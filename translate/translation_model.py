@@ -87,9 +87,8 @@ class BaseTranslationModel(object):
 
 
 class TranslationModel(BaseTranslationModel):
-    def __init__(self, name, encoders, decoder, checkpoint_dir, learning_rate,
-                 learning_rate_decay_factor, batch_size, keep_best=1,
-                 load_embeddings=None, optimizer='sgd', max_input_len=None, **kwargs):
+    def __init__(self, name, encoders, decoder, checkpoint_dir, learning_rate, learning_rate_decay_factor, batch_size,
+                 keep_best=1, load_embeddings=None, max_input_len=None, **kwargs):
         super(TranslationModel, self).__init__(name, checkpoint_dir, keep_best)
 
         self.batch_size = batch_size
@@ -122,21 +121,21 @@ class TranslationModel(BaseTranslationModel):
 
         # main model
         utils.debug('creating model {}'.format(name))
-        self.seq2seq_model = Seq2SeqModel(encoders, decoder, self.learning_rate, self.global_step, optimizer=optimizer,
+        self.seq2seq_model = Seq2SeqModel(encoders, decoder, self.learning_rate, self.global_step,
                                           max_input_len=max_input_len, **kwargs)
 
         self.batch_iterator = None
         self.dev_batches = None
         self.train_size = None
 
-    def read_data(self, max_train_size, max_dev_size, read_ahead=10):
+    def read_data(self, max_train_size, max_dev_size, read_ahead=10, batch_mode='standard', shuffle=True, **kwargs):
         utils.debug('reading training data')
         train_set = utils.read_dataset(self.filenames.train, self.extensions, self.vocabs, max_size=max_train_size,
                                        binary_input=self.binary_input, character_level=self.character_level,
                                        max_seq_len=self.max_input_len)
         self.train_size = len(train_set)
-        self.batch_iterator = utils.read_ahead_batch_iterator_blocks(train_set, self.batch_size, read_ahead=read_ahead,
-                                                                     shuffle=False)
+        self.batch_iterator = utils.read_ahead_batch_iterator(train_set, self.batch_size, read_ahead=read_ahead,
+                                                              mode=batch_mode, shuffle=shuffle)
 
         utils.debug('reading development data')
         dev_sets = [
@@ -145,7 +144,7 @@ class TranslationModel(BaseTranslationModel):
             for dev in self.filenames.dev
         ]
         # subset of the dev set whose perplexity is periodically evaluated
-        self.dev_batches = [utils.get_batches(dev_set, batch_size=self.batch_size, batches=-1) for dev_set in dev_sets]
+        self.dev_batches = [utils.get_batches(dev_set, batch_size=self.batch_size) for dev_set in dev_sets]
 
     def _read_vocab(self):
         # don't try reading vocabulary for encoders that take pre-computed features

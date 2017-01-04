@@ -19,10 +19,7 @@ class MultiTaskModel(BaseTranslationModel):
         for task in tasks:
             self.checkpoint_dir = checkpoint_dir
             # merging both dictionaries (task parameters have a higher precedence)
-            kwargs_ = dict(task)
-            for k, v in kwargs.items():
-                kwargs_.setdefault(k, v)
-
+            kwargs_ = {**kwargs, **task}
             model = TranslationModel(checkpoint_dir=None, keep_best=keep_best, **kwargs_)
 
             self.models.append(model)
@@ -34,15 +31,14 @@ class MultiTaskModel(BaseTranslationModel):
         self.global_step = 0  # steps of all tasks combined
 
 
-    def train(self, sess, beam_size, steps_per_checkpoint, score_function, steps_per_eval=None, max_train_size=None,
-              max_dev_size=None, eval_output=None, max_steps=0, auxiliary_score_function=None, script_dir='scripts',
-              read_ahead=10, eval_burn_in=0, decay_if_no_progress=5, decay_after_n_epoch=None,
-              decay_every_n_epoch=None, sgd_after_n_epoch=None, **kwargs):
+    def train(self, sess, beam_size, steps_per_checkpoint, steps_per_eval=None, eval_output=None, max_steps=0,
+              eval_burn_in=0, decay_if_no_progress=5, decay_after_n_epoch=None, decay_every_n_epoch=None,
+              sgd_after_n_epoch=None, **kwargs):
         utils.log('reading training and development data')
 
         self.global_step = 0
         for model in self.models:
-            model.read_data(max_train_size, max_dev_size, read_ahead=read_ahead)
+            model.read_data(**kwargs)
             # those parameters are used to track the progress of each task
             model.loss, model.time, model.steps = 0, 0, 0
             model.previous_losses = []
@@ -118,11 +114,8 @@ class MultiTaskModel(BaseTranslationModel):
                     else:
                         output = '{}.{}.{}'.format(eval_output, model_.name, model_.global_step.eval(sess))
 
-                    scores_ = model_.evaluate(
-                        sess, beam_size, on_dev=True, output=output, score_function=score_function,
-                        auxiliary_score_function=auxiliary_score_function, script_dir=script_dir,
-                        max_dev_size=max_dev_size
-                    )
+                    kwargs_ = {**kwargs, 'output': output}
+                    scores_ = model_.evaluate(sess, beam_size, on_dev=True, **kwargs_)
                     score_ = scores_[0]  # in case there are several dev files, only the first one counts
 
                     # if there is a main task, pick best checkpoint according to its score

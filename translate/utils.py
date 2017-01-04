@@ -340,7 +340,8 @@ def cycling_batch_iterator(data, batch_size, shuffle=True, allow_smaller=True):
             yield data[i * batch_size:(i + 1) * batch_size]
 
 
-def read_ahead_batch_iterator(data, batch_size, read_ahead=10, shuffle=True):
+def read_ahead_batch_iterator(data, batch_size, read_ahead=10, shuffle=True, allow_smaller=True,
+                              mode='standard', **kwargs):
     """
     Same iterator as `cycling_batch_iterator`, except that it reads a number of batches
     at once, and sorts their content according to their size.
@@ -354,7 +355,11 @@ def read_ahead_batch_iterator(data, batch_size, read_ahead=10, shuffle=True):
       mean faster training, but less random behavior)
     :return: an iterator which yields batches (indefinitely)
     """
-    iterator = cycling_batch_iterator(data, batch_size, shuffle=shuffle)
+    if mode == 'random':
+        iterator = random_batch_iterator(data, batch_size)
+    else:
+        iterator = cycling_batch_iterator(data, batch_size, shuffle=shuffle, allow_smaller=allow_smaller)
+
     if read_ahead <= 1:
         while True:
             yield next(iterator)
@@ -390,7 +395,7 @@ def read_ahead_batch_iterator_blocks(data, batch_size, read_ahead=10, shuffle=Tr
                     yield batch
 
 
-def get_batches(data, batch_size, batches=10, allow_smaller=True):
+def get_batches(data, batch_size, batches=0, allow_smaller=True):
     """
     Segment `data` into a given number of fixed-size batches. The dataset is automatically shuffled.
 
