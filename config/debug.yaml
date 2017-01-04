@@ -9,7 +9,7 @@ layers: 1
 bidir: True
 use_lstm: False
 steps_per_checkpoint: 200
-steps_per_eval: 400
+steps_per_eval: 4000
 eval_burn_in: 0
 max_steps: 10000
 max_output_len: 25
@@ -28,6 +28,12 @@ max_dev_size: 500
 optimizer: 'sgd'
 learning_rate: 1.0
 max_gradient_norm: 1.0
+
+learning_rate_decay_factor: 0.8
+decay_every_n_epoch: 1
+decay_after_n_epoch: 1
+decay_if_no_progress: null
+sgd_after_n_epoch: null
 
 weight_scale: 0.1
 

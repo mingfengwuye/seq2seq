@@ -63,7 +63,7 @@ class BaseTranslationModel(object):
                 f.write('{} {}\n'.format(score_, step_))
 
     def initialize(self, sess, checkpoints=None, reset=False, reset_learning_rate=False):
-        sess.run(tf.initialize_all_variables())
+        sess.run(tf.global_variables_initializer())
         blacklist = ('dropout_keep_prob',)
         if reset_learning_rate:
             blacklist += ('learning_rate',)
@@ -123,12 +123,14 @@ class TranslationModel(BaseTranslationModel):
 
         self.batch_iterator = None
         self.dev_batches = None
+        self.train_size = None
 
     def read_data(self, max_train_size, max_dev_size, read_ahead=10):
         utils.debug('reading training data')
         train_set = utils.read_dataset(self.filenames.train, self.extensions, self.vocabs, max_size=max_train_size,
                                        binary_input=self.binary_input, character_level=self.character_level,
                                        max_seq_len=self.max_input_len)
+        self.train_size = len(train_set)
         self.batch_iterator = utils.read_ahead_batch_iterator_blocks(train_set, self.batch_size, read_ahead=read_ahead,
                                                                      shuffle=False)
 
@@ -346,9 +348,9 @@ def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
     if os.path.exists(var_file):
         with open(var_file, 'rb') as f:
             var_names = pickle.load(f)
-            variables = [var for var in tf.all_variables() if var.name in var_names]
+            variables = [var for var in tf.global_variables() if var.name in var_names]
     else:
-        variables = tf.all_variables()
+        variables = tf.global_variables()
 
     # remove variables from blacklist
     variables = [var for var in variables if not any(prefix in var.name for prefix in blacklist)]
@@ -372,7 +374,7 @@ def save_checkpoint(sess, saver, checkpoint_dir, step=None, name=None):
         os.makedirs(checkpoint_dir)
 
     with open(var_file, 'wb') as f:
-        var_names = [var.name for var in tf.all_variables()]
+        var_names = [var.name for var in tf.global_variables()]
         pickle.dump(var_names, f)
 
     utils.log('saving model to {}'.format(checkpoint_dir))

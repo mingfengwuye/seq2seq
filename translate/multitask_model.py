@@ -34,7 +34,8 @@ class MultiTaskModel(BaseTranslationModel):
 
     def train(self, sess, beam_size, steps_per_checkpoint, score_function, steps_per_eval=None, max_train_size=None,
               max_dev_size=None, eval_output=None, max_steps=0, auxiliary_score_function=None, script_dir='scripts',
-              read_ahead=10, eval_burn_in=0, decay_if_no_progress=5, **kwargs):
+              read_ahead=10, eval_burn_in=0, decay_if_no_progress=5, decay_after_n_epoch=None,
+              decay_every_n_epoch=None, **kwargs):
         utils.log('reading training and development data')
 
         self.global_step = 0
@@ -44,6 +45,8 @@ class MultiTaskModel(BaseTranslationModel):
             model.loss, model.time, model.steps = 0, 0, 0
             model.previous_losses = []
             global_step = model.global_step.eval(sess)
+            model.epoch = model.batch_size * global_step // model.train_size
+
             for _ in range(global_step):   # read all the data up to this step
                 next(model.batch_iterator)
 
@@ -61,6 +64,15 @@ class MultiTaskModel(BaseTranslationModel):
             model.time += (time.time() - start_time)
             model.steps += 1
             self.global_step += 1
+            model_global_step = model.global_step.eval(sess)
+            epoch = model.batch_size * model_global_step // model.train_size
+
+            if decay_after_n_epoch is not None and epoch >= decay_after_n_epoch:
+                if decay_every_n_epoch is not None and epoch - model.epoch >= decay_every_n_epoch:
+                    import pdb; pdb.set_trace()
+                    utils.debug('epoch {}: applying learning rate decay'.format(epoch + 1))
+                    sess.run(model.learning_rate_decay_op)
+                    model.epoch = epoch
 
             if steps_per_checkpoint and self.global_step % steps_per_checkpoint == 0:
                 for model_ in self.models:

@@ -196,9 +196,9 @@ def main(args=None):
         decode_only = args.decode is not None or args.eval or args.align  # exempt from creating gradient ops
         model = MultiTaskModel(name='main', checkpoint_dir=checkpoint_dir, decode_only=decode_only, **config)
 
-    utils.log('model parameters ({})'.format(len(tf.all_variables())))
+    utils.log('model parameters ({})'.format(len(tf.global_variables())))
     parameter_count = 0
-    for var in tf.all_variables():
+    for var in tf.global_variables():
         utils.log('  {} {}'.format(var.name, var.get_shape()))
 
         v = 1
