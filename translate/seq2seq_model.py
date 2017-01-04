@@ -150,20 +150,27 @@ class Seq2SeqModel(object):
                 utils.debug('frozen parameters: {}'.format(', '.join(frozen_parameters)))
             params = [var for var in tf.trainable_variables() if var.name not in frozen_parameters]
 
+            sgd_opt = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
+
             if optimizer.lower() == 'adadelta':
                 # same epsilon and rho as Bahdanau et al. 2015
                 opt = tf.train.AdadeltaOptimizer(learning_rate=1.0, epsilon=1e-06, rho=0.95)
-            elif optimizer.lower() == 'adagrad':
-                opt = tf.train.AdagradOptimizer(learning_rate=learning_rate)
             elif optimizer.lower() == 'adam':
                 opt = tf.train.AdamOptimizer(learning_rate=0.001)
             else:
-                opt = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
+                opt = sgd_opt
 
             gradients = tf.gradients(self.loss, params)
 
             clipped_gradients, self.gradient_norms = tf.clip_by_global_norm(gradients, max_gradient_norm)
+
             self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
+
+            if opt is sgd_opt:
+                self.sgd_updates = self.updates
+            else:
+                self.sgd_updates = sgd_opt.apply_gradients(zip(clipped_gradients, params),
+                                                           global_step=self.global_step)
 
         def tensor_prod(x, w, b):
             shape = tf.shape(x)

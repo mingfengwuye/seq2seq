@@ -15,8 +15,8 @@ class BaseTranslationModel(object):
         self.name = name
         self.keep_best = keep_best
         self.checkpoint_dir = checkpoint_dir
-        self.saver = tf.train.Saver(max_to_keep=3, keep_checkpoint_every_n_hours=5,
-                                    write_version=tf.train.SaverDef.V1)
+        self.saver = None
+        self.global_step = None
 
     def manage_best_checkpoints(self, step, score):
         score_filename = os.path.join(self.checkpoint_dir, 'scores.txt')
@@ -33,27 +33,33 @@ class BaseTranslationModel(object):
 
         best_scores = sorted(scores, reverse=True)[:self.keep_best]
 
-        if any(score_ < score for score_, _ in best_scores) or not best_scores:
-            shutil.copy(os.path.join(self.checkpoint_dir, 'translate-{}'.format(step)),
-                        os.path.join(self.checkpoint_dir, 'best-{}'.format(step)))
+        def full_path(filename):
+            return os.path.join(self.checkpoint_dir, filename)
 
-            if all(score_ < score for score_, _ in best_scores):
-                path = os.path.abspath(os.path.join(self.checkpoint_dir, 'best'))
-                try:  # remove old links
-                    os.remove(path)
-                except OSError:
-                    pass
-                # copy of best model
-                shutil.copy('{}-{}'.format(path, step), path)
+        if any(score_ < score for score_, _ in best_scores) or not best_scores:
+            # if this checkpoint is in the top, save it under a special name
+
+            prefix = 'translate-{}'.format(step)
+            dest_prefix = 'best-{}'.format(step)
+
+            for filename in os.listdir(self.checkpoint_dir):
+                if filename.startswith(prefix):
+                    dest_filename = filename.replace(prefix, dest_prefix)
+                    shutil.copy(full_path(filename), full_path(dest_filename))
+
+                    # also copy to `best` if this checkpoint is the absolute best
+                    if all(score_ < score for score_, _ in best_scores):
+                        dest_filename = filename.replace(prefix, 'best')
+                        shutil.copy(full_path(filename), full_path(dest_filename))
 
             best_scores = sorted(best_scores + [(score, step)], reverse=True)
 
             for _, step_ in best_scores[self.keep_best:]:
                 # remove checkpoints that are not in the top anymore
-                try:
-                    os.remove(os.path.join(self.checkpoint_dir, 'best-{}'.format(step_)))
-                except OSError:
-                    pass
+                prefix = 'best-{}'.format(step_)
+                for filename in os.listdir(self.checkpoint_dir):
+                    if filename.startswith(prefix):
+                        os.remove(full_path(filename))
 
         # save bleu scores
         scores.append((score, step))
@@ -63,6 +69,8 @@ class BaseTranslationModel(object):
                 f.write('{} {}\n'.format(score_, step_))
 
     def initialize(self, sess, checkpoints=None, reset=False, reset_learning_rate=False):
+        self.saver = tf.train.Saver(max_to_keep=3, keep_checkpoint_every_n_hours=5, sharded=False)
+
         sess.run(tf.global_variables_initializer())
         blacklist = ('dropout_keep_prob',)
         if reset_learning_rate:
@@ -82,6 +90,8 @@ class TranslationModel(BaseTranslationModel):
     def __init__(self, name, encoders, decoder, checkpoint_dir, learning_rate,
                  learning_rate_decay_factor, batch_size, keep_best=1,
                  load_embeddings=None, optimizer='sgd', max_input_len=None, **kwargs):
+        super(TranslationModel, self).__init__(name, checkpoint_dir, keep_best)
+
         self.batch_size = batch_size
         self.src_ext = [encoder.get('ext') or encoder.name for encoder in encoders]
         self.trg_ext = decoder.get('ext') or decoder.name
@@ -93,11 +103,7 @@ class TranslationModel(BaseTranslationModel):
         self.character_level = [encoder_or_decoder.character_level for encoder_or_decoder in encoders_and_decoder]
 
         self.learning_rate = tf.Variable(learning_rate, trainable=False, name='learning_rate', dtype=tf.float32)
-
-        if optimizer == 'sgd':
-            self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * learning_rate_decay_factor)
-        else:
-            self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate)
+        self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * learning_rate_decay_factor)
 
         with tf.device('/cpu:0'):
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
@@ -116,10 +122,8 @@ class TranslationModel(BaseTranslationModel):
 
         # main model
         utils.debug('creating model {}'.format(name))
-        self.model = Seq2SeqModel(encoders, decoder, self.learning_rate, self.global_step, optimizer=optimizer,
-                                  max_input_len=max_input_len, **kwargs)
-
-        super(TranslationModel, self).__init__(name, checkpoint_dir, keep_best)
+        self.seq2seq_model = Seq2SeqModel(encoders, decoder, self.learning_rate, self.global_step, optimizer=optimizer,
+                                          max_input_len=max_input_len, **kwargs)
 
         self.batch_iterator = None
         self.dev_batches = None
@@ -157,13 +161,13 @@ class TranslationModel(BaseTranslationModel):
         raise NotImplementedError('use MultiTaskModel')
 
     def train_step(self, sess):
-        return self.model.step(sess, next(self.batch_iterator)).loss
+        return self.seq2seq_model.step(sess, next(self.batch_iterator)).loss
 
     def eval_step(self, sess):
         # compute perplexity on dev set
         for dev_batches in self.dev_batches:
             eval_loss = sum(
-                self.model.step(sess, batch, forward_only=True).loss * len(batch)
+                self.seq2seq_model.step(sess, batch, forward_only=True).loss * len(batch)
                 for batch in dev_batches
             )
             eval_loss /= sum(map(len, dev_batches))
@@ -179,9 +183,9 @@ class TranslationModel(BaseTranslationModel):
         ]
 
         if beam_size <= 1 and not isinstance(sess, list):
-            trg_token_ids, _ = self.model.greedy_decoding(sess, token_ids)
+            trg_token_ids, _ = self.seq2seq_model.greedy_decoding(sess, token_ids)
         else:
-            hypotheses, scores = self.model.beam_search_decoding(sess, token_ids, beam_size, ngrams=self.ngrams)
+            hypotheses, scores = self.seq2seq_model.beam_search_decoding(sess, token_ids, beam_size, ngrams=self.ngrams)
             trg_token_ids = hypotheses[0]  # first hypothesis is the highest scoring one
 
         # remove EOS symbols from output
@@ -213,7 +217,7 @@ class TranslationModel(BaseTranslationModel):
                 for vocab, sentence, char_level in zip(self.vocabs, lines, self.character_level)
             ]
 
-            _, weights = self.model.step(sess, data=[token_ids], forward_only=True, align=True)
+            _, weights = self.seq2seq_model.step(sess, data=[token_ids], forward_only=True, align=True)
             trg_tokens = [self.trg_vocab.reverse[i] if i < len(self.trg_vocab.reverse) else utils._UNK
                           for i in token_ids[-1]]
 
@@ -380,4 +384,5 @@ def save_checkpoint(sess, saver, checkpoint_dir, step=None, name=None):
     utils.log('saving model to {}'.format(checkpoint_dir))
     checkpoint_path = os.path.join(checkpoint_dir, name)
     saver.save(sess, checkpoint_path, step, write_meta_graph=False)
+
     utils.log('finished saving model')

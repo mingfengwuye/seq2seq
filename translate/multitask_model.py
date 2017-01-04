@@ -11,6 +11,8 @@ class MultiTaskModel(BaseTranslationModel):
         Proxy for several translation models that are trained jointly
         This class presents the same interface as TranslationModel
         """
+        super(MultiTaskModel, self).__init__(name, checkpoint_dir, keep_best)
+
         self.models = []
         self.ratios = []
 
@@ -30,12 +32,12 @@ class MultiTaskModel(BaseTranslationModel):
 
         self.main_task = main_task
         self.global_step = 0  # steps of all tasks combined
-        super(MultiTaskModel, self).__init__(name, checkpoint_dir, keep_best)
+
 
     def train(self, sess, beam_size, steps_per_checkpoint, score_function, steps_per_eval=None, max_train_size=None,
               max_dev_size=None, eval_output=None, max_steps=0, auxiliary_score_function=None, script_dir='scripts',
               read_ahead=10, eval_burn_in=0, decay_if_no_progress=5, decay_after_n_epoch=None,
-              decay_every_n_epoch=None, **kwargs):
+              decay_every_n_epoch=None, sgd_after_n_epoch=None, **kwargs):
         utils.log('reading training and development data')
 
         self.global_step = 0
@@ -67,9 +69,13 @@ class MultiTaskModel(BaseTranslationModel):
             model_global_step = model.global_step.eval(sess)
             epoch = model.batch_size * model_global_step // model.train_size
 
+            if sgd_after_n_epoch is not None and epoch >= sgd_after_n_epoch:
+                if model.seq2seq_model.sgd_updates is not model.seq2seq_model.updates:
+                    model.seq2seq_model.updates = model.seq2seq_model.sgd_updates
+                    utils.debug('epoch {}: starting to use SGD'.format(epoch + 1))
+
             if decay_after_n_epoch is not None and epoch >= decay_after_n_epoch:
                 if decay_every_n_epoch is not None and epoch - model.epoch >= decay_every_n_epoch:
-                    import pdb; pdb.set_trace()
                     utils.debug('epoch {}: applying learning rate decay'.format(epoch + 1))
                     sess.run(model.learning_rate_decay_op)
                     model.epoch = epoch
