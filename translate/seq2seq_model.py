@@ -183,6 +183,7 @@ class Seq2SeqModel(object):
             w, b = output_projection
             self.outputs = tensor_prod(self.outputs, w, b)
 
+        self.greedy_output = tf.argmax(self.outputs, axis=2)
         self.beam_output = tf.nn.softmax(self.outputs[0,:,:])
 
     def step(self, session, data, forward_only=False, align=False, debug=False):
@@ -211,6 +212,46 @@ class Seq2SeqModel(object):
 
         res = session.run(output_feed, input_feed)
         return namedtuple('output', 'loss attn_weights')(res['loss'], res.get('attn_weights'))
+
+    def reinforce_step(self, session, data):
+        if self.dropout is not None:
+            session.run(self.dropout_on)
+
+        batch = self.get_batch(data)
+        encoder_inputs, decoder_inputs, targets, target_weights, encoder_input_length, decoder_input_length = batch
+
+        input_feed = {
+            self.target_weights: target_weights,
+            self.decoder_inputs: decoder_inputs,
+            self.decoder_input_length: decoder_input_length,
+            self.targets: targets
+        }
+
+        for i in range(self.encoder_count):
+            input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
+            input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
+
+        output = session.run(self.greedy_output, input_feed)
+
+        output_ = output.T
+        targets_ = targets.T
+
+        x = output_[:,:-1]
+        y = output_[:,1:]
+
+        bigrams = np.concatenate([np.expand_dims(x, axis=2), np.expand_dims(y, axis=2)], axis=2)
+
+        s = tf.nn.softmax(self.outputs)
+        i = tf.argmax(self.outputs, axis=2)
+        # x = tf.gather(s, i)
+
+        # y = tf.reshape(tf.gather_nd(s, i), tf.shape(i))
+
+        shape = tf.shape(s)
+        batch_size = shape[0]
+        seq_len = shape[1]
+        size = batch_size * seq_len
+        p = tf.reduce_max(s, axis=2)
 
     def greedy_decoding(self, session, token_ids):
         if self.dropout is not None:

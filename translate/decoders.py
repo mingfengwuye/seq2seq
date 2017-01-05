@@ -541,3 +541,7 @@ def sequence_loss(logits, targets, weights, average_across_timesteps=False, aver
         return cost / tf.cast(batch_size, tf.float32)
     else:
         return cost
+
+def reinforce_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True,
+                   softmax_loss_function=None):
+    pass
