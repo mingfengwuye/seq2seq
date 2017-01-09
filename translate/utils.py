@@ -10,7 +10,7 @@ import random
 import math
 import wave
 
-from collections import namedtuple
+from collections import namedtuple, Counter
 from contextlib import contextmanager
 
 # special vocabulary symbols
@@ -211,6 +211,57 @@ def nltk_bleu_score(hypotheses, references, **kwargs):
              for ref, hyp in zip(references, hypotheses)]
     bleu = float('{:.2f}'.format(100 * sum(bleus) / len(bleus)))
     return bleu, None
+
+
+def safe_log(x):
+    if x <= 0:
+        return float('-inf')
+    else:
+        return math.log(x)
+
+
+def sentence_score(hypothesis, reference, order=4):
+    log_score = 0
+
+    for i in range(order):
+        hyp_ngrams = Counter(zip(*[hypothesis[j:] for j in range(i + 1)]))
+        ref_ngrams = Counter(zip(*[reference[j:] for j in range(i + 1)]))
+
+        score_ = sum(min(count, ref_ngrams[bigram]) for bigram, count in hyp_ngrams.items())
+        score_ /= max(1, sum(hyp_ngrams.values()))
+
+        log_score += safe_log(score_) / order
+
+    bp = min(1, math.exp(1 - len(reference) / len(hypothesis)))
+    return math.exp(log_score) * bp
+
+
+def corpus_score(hypotheses, references, order=4):
+    total = np.zeros((4,))
+    correct = np.zeros((4,))
+
+    hyp_length = 0
+    ref_length = 0
+
+    for hyp, ref in zip(hypotheses, references):
+        hyp = hyp.split()
+        ref = ref.split()
+
+        hyp_length += len(hyp)
+        ref_length += len(ref)
+
+        for i in range(order):
+            hyp_ngrams = Counter(zip(*[hyp[j:] for j in range(i + 1)]))
+            ref_ngrams = Counter(zip(*[ref[j:] for j in range(i + 1)]))
+
+            total[i] += sum(hyp_ngrams.values())
+            correct[i] += sum(min(count, ref_ngrams[bigram]) for bigram, count in hyp_ngrams.items())
+
+    scores = correct / total
+    score = math.exp(sum(map(safe_log, scores)) / order)
+    bp = min(1, math.exp(1 - ref_length / hyp_length))
+
+    return score * bp
 
 
 def read_embeddings(embedding_filenames, encoders_and_decoder, load_embeddings,
@@ -548,6 +599,8 @@ def heatmap(xlabels=None, ylabels=None, weights=None,
     import matplotlib.pyplot as plt
     xlabels = xlabels or []
     ylabels = ylabels or []
+
+    from matplotlib import pyplot as plt
 
     if wav_file is None:
         _, ax = plt.subplots()

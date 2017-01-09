@@ -119,6 +119,7 @@ class Seq2SeqModel(object):
 
         self.decoder_input_length = tf.placeholder(tf.int64, shape=[None],
                                                    name='decoder_{}_length'.format(decoder.name))
+        self.reward = tf.placeholder(tf.float32, shape=[None], name='reward')
 
         parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
                           output_projection=output_projection,
@@ -137,6 +138,17 @@ class Seq2SeqModel(object):
             logits=self.outputs, targets=self.targets, weights=self.target_weights,
             softmax_loss_function=softmax_loss_function
         )
+
+        with variable_scope.variable_scope('reward_baseline'):
+            w = decoders.get_variable_unsafe('w', [self.trg_vocab_size, 1])
+
+            shape = tf.shape(self.outputs)
+            x = tf.reshape(self.outputs, tf.pack([tf.mul(shape[0], shape[1]), shape[2]]))
+            x = tf.matmul(x, w)
+            x = tf.reshape(x, tf.pack([shape[0], shape[1]]))
+
+            self.baseline = x    # time_steps * batch_size
+            # TODO: train baseline, and don't propagate gradient
 
         if not decode_only:
             # gradients and SGD update operation for training the model
@@ -235,23 +247,25 @@ class Seq2SeqModel(object):
 
         output_ = output.T
         targets_ = targets.T
+        lengths_ = decoder_input_length
 
-        x = output_[:,:-1]
-        y = output_[:,1:]
+        import time
 
-        bigrams = np.concatenate([np.expand_dims(x, axis=2), np.expand_dims(y, axis=2)], axis=2)
+        scores = []
+        t = time.time()
+        for output_, target_, length_ in zip(output_, targets_, lengths_):
+            target_ = target_[:length_]
 
-        s = tf.nn.softmax(self.outputs)
-        i = tf.argmax(self.outputs, axis=2)
-        # x = tf.gather(s, i)
+            i, = np.where(output_ == utils.EOS_ID)
+            if i:
+                output_ = output_[:i]
 
-        # y = tf.reshape(tf.gather_nd(s, i), tf.shape(i))
+            score = utils.sentence_score(output_, target_)
 
-        shape = tf.shape(s)
-        batch_size = shape[0]
-        seq_len = shape[1]
-        size = batch_size * seq_len
-        p = tf.reduce_max(s, axis=2)
+            # TODO: smoothing
+            scores.append(score)
+
+        t = time.time() - t
 
     def greedy_decoding(self, session, token_ids):
         if self.dropout is not None:
