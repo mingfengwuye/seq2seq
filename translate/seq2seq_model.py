@@ -87,6 +87,7 @@ class Seq2SeqModel(object):
             self.dropout = None
 
         self.feed_previous = tf.constant(feed_previous, dtype=tf.float32)
+        self.use_reinforce = tf.constant(False, dtype=tf.bool)
 
         self.encoder_inputs = []
         self.encoder_input_length = []
@@ -128,7 +129,7 @@ class Seq2SeqModel(object):
         self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
         decoder = decoders.attention_decoder if attention else decoders.decoder
 
-        self.outputs, self.attention_weights, self.beam_tensors = decoder(
+        self.outputs, self.attention_weights, self.decoder_states, self.beam_tensors = decoder(
             attention_states=self.attention_states, initial_state=self.encoder_state,
             decoder_inputs=self.decoder_inputs, feed_previous=self.feed_previous,
             decoder_input_length=self.decoder_input_length, **parameters
@@ -140,15 +141,21 @@ class Seq2SeqModel(object):
         )
 
         with variable_scope.variable_scope('reward_baseline'):
-            w = decoders.get_variable_unsafe('w', [self.trg_vocab_size, 1])
+            time_steps = tf.shape(self.decoder_states)[0]
+            batch_size = tf.shape(self.decoder_states)[1]
+            state_size = self.decoder_states.get_shape()[2]
 
-            shape = tf.shape(self.outputs)
-            x = tf.reshape(self.outputs, tf.pack([tf.mul(shape[0], shape[1]), shape[2]]))
-            x = tf.matmul(x, w)
-            x = tf.reshape(x, tf.pack([shape[0], shape[1]]))
+            self.baseline_weights = decoders.get_variable_unsafe('w', shape=[state_size])
 
-            self.baseline = x    # time_steps * batch_size
-            # TODO: train baseline, and don't propagate gradient
+            states = tf.reshape(self.decoder_states, shape=tf.pack([time_steps * batch_size, state_size]))
+            baseline = tf.matmul(states, tf.expand_dims(self.baseline_weights, axis=1))
+            self.baseline = tf.reshape(baseline, shape=tf.pack([time_steps, batch_size]))
+
+        # feed target weights with 1 until EOS, and 0 after
+        self.reinforce_loss = decoders.reinforce_loss(reward=self.reward, outputs=self.outputs,
+                                                      weights=self.target_weights, baseline=self.baseline)
+        self.baseline_loss = decoders.baseline_loss(baseline=self.baseline, reward=self.baseline,
+                                                    weights=self.target_weights)
 
         if not decode_only:
             # gradients and SGD update operation for training the model
@@ -172,8 +179,14 @@ class Seq2SeqModel(object):
             else:
                 opt = sgd_opt
 
-            gradients = tf.gradients(self.loss, params)
+            # loss = tf.cond(
+            #     self.use_reinforce,
+            #     lambda: self.reinforce_loss,
+            #     lambda: self.loss
+            # )
+            loss = self.loss
 
+            gradients = tf.gradients(loss, params)
             clipped_gradients, self.gradient_norms = tf.clip_by_global_norm(gradients, max_gradient_norm)
 
             self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
@@ -183,6 +196,9 @@ class Seq2SeqModel(object):
             else:
                 self.sgd_updates = sgd_opt.apply_gradients(zip(clipped_gradients, params),
                                                            global_step=self.global_step)
+
+            baseline_opt = tf.train.AdamOptimizer(learning_rate=0.001)
+            self.baseline_updates = baseline_opt.apply_gradients(zip(gradients, params))
 
         def tensor_prod(x, w, b):
             shape = tf.shape(x)
@@ -205,16 +221,53 @@ class Seq2SeqModel(object):
         batch = self.get_batch(data)
         encoder_inputs, decoder_inputs, targets, target_weights, encoder_input_length, decoder_input_length = batch
 
+        batch_size = targets.shape[1]
+
         input_feed = {
             self.target_weights: target_weights,
             self.decoder_inputs: decoder_inputs,
             self.decoder_input_length: decoder_input_length,
-            self.targets: targets
+            self.targets: targets,
+            self.reward: np.zeros((batch_size,))
         }
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
+
+        # time_steps = tf.shape(self.outputs)[0]
+        # batch_size = tf.shape(self.outputs)[1]
+        # output_size = self.outputs.get_shape()[2]
+        # size = time_steps * batch_size
+        #
+        # indices = tf.argmax(self.outputs, axis=2)
+        #
+        # p = tf.nn.softmax(self.outputs)
+        #
+        # indices = tf.reshape(indices, shape=tf.pack([size]))
+        # p = tf.reshape(p, shape=tf.pack([size, output_size]))
+        #
+        # indices = tf.stack([tf.cast(tf.range(size), tf.int64), indices], axis=1)
+        # p = tf.gather_nd(p, indices)
+        # p = tf.reshape(p, shape=tf.pack([time_steps, batch_size]))
+        #
+        #
+        #
+        # s = tf.nn.softmax(self.outputs)
+        # i = tf.argmax(self.outputs, axis=2)
+        #
+        # time_steps = tf.shape(s)[0]
+        # batch_size = tf.shape(s)[1]
+        #
+        # s = tf.reshape(s, shape=tf.pack([-1, s.get_shape()[-1]]))
+        # i = tf.reshape(i, shape=tf.pack([-1]))
+        #
+        # x = tf.range(time_steps * batch_size)
+        #
+        # r = s[x, i]
+        # r = tf.reshape(r, shape=tf.pack([time_steps, batch_size]))
+
+        # y = tf.reshape(tf.gather_nd(s, i), tf.shape(i))
 
         output_feed = {'loss': self.loss, 'gradient': self.gradient_norms}
         if not forward_only:

@@ -437,6 +437,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         zero_output = tf.zeros(tf.pack([batch_size, cell.output_size]), tf.float32)
 
         output_ta = tf.TensorArray(dtype=tf.float32, size=time_steps, clear_after_read=False)
+        state_ta = tf.TensorArray(dtype=tf.float32, size=time_steps)
 
         input_ta = tf.TensorArray(dtype=tf.float32, size=time_steps, clear_after_read=False).unpack(decoder_inputs)
         weights_ta = tf.TensorArray(dtype=tf.float32, size=time_steps)
@@ -447,7 +448,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         attns = tf.zeros(tf.pack([batch_size, context_size]), dtype=tf.float32)
         output = tf.zeros(tf.pack([batch_size, cell.output_size]), dtype=tf.float32)
 
-        def _time_step(time, state, output, _, weights, output_ta, weights_ta):
+        def _time_step(time, state, output, _, weights, output_ta, weights_ta, state_ta):
             context_vector, new_weights = attention_(state, prev_weights=weights)
             #
             # def lookup(input_symbol):
@@ -468,6 +469,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             # using decoder state instead of decoder output in the attention model seems
             # to give much better results
 
+            state_ta = state_ta.write(time, state)
             output_ = linear_unsafe([state, input_, context_vector], decoder.cell_size, False, scope='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.pack([batch_size, decoder.cell_size // 2, 2])), axis=2)
             output_ = linear_unsafe(output_, decoder.embedding_size, False, scope='softmax0')
@@ -498,19 +500,20 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             else:
                 new_output, new_state = call_cell()
 
-            return time + 1, new_state, new_output, context_vector, new_weights, output_ta, weights_ta
+            return time + 1, new_state, new_output, context_vector, new_weights, output_ta, weights_ta, state_ta
 
-        _, new_state, new_output, _, _, output_final_ta, weights_final = tf.while_loop(
+        _, new_state, new_output, _, _, output_final_ta, weights_final, state_final_ta = tf.while_loop(
             cond=lambda time, *_: time < time_steps,
             body=_time_step,
-            loop_vars=(time, state, output, attns, weights, output_ta, weights_ta),
+            loop_vars=(time, state, output, attns, weights, output_ta, weights_ta, state_ta),
             parallel_iterations=decoder.parallel_iterations,
             swap_memory=decoder.swap_memory)
 
         outputs = output_final_ta.pack()
+        states = state_final_ta.pack()
 
         beam_tensors = namedtuple('beam_tensors', 'state new_state output new_output')
-        return outputs, weights, beam_tensors(state, new_state, output, new_output)
+        return outputs, weights, states, beam_tensors(state, new_state, output, new_output)
 
 
 def sequence_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True,
@@ -542,6 +545,73 @@ def sequence_loss(logits, targets, weights, average_across_timesteps=False, aver
     else:
         return cost
 
-def reinforce_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True,
-                   softmax_loss_function=None):
-    pass
+def reinforce_loss(reward, outputs, weights, baseline, gamma=1.0, average_across_timesteps=False,
+                   average_across_batch=True):
+    """
+    :param reward: tensor of shape (batch_size,) corresponding to the BLEU score of
+        each predicted sequence in the batch
+    :param outputs: tensor of shape (time_steps, batch_size, output_size)
+    :param weights: outputs after EOS shouldn't count
+    :param baseline: tensor of shape (time_steps, batch_size)
+    :param gamma: discount factor
+    :return: scalar tensor
+    """
+    # indices = tf.argmax(outputs, axis=2)
+
+    p = tf.nn.softmax(outputs)
+
+    # indices = tf.reshape(indices, shape=[size])
+    # p = tf.reshape(p, shape=tf.pack([size, output_size]))
+    #
+    # indices = tf.stack([tf.range(size), indices], axis=1)
+    # p = tf.gather_nd(p, indices)
+    # p = tf.reshape(p, shape=tf.pack([time_steps, batch_size]))
+
+    p = tf.reduce_max(p, axis=2)  # time_steps * batch_size
+
+    # states = tf.reshape(states, shape=tf.pack([size, state_size]))
+    # baseline = tf.expand_dims(baseline, axis=1)
+    #
+    # r = tf.matmul(states, baseline)
+    # r = tf.reshape(r, shape=tf.pack([time_steps, batch_size]))
+    # r = tf.stop_gradient(r)    # do not propagate gradient through baseline
+
+    time_steps = tf.shape(outputs)[0]
+    batch_size = tf.shape(outputs)[1]
+    discount = tf.pow(gamma, tf.cast(tf.range(time_steps), dtype=tf.float32))
+
+    baseline = tf.stop_gradient(baseline)   # do not propagate gradient through baseline
+    cost = tf.transpose((reward - baseline) * tf.log(p)) * discount   # batch_size * time_steps
+
+    cost = tf.reduce_sum(cost * weights, axis=0)
+
+    if average_across_timesteps:
+        total_size = tf.reduce_sum(weights, 0)
+        total_size += 1e-12  # just to avoid division by 0 for all-0 weights
+        cost /= total_size
+
+    cost = tf.reduce_sum(cost)
+
+    if average_across_batch:
+        cost /= tf.cast(batch_size, tf.float32)
+
+    return cost
+
+
+def baseline_loss(baseline, reward, weights, average_across_timesteps=False,
+                  average_across_batch=True):
+    batch_size = tf.shape(baseline)[1]
+    cost = (reward - baseline) ** 2
+    cost = tf.reduce_sum(cost * weights, axis=0)
+
+    if average_across_timesteps:
+        total_size = tf.reduce_sum(weights, 0)
+        total_size += 1e-12  # just to avoid division by 0 for all-0 weights
+        cost /= total_size
+
+    cost = tf.reduce_sum(cost)
+
+    if average_across_batch:
+        cost /= tf.cast(batch_size, tf.float32)
+
+    return cost
