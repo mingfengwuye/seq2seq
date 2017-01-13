@@ -24,6 +24,7 @@ from translate import decoders
 from collections import namedtuple
 
 from tensorflow.python.ops import variable_scope
+from tensorflow.contrib.layers import fully_connected
 
 
 class Seq2SeqModel(object):
@@ -135,26 +136,56 @@ class Seq2SeqModel(object):
             decoder_input_length=self.decoder_input_length, **parameters
         )
 
-        self.loss = decoders.sequence_loss(
+        self.xent_loss = decoders.sequence_loss(
             logits=self.outputs, targets=self.targets, weights=self.target_weights,
             softmax_loss_function=softmax_loss_function
         )
+
+        def tensor_prod(x, w, b):
+            shape = tf.shape(x)
+            x = tf.reshape(x, tf.pack([tf.mul(shape[0], shape[1]), shape[2]]))
+            x = tf.matmul(x, w) + b
+            x = tf.reshape(x, tf.pack([shape[0], shape[1], b.get_shape()[0]]))
+            return x
+
+        if output_projection is not None:
+            w, b = output_projection
+            self.outputs = tensor_prod(self.outputs, w, b)
 
         with variable_scope.variable_scope('reward_baseline'):
             time_steps = tf.shape(self.decoder_states)[0]
             batch_size = tf.shape(self.decoder_states)[1]
             state_size = self.decoder_states.get_shape()[2]
 
-            self.baseline_weights = decoders.get_variable_unsafe('w', shape=[state_size])
+            # states = tf.reshape(self.decoder_states, shape=tf.pack([time_steps * batch_size, state_size]))
+            #
+            # self.baseline = fully_connected(tf.stop_gradient(states), num_outputs=1, activation_fn=tf.sigmoid)
+            # self.baseline = tf.reshape(self.baseline, shape=tf.pack([time_steps, batch_size]))
+            #
+            # reward = tf.reshape(tf.tile(self.reward, [time_steps]),
+            #                     shape=tf.pack([time_steps, batch_size]))
+            # reward = reward - tf.stop_gradient(self.baseline)
+            #
+            states = self.decoder_states[-1]
+            self.baseline = fully_connected(tf.stop_gradient(states), num_outputs=1, activation_fn=None)
+            # self.baseline = fully_connected(tf.stop_gradient(states), num_outputs=128, activation_fn=tf.tanh,
+            #                                 scope='first')
+            # self.baseline = fully_connected(self.baseline, num_outputs=1, scope='second')
 
-            states = tf.reshape(self.decoder_states, shape=tf.pack([time_steps * batch_size, state_size]))
-            baseline = tf.matmul(states, tf.expand_dims(self.baseline_weights, axis=1))
-            self.baseline = tf.reshape(baseline, shape=tf.pack([time_steps, batch_size]))
+            self.baseline = tf.squeeze(self.baseline, axis=1)
+            reward = self.reward - tf.stop_gradient(self.baseline)
+            reward = tf.reshape(tf.tile(reward, [time_steps]),
+                                shape=tf.pack([time_steps, batch_size]))
 
-        # feed target weights with 1 until EOS, and 0 after
-        self.reinforce_loss = decoders.reinforce_loss(reward=self.reward, outputs=self.outputs,
-                                                      weights=self.target_weights, baseline=self.baseline)
-        self.baseline_loss = decoders.baseline_loss(baseline=self.baseline, reward=self.baseline,
+        # self.reinforce_loss = decoders.reinforce_loss(reward=self.reward, outputs=self.outputs,
+        #                                               weights=self.target_weights, baseline=self.baseline)
+
+        self.reinforce_loss = decoders.sequence_loss(
+            logits=self.outputs, targets=self.targets, weights=self.target_weights,
+            softmax_loss_function=softmax_loss_function, reward=reward
+        )
+
+        self.baseline_loss = decoders.baseline_loss(baseline=self.baseline, reward=self.reward,
                                                     weights=self.target_weights)
 
         if not decode_only:
@@ -179,14 +210,13 @@ class Seq2SeqModel(object):
             else:
                 opt = sgd_opt
 
-            # loss = tf.cond(
-            #     self.use_reinforce,
-            #     lambda: self.reinforce_loss,
-            #     lambda: self.loss
-            # )
-            loss = self.loss
+            self.loss = tf.cond(
+                self.use_reinforce,
+                lambda: self.reinforce_loss,
+                lambda: self.xent_loss
+            )
 
-            gradients = tf.gradients(loss, params)
+            gradients = tf.gradients(self.loss, params)
             clipped_gradients, self.gradient_norms = tf.clip_by_global_norm(gradients, max_gradient_norm)
 
             self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
@@ -198,23 +228,13 @@ class Seq2SeqModel(object):
                                                            global_step=self.global_step)
 
             baseline_opt = tf.train.AdamOptimizer(learning_rate=0.001)
-            self.baseline_updates = baseline_opt.apply_gradients(zip(gradients, params))
-
-        def tensor_prod(x, w, b):
-            shape = tf.shape(x)
-            x = tf.reshape(x, tf.pack([tf.mul(shape[0], shape[1]), shape[2]]))
-            x = tf.matmul(x, w) + b
-            x = tf.reshape(x, tf.pack([shape[0], shape[1], b.get_shape()[0]]))
-            return x
-
-        if output_projection is not None:
-            w, b = output_projection
-            self.outputs = tensor_prod(self.outputs, w, b)
+            self.baseline_gradients = tf.gradients(self.baseline_loss, params)
+            self.baseline_updates = baseline_opt.apply_gradients(zip(self.baseline_gradients, params))
 
         self.greedy_output = tf.argmax(self.outputs, axis=2)
         self.beam_output = tf.nn.softmax(self.outputs[0,:,:])
 
-    def step(self, session, data, forward_only=False, align=False, debug=False):
+    def step(self, session, data, update_model=True, align=False, **kwargs):
         if self.dropout is not None:
             session.run(self.dropout_on)
 
@@ -228,49 +248,15 @@ class Seq2SeqModel(object):
             self.decoder_inputs: decoder_inputs,
             self.decoder_input_length: decoder_input_length,
             self.targets: targets,
-            self.reward: np.zeros((batch_size,))
+            self.reward: np.zeros((batch_size,)),
         }
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
 
-        # time_steps = tf.shape(self.outputs)[0]
-        # batch_size = tf.shape(self.outputs)[1]
-        # output_size = self.outputs.get_shape()[2]
-        # size = time_steps * batch_size
-        #
-        # indices = tf.argmax(self.outputs, axis=2)
-        #
-        # p = tf.nn.softmax(self.outputs)
-        #
-        # indices = tf.reshape(indices, shape=tf.pack([size]))
-        # p = tf.reshape(p, shape=tf.pack([size, output_size]))
-        #
-        # indices = tf.stack([tf.cast(tf.range(size), tf.int64), indices], axis=1)
-        # p = tf.gather_nd(p, indices)
-        # p = tf.reshape(p, shape=tf.pack([time_steps, batch_size]))
-        #
-        #
-        #
-        # s = tf.nn.softmax(self.outputs)
-        # i = tf.argmax(self.outputs, axis=2)
-        #
-        # time_steps = tf.shape(s)[0]
-        # batch_size = tf.shape(s)[1]
-        #
-        # s = tf.reshape(s, shape=tf.pack([-1, s.get_shape()[-1]]))
-        # i = tf.reshape(i, shape=tf.pack([-1]))
-        #
-        # x = tf.range(time_steps * batch_size)
-        #
-        # r = s[x, i]
-        # r = tf.reshape(r, shape=tf.pack([time_steps, batch_size]))
-
-        # y = tf.reshape(tf.gather_nd(s, i), tf.shape(i))
-
         output_feed = {'loss': self.loss, 'gradient': self.gradient_norms}
-        if not forward_only:
+        if update_model:
             output_feed['updates'] = self.updates
         if align:
             output_feed['attn_weights'] = self.attention_weights
@@ -278,47 +264,73 @@ class Seq2SeqModel(object):
         res = session.run(output_feed, input_feed)
         return namedtuple('output', 'loss attn_weights')(res['loss'], res.get('attn_weights'))
 
-    def reinforce_step(self, session, data):
+    def reinforce_step(self, session, data, update_model=True, update_baseline=True, **kwargs):
         if self.dropout is not None:
-            session.run(self.dropout_on)
+            session.run(self.dropout_off)
 
         batch = self.get_batch(data)
         encoder_inputs, decoder_inputs, targets, target_weights, encoder_input_length, decoder_input_length = batch
 
         input_feed = {
-            self.target_weights: target_weights,
             self.decoder_inputs: decoder_inputs,
             self.decoder_input_length: decoder_input_length,
-            self.targets: targets
         }
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
 
-        output = session.run(self.greedy_output, input_feed)
+        output_feed = [self.outputs, self.greedy_output, self.decoder_states]
+        outputs, greedy_outputs, decoder_states = session.run(output_feed, input_feed)
 
-        output_ = output.T
+        outputs_ = greedy_outputs.T
         targets_ = targets.T
         lengths_ = decoder_input_length
 
-        import time
-
         scores = []
-        t = time.time()
-        for output_, target_, length_ in zip(output_, targets_, lengths_):
-            target_ = target_[:length_]
+        weights = []
+        for output_, target_, length_ in zip(outputs_, targets_, lengths_):
+            target_ = target_[:length_]    # includes first EOS (good idea?)
 
-            i, = np.where(output_ == utils.EOS_ID)
-            if i:
-                output_ = output_[:i]
+            i, = np.where(output_ == utils.EOS_ID)  # array of indices whose value is EOS_ID
 
-            score = utils.sentence_score(output_, target_)
+            time_steps = output_.shape[0]
+            if len(i) > 0:
+                i = i[0]  # index of the first EOS symbol
+                weights_ = (np.arange(time_steps) <= i).astype(np.float32)
+                output_ = output_[:i + 1]  # includes first EOS
+            else:
+                weights_ = np.ones(time_steps)
 
-            # TODO: smoothing
+            weights.append(weights_)
+
+            score = utils.sentence_score(output_, target_, smoothing=True, order=4)
             scores.append(score)
 
-        t = time.time() - t
+        weights = np.transpose(weights)
+
+        if self.dropout is not None:
+            session.run(self.dropout_on)
+
+        input_feed = {
+            **input_feed,
+            self.reward: scores,
+            self.target_weights: weights,
+            self.targets: greedy_outputs,
+            self.use_reinforce: True,
+        }
+
+        output_feed = {'loss': self.reinforce_loss, 'baseline_loss': self.baseline_loss}
+
+        if update_model:
+            output_feed['updates'] = self.updates
+
+        if update_baseline:
+            output_feed['baseline_updates'] = self.baseline_updates
+
+        res = session.run(output_feed, input_feed)
+
+        return namedtuple('output', 'loss baseline_loss')(res['loss'], res['baseline_loss'])
 
     def greedy_decoding(self, session, token_ids):
         if self.dropout is not None:

@@ -13,10 +13,11 @@ max_steps: 0
 optimizer: 'adam'
 weight_scale: 0.01
 batch_size: 80
+shuffle_data: True    # shuffle dataset at each new epoch
 read_ahead: 20
 max_output_len: 49    # faster decoding
 max_input_len: 49     # limit memory usage
-max_gradient_norm: 1
+max_gradient_norm: 1.0
 
 data_dir: experiments/WMT14/data_subwords
 model_dir: experiments/WMT14/subwords
@@ -29,3 +30,11 @@ encoders:
 
 decoder:
     name: fr
+
+# SGD parameters
+sgd_after_n_epoch: 1    # only use Adam for the first epoch, to speed up training (one epoch ~= 150k steps)
+learning_rate: 0.5
+learning_rate_decay_factor: 0.5
+decay_every_n_epoch: 1
+decay_after_n_epoch: 2
+decay_if_no_progress: null

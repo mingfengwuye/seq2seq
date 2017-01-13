@@ -127,6 +127,7 @@ class TranslationModel(BaseTranslationModel):
         self.batch_iterator = None
         self.dev_batches = None
         self.train_size = None
+        self.use_sgd = False
 
     def read_data(self, max_train_size, max_dev_size, read_ahead=10, batch_mode='standard', shuffle=True, **kwargs):
         utils.debug('reading training data')
@@ -159,14 +160,31 @@ class TranslationModel(BaseTranslationModel):
     def train(self, *args, **kwargs):
         raise NotImplementedError('use MultiTaskModel')
 
-    def train_step(self, sess):
-        return self.seq2seq_model.step(sess, next(self.batch_iterator)).loss
+    def train_step(self, sess, loss_function='xent'):
+        if loss_function == 'reinforce':
+            fun = self.seq2seq_model.reinforce_step   # FIXME
+        else:
+            fun = self.seq2seq_model.step
 
-    def eval_step(self, sess):
+        return fun(sess, next(self.batch_iterator), update_model=True, update_baseline=True)
+
+    def baseline_step(self, sess):
+        return self.seq2seq_model.reinforce_step(sess,
+                                                 next(self.batch_iterator),
+                                                 update_model=False,
+                                                 update_baseline=True).baseline_loss
+
+    def eval_step(self, sess, loss_function='xent'):
+        if loss_function == 'reinforce':
+            # fun = self.seq2seq_model.reinforce_step  # TODO (print both, same for train loss)
+            fun = self.seq2seq_model.step
+        else:
+            fun = self.seq2seq_model.step
+
         # compute perplexity on dev set
         for dev_batches in self.dev_batches:
             eval_loss = sum(
-                self.seq2seq_model.step(sess, batch, forward_only=True).loss * len(batch)
+                fun(sess, batch, update_model=False, update_baseline=False).loss * len(batch)
                 for batch in dev_batches
             )
             eval_loss /= sum(map(len, dev_batches))
@@ -323,7 +341,7 @@ class TranslationModel(BaseTranslationModel):
             score_info = []
             if self.name is not None:
                 score_info.append(self.name)
-            score_info.append('score={}'.format(score))
+            score_info.append('score={:.2f}'.format(score))
             if score_summary:
                 score_info.append(score_summary)
 

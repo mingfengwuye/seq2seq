@@ -468,7 +468,6 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
             # using decoder state instead of decoder output in the attention model seems
             # to give much better results
-
             state_ta = state_ta.write(time, state)
             output_ = linear_unsafe([state, input_, context_vector], decoder.cell_size, False, scope='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.pack([batch_size, decoder.cell_size // 2, 2])), axis=2)
@@ -517,7 +516,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
 
 def sequence_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True,
-                  softmax_loss_function=None):
+                  softmax_loss_function=None, reward=None):
     time_steps = tf.shape(targets)[0]
     batch_size = tf.shape(targets)[1]
 
@@ -530,6 +529,10 @@ def sequence_loss(logits, targets, weights, average_across_timesteps=False, aver
         crossent = softmax_loss_function(logits_, targets_)
 
     crossent = tf.reshape(crossent, tf.pack([time_steps, batch_size]))
+
+    if reward is not None:
+        crossent *= reward
+
     log_perp = tf.reduce_sum(crossent * weights, 0)
 
     if average_across_timesteps:
@@ -545,43 +548,33 @@ def sequence_loss(logits, targets, weights, average_across_timesteps=False, aver
     else:
         return cost
 
-def reinforce_loss(reward, outputs, weights, baseline, gamma=1.0, average_across_timesteps=False,
+
+def reinforce_loss(reward, outputs, weights, gamma=1.0, average_across_timesteps=False,
                    average_across_batch=True):
     """
     :param reward: tensor of shape (batch_size,) corresponding to the BLEU score of
         each predicted sequence in the batch
     :param outputs: tensor of shape (time_steps, batch_size, output_size)
-    :param weights: outputs after EOS shouldn't count
+    :param weights: tensor of shape (time_steps, batch_size), outputs after EOS shouldn't count
     :param baseline: tensor of shape (time_steps, batch_size)
     :param gamma: discount factor
     :return: scalar tensor
     """
-    # indices = tf.argmax(outputs, axis=2)
-
     p = tf.nn.softmax(outputs)
-
-    # indices = tf.reshape(indices, shape=[size])
-    # p = tf.reshape(p, shape=tf.pack([size, output_size]))
-    #
-    # indices = tf.stack([tf.range(size), indices], axis=1)
-    # p = tf.gather_nd(p, indices)
-    # p = tf.reshape(p, shape=tf.pack([time_steps, batch_size]))
-
     p = tf.reduce_max(p, axis=2)  # time_steps * batch_size
-
-    # states = tf.reshape(states, shape=tf.pack([size, state_size]))
-    # baseline = tf.expand_dims(baseline, axis=1)
-    #
-    # r = tf.matmul(states, baseline)
-    # r = tf.reshape(r, shape=tf.pack([time_steps, batch_size]))
-    # r = tf.stop_gradient(r)    # do not propagate gradient through baseline
 
     time_steps = tf.shape(outputs)[0]
     batch_size = tf.shape(outputs)[1]
     discount = tf.pow(gamma, tf.cast(tf.range(time_steps), dtype=tf.float32))
 
-    baseline = tf.stop_gradient(baseline)   # do not propagate gradient through baseline
-    cost = tf.transpose((reward - baseline) * tf.log(p)) * discount   # batch_size * time_steps
+    # cost = tf.transpose(
+    #     tf.transpose((reward - baseline) * tf.log(p)) * discount
+    # )
+
+    # cost = reward * tf.log(p)
+    cost = tf.transpose(
+        tf.transpose(reward * tf.log(p)) * discount
+    )
 
     cost = tf.reduce_sum(cost * weights, axis=0)
 
@@ -600,14 +593,13 @@ def reinforce_loss(reward, outputs, weights, baseline, gamma=1.0, average_across
 
 def baseline_loss(baseline, reward, weights, average_across_timesteps=False,
                   average_across_batch=True):
-    batch_size = tf.shape(baseline)[1]
+    batch_size = tf.shape(baseline)[0]
     cost = (reward - baseline) ** 2
-    cost = tf.reduce_sum(cost * weights, axis=0)
-
-    if average_across_timesteps:
-        total_size = tf.reduce_sum(weights, 0)
-        total_size += 1e-12  # just to avoid division by 0 for all-0 weights
-        cost /= total_size
+    # cost = tf.reduce_sum(cost * weights, axis=0)
+    # if average_across_timesteps:
+    #     total_size = tf.reduce_sum(weights, 0)
+    #     total_size += 1e-12  # just to avoid division by 0 for all-0 weights
+    #     cost /= total_size
 
     cost = tf.reduce_sum(cost)
 

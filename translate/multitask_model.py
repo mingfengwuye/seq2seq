@@ -33,7 +33,7 @@ class MultiTaskModel(BaseTranslationModel):
 
     def train(self, sess, beam_size, steps_per_checkpoint, steps_per_eval=None, eval_output=None, max_steps=0,
               eval_burn_in=0, decay_if_no_progress=5, decay_after_n_epoch=None, decay_every_n_epoch=None,
-              sgd_after_n_epoch=None, **kwargs):
+              sgd_after_n_epoch=None, loss_function='xent', baseline_steps=0, **kwargs):
         utils.log('reading training and development data')
 
         self.global_step = 0
@@ -41,6 +41,7 @@ class MultiTaskModel(BaseTranslationModel):
             model.read_data(**kwargs)
             # those parameters are used to track the progress of each task
             model.loss, model.time, model.steps = 0, 0, 0
+            model.baseline_loss = 0
             model.previous_losses = []
             global_step = model.global_step.eval(sess)
             model.epoch = model.batch_size * global_step // model.train_size
@@ -50,14 +51,30 @@ class MultiTaskModel(BaseTranslationModel):
 
             self.global_step += global_step
 
+        # pre-train baseline
+        if loss_function == 'reinforce' and baseline_steps > 0:
+            utils.log('pre-training baseline')
+            for model in self.models:
+                baseline_loss = 0
+                for step in range(1, baseline_steps + 1):
+                    baseline_loss += model.baseline_step(sess)
+
+                    if step % steps_per_checkpoint == 0:
+                        loss = baseline_loss / steps_per_checkpoint
+                        baseline_loss = 0
+                        utils.log('{} step {} baseline loss {:.4f}'.format(model.name, step, loss))
+
         utils.log('starting training')
         while True:
             i = np.random.choice(len(self.models), 1, p=self.ratios)[0]
             model = self.models[i]
 
             start_time = time.time()
-            loss = model.train_step(sess)
-            model.loss += loss
+            res = model.train_step(sess, loss_function=loss_function)
+            model.loss += res.loss
+
+            if loss_function == 'reinforce':
+                model.baseline_loss += res.baseline_loss
 
             model.time += (time.time() - start_time)
             model.steps += 1
@@ -84,9 +101,15 @@ class MultiTaskModel(BaseTranslationModel):
                     loss_ = model_.loss / model_.steps
                     step_time_ = model_.time / model_.steps
 
-                    utils.log('{} step {} learning rate {:.4f} step-time {:.2f} loss {:.2f}'.format(
+                    if loss_function == 'reinforce':
+                        baseline_loss_ = ' baseline loss {:.4f}'.format(model_.baseline_loss / model_.steps)
+                        model_.baseline_loss = 0
+                    else:
+                        baseline_loss_ = ''
+
+                    utils.log('{} step {} learning rate {:.4f} step-time {:.3f}{} loss {:.3f}'.format(
                         model_.name, model_.global_step.eval(sess), model_.learning_rate.eval(),
-                        step_time_, loss_))
+                        step_time_, baseline_loss_, loss_))
                     
                     if decay_if_no_progress and len(model_.previous_losses) >= decay_if_no_progress:
                         if loss_ >= max(model_.previous_losses[:decay_if_no_progress]):
@@ -94,7 +117,7 @@ class MultiTaskModel(BaseTranslationModel):
 
                     model_.previous_losses.append(loss_)
                     model_.loss, model_.time, model_.steps = 0, 0, 0
-                    model_.eval_step(sess)
+                    model_.eval_step(sess, loss_function=loss_function)
 
                 self.save(sess)
 

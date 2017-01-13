@@ -12,6 +12,7 @@ import wave
 
 from collections import namedtuple, Counter
 from contextlib import contextmanager
+from matplotlib import pyplot as plt
 
 # special vocabulary symbols
 _BOS = "<S>"
@@ -135,7 +136,7 @@ def get_filenames(data_dir, extensions, train_prefix, dev_prefix, vocab_prefix,
     return filenames(train, dev, test, vocab, lm_path, embeddings)
 
 
-def bleu_score(hypotheses, references, script_dir):
+def multi_bleu_score(hypotheses, references, script_dir):
     """
     Scoring function which calls the 'multi-bleu.perl' script.
 
@@ -213,30 +214,32 @@ def nltk_bleu_score(hypotheses, references, **kwargs):
     return bleu, None
 
 
-def safe_log(x):
-    if x <= 0:
-        return float('-inf')
-    else:
-        return math.log(x)
-
-
-def sentence_score(hypothesis, reference, order=4):
+def sentence_score(hypothesis, reference, smoothing=False, order=4):
     log_score = 0
 
     for i in range(order):
         hyp_ngrams = Counter(zip(*[hypothesis[j:] for j in range(i + 1)]))
         ref_ngrams = Counter(zip(*[reference[j:] for j in range(i + 1)]))
 
-        score_ = sum(min(count, ref_ngrams[bigram]) for bigram, count in hyp_ngrams.items())
-        score_ /= max(1, sum(hyp_ngrams.values()))
+        numerator = sum(min(count, ref_ngrams[bigram]) for bigram, count in hyp_ngrams.items())
+        denominator = max(1, sum(hyp_ngrams.values()))
 
-        log_score += safe_log(score_) / order
+        if smoothing:
+            numerator += 1
+            denominator += 1
+
+        score = numerator / denominator
+
+        if score == 0:
+            log_score += float('-inf')
+        else:
+            log_score += math.log(score) / order
 
     bp = min(1, math.exp(1 - len(reference) / len(hypothesis)))
     return math.exp(log_score) * bp
 
 
-def corpus_score(hypotheses, references, order=4):
+def bleu_score(hypotheses, references, script_dir, smoothing=False, order=4):
     total = np.zeros((4,))
     correct = np.zeros((4,))
 
@@ -257,11 +260,20 @@ def corpus_score(hypotheses, references, order=4):
             total[i] += sum(hyp_ngrams.values())
             correct[i] += sum(min(count, ref_ngrams[bigram]) for bigram, count in hyp_ngrams.items())
 
-    scores = correct / total
-    score = math.exp(sum(map(safe_log, scores)) / order)
-    bp = min(1, math.exp(1 - ref_length / hyp_length))
+    if smoothing:
+        total += 1
+        correct += 1
 
-    return score * bp
+    scores = correct / total
+
+    score = math.exp(
+        sum(math.log(score) if score > 0 else float('-inf') for score in scores) / order
+    )
+
+    bp = min(1, math.exp(1 - ref_length / hyp_length))
+    bleu = 100 * bp * score
+
+    return bleu, 'penalty={:.3f} ratio={:.3f}'.format(bp, hyp_length / ref_length)
 
 
 def read_embeddings(embedding_filenames, encoders_and_decoder, load_embeddings,
