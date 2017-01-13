@@ -12,7 +12,6 @@ import wave
 
 from collections import namedtuple, Counter
 from contextlib import contextmanager
-from matplotlib import pyplot as plt
 
 # special vocabulary symbols
 _BOS = "<S>"
@@ -608,7 +607,8 @@ def heatmap(xlabels=None, ylabels=None, weights=None,
     :param output_file: write the figure to this file, or show it into a window if None
     :param wav_file: plot the waveform of this audio file on the x axis
     """
-    import matplotlib.pyplot as plt
+    from matplotlib import pyplot as plt
+
     xlabels = xlabels or []
     ylabels = ylabels or []
 
