@@ -45,7 +45,7 @@ class Seq2SeqModel(object):
     def __init__(self, encoders, decoder, learning_rate, global_step, max_gradient_norm, num_samples=512,
                  dropout_rate=0.0, freeze_variables=None, lm_weight=None, max_output_len=50, attention=True,
                  feed_previous=0.0, optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
-                 **kwargs):
+                 reinforce_baseline=True, **kwargs):
         self.lm_weight = lm_weight
         self.encoders = encoders
         self.decoder = decoder
@@ -152,11 +152,8 @@ class Seq2SeqModel(object):
             w, b = output_projection
             self.outputs = tensor_prod(self.outputs, w, b)
 
-        with variable_scope.variable_scope('reward_baseline'):
-            time_steps = tf.shape(self.decoder_states)[0]
-            batch_size = tf.shape(self.decoder_states)[1]
-            state_size = self.decoder_states.get_shape()[2]
-
+        if reinforce_baseline:
+            # state_size = self.decoder_states.get_shape()[2]
             # states = tf.reshape(self.decoder_states, shape=tf.pack([time_steps * batch_size, state_size]))
             #
             # self.baseline = fully_connected(tf.stop_gradient(states), num_outputs=1, activation_fn=tf.sigmoid)
@@ -165,28 +162,31 @@ class Seq2SeqModel(object):
             # reward = tf.reshape(tf.tile(self.reward, [time_steps]),
             #                     shape=tf.pack([time_steps, batch_size]))
             # reward = reward - tf.stop_gradient(self.baseline)
-            #
+
             states = self.decoder_states[-1]
-            self.baseline = fully_connected(tf.stop_gradient(states), num_outputs=1, activation_fn=None)
+            self.baseline = fully_connected(tf.stop_gradient(states), num_outputs=1, activation_fn=None,
+                                            scope='reward_baseline')
             # self.baseline = fully_connected(tf.stop_gradient(states), num_outputs=128, activation_fn=tf.tanh,
             #                                 scope='first')
             # self.baseline = fully_connected(self.baseline, num_outputs=1, scope='second')
 
             self.baseline = tf.squeeze(self.baseline, axis=1)
             reward = self.reward - tf.stop_gradient(self.baseline)
-            reward = tf.reshape(tf.tile(reward, [time_steps]),
-                                shape=tf.pack([time_steps, batch_size]))
 
-        # self.reinforce_loss = decoders.reinforce_loss(reward=self.reward, outputs=self.outputs,
-        #                                               weights=self.target_weights, baseline=self.baseline)
+            self.baseline_loss = decoders.baseline_loss(baseline=self.baseline, reward=self.reward,
+                                                        weights=self.target_weights)
+        else:
+            reward = self.reward
+            self.baseline_loss = tf.constant(0.0)
+
+        time_steps = tf.shape(self.decoder_states)[0]
+        batch_size = tf.shape(self.decoder_states)[1]
+        reward = tf.reshape(tf.tile(reward, [time_steps]), shape=tf.pack([time_steps, batch_size]))
 
         self.reinforce_loss = decoders.sequence_loss(
             logits=self.outputs, targets=self.targets, weights=self.target_weights,
             softmax_loss_function=softmax_loss_function, reward=reward
         )
-
-        self.baseline_loss = decoders.baseline_loss(baseline=self.baseline, reward=self.reward,
-                                                    weights=self.target_weights)
 
         if not decode_only:
             # gradients and SGD update operation for training the model
@@ -227,9 +227,12 @@ class Seq2SeqModel(object):
                 self.sgd_updates = sgd_opt.apply_gradients(zip(clipped_gradients, params),
                                                            global_step=self.global_step)
 
-            baseline_opt = tf.train.AdamOptimizer(learning_rate=0.001)
-            self.baseline_gradients = tf.gradients(self.baseline_loss, params)
-            self.baseline_updates = baseline_opt.apply_gradients(zip(self.baseline_gradients, params))
+            if reinforce_baseline:
+                baseline_opt = tf.train.AdamOptimizer(learning_rate=0.001)
+                baseline_gradients = tf.gradients(self.baseline_loss, params)
+                self.baseline_updates = baseline_opt.apply_gradients(zip(baseline_gradients, params))
+            else:
+                self.baseline_updates = tf.constant(0.0)   # dummy tensor
 
         self.greedy_output = tf.argmax(self.outputs, axis=2)
         self.beam_output = tf.nn.softmax(self.outputs[0,:,:])

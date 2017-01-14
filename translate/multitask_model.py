@@ -33,7 +33,8 @@ class MultiTaskModel(BaseTranslationModel):
 
     def train(self, sess, beam_size, steps_per_checkpoint, steps_per_eval=None, eval_output=None, max_steps=0,
               eval_burn_in=0, decay_if_no_progress=5, decay_after_n_epoch=None, decay_every_n_epoch=None,
-              sgd_after_n_epoch=None, loss_function='xent', baseline_steps=0, **kwargs):
+              sgd_after_n_epoch=None, loss_function='xent', baseline_steps=0, reinforce_baseline=True,
+              **kwargs):
         utils.log('reading training and development data')
 
         self.global_step = 0
@@ -52,7 +53,7 @@ class MultiTaskModel(BaseTranslationModel):
             self.global_step += global_step
 
         # pre-train baseline
-        if loss_function == 'reinforce' and baseline_steps > 0:
+        if loss_function == 'reinforce' and baseline_steps > 0 and reinforce_baseline:
             utils.log('pre-training baseline')
             for model in self.models:
                 baseline_loss = 0

@@ -27,6 +27,7 @@ feed_previous: 0.0       # randomly feed previous output instead of groundtruth 
 optimizer: 'sgd'         # 'sgd', 'adadelta', or 'adam'
 loss_function: 'xent'    # 'xent' or 'reinforce'
 baseline_steps: 0        # pre-training steps for reward baseline
+reinforce_baseline: True # train a reward baseline for reinforce
 
 # model (each one of these settings can be defined specifically in `encoders` and `decoder`, or generally here)
 attention: True          # use an attention mechanism
