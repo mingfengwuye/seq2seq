@@ -4,9 +4,10 @@
 learning_rate: 0.5       # initial learning rate
 learning_rate_decay_factor: 0.99
 decay_every_n_epoch: null
-decay_after_n_epoch: null
+decay_after_n_epoch: 0
 decay_if_no_progress: 3  # measure average loss over this many checkpoints, and decay if no progress
 sgd_after_n_epoch: null  # use SGD optimizer after this many epochs (instead of adam/adadelta)
+reinforce_after_n_epoch: null  # switch to a reinforce loss after this many epochs (TODO)
 
 # batch iteration parameters
 batch_mode: 'standard'   # standard, random, or strict
@@ -22,12 +23,16 @@ steps_per_checkpoint: 1000   # number of updates between each checkpoint
 steps_per_eval: 4000     # number of updates between each BLEU eval (on dev set)
 eval_burn_in: 0          # minimum number of steps before starting BLEU eval
 max_steps: 0             # maximum number of updates before stopping
+max_epochs: 0            # maximum number of epochs before stopping
 keep_best: 4             # number of best checkpoints to keep
 feed_previous: 0.0       # randomly feed previous output instead of groundtruth to decoder during training
 optimizer: 'sgd'         # 'sgd', 'adadelta', or 'adam'
+
+# reinforce parameters
 loss_function: 'xent'    # 'xent' or 'reinforce'
 baseline_steps: 0        # pre-training steps for reward baseline
 reinforce_baseline: True # train a reward baseline for reinforce
+reinforce_reward: sentence_bleu  # sentence_bleu, or sentence_ter
 
 # model (each one of these settings can be defined specifically in `encoders` and `decoder`, or generally here)
 attention: True          # use an attention mechanism
@@ -63,7 +68,7 @@ embedding_prefix: vectors  # name of the embeddings files
 checkpoints: []          # list of checkpoints to load (in this specific order) after main checkpoint
 
 # decoding
-score_function: bleu_score  # name of the main scoring function (used for selecting models)
+score_function: corpus_bleu # name of the main scoring function (used for selecting models), corpus_bleu or corpus_ter
 auxiliary_score_function: null   # name of the auxiliary scoring function (used for logging)
 remove_unk: False        # remove UNK symbols from the decoder output
 lm_file: null            # path to a language model file (in arpa format) to use during decoding

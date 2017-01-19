@@ -8,7 +8,7 @@ bidir: True
 use_lstm: False
 eval_burn_in: 40000
 steps_per_checkpoint: 1000
-steps_per_eval: 4000
+steps_per_eval: 1000
 max_steps: 0
 optimizer: 'adam'
 weight_scale: 0.01
@@ -29,3 +29,8 @@ encoders:
 
 decoder:
     name: fr
+
+
+loss_function: 'reinforce'
+baseline_steps: 10000
+reinforce_baseline: False

@@ -10,6 +10,7 @@ import random
 import math
 import wave
 
+from translate import pyter
 from collections import namedtuple, Counter
 from contextlib import contextmanager
 
@@ -135,85 +136,18 @@ def get_filenames(data_dir, extensions, train_prefix, dev_prefix, vocab_prefix,
     return filenames(train, dev, test, vocab, lm_path, embeddings)
 
 
-def multi_bleu_score(hypotheses, references, script_dir):
+def sentence_bleu(hypothesis, reference, smoothing=True, order=4, **kwargs):
     """
-    Scoring function which calls the 'multi-bleu.perl' script.
+    Compute sentence-level BLEU score between a translation hypothesis and a reference.
+    All reward functions used for REINFORCE should follow this interface.
 
-    :param hypotheses: list of translation hypotheses
-    :param references: list of translation references
-    :param script_dir: directory containing the evaluation script
-    :return: a pair (BLEU score, additional scoring information)
+    :param hypothesis: list of tokens or token ids
+    :param reference: list of tokens or token ids
+    :param smoothing: apply smoothing (recommended, especially for short sequences)
+    :param order: count n-grams up to this value of n.
+    :param kwargs: additional (unused) parameters
+    :return: BLEU score (float)
     """
-    with tempfile.NamedTemporaryFile(delete=False, mode='w') as f:
-        for ref in references:
-            f.write(ref + '\n')
-
-    bleu_script = os.path.join(script_dir, 'multi-bleu.perl')
-    try:
-        p = subprocess.Popen([bleu_script, f.name], stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=open('/dev/null', 'w'))
-        output, _ = p.communicate(('\n'.join(hypotheses) + '\n').encode())
-    finally:
-        os.unlink(f.name)
-
-    output = output.decode()
-
-    try:
-        m = re.match(r'BLEU = ([^,]*).*BP=([^,]*), ratio=([^,]*)', output)
-        bleu, penalty, ratio = [float(m.group(i)) for i in range(1, 4)]
-    except:
-        bleu, penalty, ratio = 0.0, 0.0, 0.0
-
-    return bleu, 'penalty={} ratio={}'.format(penalty, ratio)
-
-
-def multi_score(hypotheses, references, script_dir):
-    """
-    Scoring function which calls the 'score.py' script, to get
-    BLEU, NIST, and TER scores.
-
-    :param hypotheses: list of translation hypotheses
-    :param references: list of translation references
-    :param script_dir: directory containing the evaluation script
-    :return: a pair (BLEU score, additional scoring information)
-    """
-    with tempfile.NamedTemporaryFile(delete=False, mode='w') as f1, \
-         tempfile.NamedTemporaryFile(delete=False, mode='w') as f2:
-        for ref in references:
-            f1.write(ref + '\n')
-        for hyp in hypotheses:
-            f2.write(hyp + '\n')
-
-    scoring_script = os.path.join(script_dir, 'score.py')
-    try:
-        output = subprocess.check_output([scoring_script, f2.name, f1.name]).decode()
-    finally:
-        os.unlink(f1.name)
-        os.unlink(f2.name)
-
-    m = re.match(r'BLEU=(.*) NIST=(.*) TER=(.*) RATIO=(.*)', output)
-    bleu, nist, ter, ratio = [float(m.group(i)) for i in range(1, 5)]
-
-    return bleu, 'nist={} ter={} ratio={}'.format(nist, ter, ratio)
-
-
-def nltk_bleu_score(hypotheses, references, **kwargs):
-    """
-    Scoring function using NLTK to compute the BLEU score.
-    Warning: this doesn't produce the same BLEU score as 'multi-bleu.perl' and 'score.py'
-
-    :param hypotheses: list of translation hypotheses
-    :param references: list of translation references
-    :return: a pair (BLEU score, None)
-    """
-    import nltk
-    bleus = [nltk.bleu_score.bleu([ref.split()], hyp.split(), [1.0 / 3] * 3)
-             for ref, hyp in zip(references, hypotheses)]
-    bleu = float('{:.2f}'.format(100 * sum(bleus) / len(bleus)))
-    return bleu, None
-
-
-def sentence_score(hypothesis, reference, smoothing=False, order=4):
     log_score = 0
 
     for i in range(order):
@@ -238,7 +172,20 @@ def sentence_score(hypothesis, reference, smoothing=False, order=4):
     return math.exp(log_score) * bp
 
 
-def bleu_score(hypotheses, references, script_dir, smoothing=False, order=4):
+def corpus_bleu(hypotheses, references, smoothing=False, order=4, **kwargs):
+    """
+    Computes the BLEU score at the corpus-level between a list of translation hypotheses and references.
+    With the default settings, this computes the exact same score as `multi-bleu.perl`.
+
+    All corpus-based evaluation functions should follow this interface.
+
+    :param hypotheses: list of strings
+    :param references: list of strings
+    :param smoothing: apply +1 smoothing
+    :param order: count n-grams up to this value of n. `multi-bleu.perl` uses a value of 4.
+    :param kwargs: additional (unused) parameters
+    :return: score (float), and summary containing additional information (str)
+    """
     total = np.zeros((4,))
     correct = np.zeros((4,))
 
@@ -273,6 +220,24 @@ def bleu_score(hypotheses, references, script_dir, smoothing=False, order=4):
     bleu = 100 * bp * score
 
     return bleu, 'penalty={:.3f} ratio={:.3f}'.format(bp, hyp_length / ref_length)
+
+
+def sentence_ter(hypothesis, reference, **kwargs):
+    """
+    This is not exactly TER, but 1 - TER,
+    which is necessary for this to be a reward function (the higher the better)
+    """
+    return 1 - pyter.ter(hypothesis, reference)
+
+
+def corpus_ter(hypotheses, references, **kwargs):
+    scores = [pyter.ter(hyp.split(), ref.split()) for hyp, ref in zip(hypotheses, references)]
+    score = 100 * sum(scores) / len(scores)
+
+    hyp_length = sum(len(hyp.split()) for hyp in hypotheses)
+    ref_length = sum(len(ref.split()) for ref in references)
+
+    return score, 'ratio={:.3f}'.format(hyp_length / ref_length)
 
 
 def read_embeddings(embedding_filenames, encoders_and_decoder, load_embeddings,
@@ -611,8 +576,6 @@ def heatmap(xlabels=None, ylabels=None, weights=None,
 
     xlabels = xlabels or []
     ylabels = ylabels or []
-
-    from matplotlib import pyplot as plt
 
     if wav_file is None:
         _, ax = plt.subplots()

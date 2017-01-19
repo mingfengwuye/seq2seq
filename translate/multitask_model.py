@@ -32,9 +32,8 @@ class MultiTaskModel(BaseTranslationModel):
 
 
     def train(self, sess, beam_size, steps_per_checkpoint, steps_per_eval=None, eval_output=None, max_steps=0,
-              eval_burn_in=0, decay_if_no_progress=5, decay_after_n_epoch=None, decay_every_n_epoch=None,
-              sgd_after_n_epoch=None, loss_function='xent', baseline_steps=0, reinforce_baseline=True,
-              **kwargs):
+              max_epochs=0, eval_burn_in=0, decay_if_no_progress=5, decay_after_n_epoch=None, decay_every_n_epoch=None,
+              sgd_after_n_epoch=None, loss_function='xent', baseline_steps=0, reinforce_baseline=True, **kwargs):
         utils.log('reading training and development data')
 
         self.global_step = 0
@@ -46,6 +45,7 @@ class MultiTaskModel(BaseTranslationModel):
             model.previous_losses = []
             global_step = model.global_step.eval(sess)
             model.epoch = model.batch_size * global_step // model.train_size
+            model.last_decay = model.epoch
 
             for _ in range(global_step):   # read all the data up to this step
                 next(model.batch_iterator)
@@ -77,22 +77,26 @@ class MultiTaskModel(BaseTranslationModel):
             if loss_function == 'reinforce':
                 model.baseline_loss += res.baseline_loss
 
-            model.time += (time.time() - start_time)
+            model.time += time.time() - start_time
             model.steps += 1
             self.global_step += 1
             model_global_step = model.global_step.eval(sess)
+
             epoch = model.batch_size * model_global_step // model.train_size
+            if epoch > model.epoch:
+                utils.log('{} starting epoch {}'.format(model.name, epoch + 1))
+                model.epoch = epoch
+
+            if decay_after_n_epoch is not None and epoch >= decay_after_n_epoch:
+                if decay_every_n_epoch is not None and epoch - model.last_decay >= decay_every_n_epoch:
+                    sess.run(model.learning_rate_decay_op)
+                    utils.debug('  decaying learning rate to: {:.4f}'.format(model.learning_rate.eval()))
+                    model.last_decay = epoch
 
             if sgd_after_n_epoch is not None and epoch >= sgd_after_n_epoch:
                 if model.seq2seq_model.sgd_updates is not model.seq2seq_model.updates:
                     model.seq2seq_model.updates = model.seq2seq_model.sgd_updates
-                    utils.debug('epoch {}: starting to use SGD'.format(epoch + 1))
-
-            if decay_after_n_epoch is not None and epoch >= decay_after_n_epoch:
-                if decay_every_n_epoch is not None and epoch - model.epoch >= decay_every_n_epoch:
-                    utils.debug('epoch {}: applying learning rate decay'.format(epoch + 1))
-                    sess.run(model.learning_rate_decay_op)
-                    model.epoch = epoch
+                    utils.debug('  starting to use SGD')
 
             if steps_per_checkpoint and self.global_step % steps_per_checkpoint == 0:
                 for model_ in self.models:
@@ -108,7 +112,7 @@ class MultiTaskModel(BaseTranslationModel):
                     else:
                         baseline_loss_ = ''
 
-                    utils.log('{} step {} learning rate {:.4f} step-time {:.3f}{} loss {:.3f}'.format(
+                    utils.log('{} step {} learning rate {:.4f} step-time {:.3f}{} loss {:.4f}'.format(
                         model_.name, model_.global_step.eval(sess), model_.learning_rate.eval(),
                         step_time_, baseline_loss_, loss_))
                     
@@ -151,8 +155,9 @@ class MultiTaskModel(BaseTranslationModel):
 
                 self.manage_best_checkpoints(self.global_step, score)
 
-            if 0 < max_steps <= self.global_step:
+            if 0 < max_steps <= self.global_step and 0 < max_epochs <= epoch:
                 utils.log('finished training')
+                # TODO: save models
                 return
 
     def decode(self, *args, **kwargs):

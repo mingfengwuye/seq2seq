@@ -22,8 +22,8 @@ from translate.multitask_model import MultiTaskModel
 parser = argparse.ArgumentParser()
 parser.add_argument('config', help='load a configuration file in the YAML format')
 parser.add_argument('-v', '--verbose', help='verbose mode', action='store_true')
-parser.add_argument('--reset', help="reset model (don't load any checkpoint)", action='store_true')
-parser.add_argument('--reset-learning-rate', help='reset learning rate', action='store_true')
+parser.add_argument('--reset', help="reset model (don't load any checkpoint)", action='store_const', const=True)
+parser.add_argument('--reset-learning-rate', help='reset learning rate', action='store_const', const=True)
 parser.add_argument('--learning-rate', type=float, help='custom learning rate (triggers `reset-learning-rate`)')
 parser.add_argument('--purge', help='remove previous model files', action='store_true')
 
@@ -224,12 +224,12 @@ def main(args=None):
                 model.initialize(sess_, [checkpoint], reset=True)
         elif (not config.checkpoints and (args.eval or args.decode is not None or args.align)
               and os.path.isfile(best_checkpoint)):
-            # in decoding and evaluation mode, unless specified otherwise (by `checkpoints` or `reset` parameters,
+            # in decoding and evaluation mode, unless specified otherwise (by `checkpoints`),
             # try to load the best checkpoint)
             model.initialize(sess, [best_checkpoint], reset=True)
         else:
             # loads last checkpoint, unless `reset` is true
-            model.initialize(sess, config.checkpoints, reset=args.reset, reset_learning_rate=args.reset_learning_rate)
+            model.initialize(sess, **config)
 
         # Inspect variables:
         # tf.get_variable_scope().reuse_variables()

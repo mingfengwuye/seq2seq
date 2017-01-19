@@ -468,10 +468,12 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
             # using decoder state instead of decoder output in the attention model seems
             # to give much better results
-            state_ta = state_ta.write(time, state)
             output_ = linear_unsafe([state, input_, context_vector], decoder.cell_size, False, scope='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.pack([batch_size, decoder.cell_size // 2, 2])), axis=2)
             output_ = linear_unsafe(output_, decoder.embedding_size, False, scope='softmax0')
+
+            state_ta = state_ta.write(time, output_)
+
             # with tf.device('/cpu:0'):
             output_ = linear_unsafe(output_, output_size, True, scope='softmax1')
             output_ta = output_ta.write(time, output_)
@@ -549,57 +551,16 @@ def sequence_loss(logits, targets, weights, average_across_timesteps=False, aver
         return cost
 
 
-def reinforce_loss(reward, outputs, weights, gamma=1.0, average_across_timesteps=False,
-                   average_across_batch=True):
-    """
-    :param reward: tensor of shape (batch_size,) corresponding to the BLEU score of
-        each predicted sequence in the batch
-    :param outputs: tensor of shape (time_steps, batch_size, output_size)
-    :param weights: tensor of shape (time_steps, batch_size), outputs after EOS shouldn't count
-    :param baseline: tensor of shape (time_steps, batch_size)
-    :param gamma: discount factor
-    :return: scalar tensor
-    """
-    p = tf.nn.softmax(outputs)
-    p = tf.reduce_max(p, axis=2)  # time_steps * batch_size
-
-    time_steps = tf.shape(outputs)[0]
-    batch_size = tf.shape(outputs)[1]
-    discount = tf.pow(gamma, tf.cast(tf.range(time_steps), dtype=tf.float32))
-
-    # cost = tf.transpose(
-    #     tf.transpose((reward - baseline) * tf.log(p)) * discount
-    # )
-
-    # cost = reward * tf.log(p)
-    cost = tf.transpose(
-        tf.transpose(reward * tf.log(p)) * discount
-    )
-
+def baseline_loss(baseline, reward, weights, average_across_timesteps=False,
+                  average_across_batch=True):
+    batch_size = tf.shape(baseline)[0]
+    cost = (reward - baseline) ** 2
     cost = tf.reduce_sum(cost * weights, axis=0)
 
     if average_across_timesteps:
         total_size = tf.reduce_sum(weights, 0)
         total_size += 1e-12  # just to avoid division by 0 for all-0 weights
         cost /= total_size
-
-    cost = tf.reduce_sum(cost)
-
-    if average_across_batch:
-        cost /= tf.cast(batch_size, tf.float32)
-
-    return cost
-
-
-def baseline_loss(baseline, reward, weights, average_across_timesteps=False,
-                  average_across_batch=True):
-    batch_size = tf.shape(baseline)[0]
-    cost = (reward - baseline) ** 2
-    # cost = tf.reduce_sum(cost * weights, axis=0)
-    # if average_across_timesteps:
-    #     total_size = tf.reduce_sum(weights, 0)
-    #     total_size += 1e-12  # just to avoid division by 0 for all-0 weights
-    #     cost /= total_size
 
     cost = tf.reduce_sum(cost)
 
