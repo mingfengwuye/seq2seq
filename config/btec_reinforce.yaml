@@ -10,7 +10,6 @@ bidir: True
 use_lstm: False
 steps_per_checkpoint: 1000
 steps_per_eval: 1000
-max_epochs: 25
 max_output_len: 25
 max_input_len: 25
 weight_scale: 0.1
@@ -22,15 +21,19 @@ batch_size: 32
 dev_prefix: dev
 max_dev_size: 500
 
-# optimizer: 'adam'
 max_gradient_norm: 1.0
 optimizer: 'sgd'
-learning_rate: 0.5
-loss_function: 'xent'    # XENT has 40.68 BLEU, 38.01 TER
-baseline_steps: 2000
+learning_rate: 0.01
+reset: True
+loss_function: 'reinforce'
+baseline_steps: 3000
 reinforce_baseline: True
 reinforce_reward: sentence_bleu
 score_function: corpus_bleu
+
+learning_rate_decay_factor: 0.9
+decay_every_n_epoch: 1
+max_epochs: 25
 
 batch_mode: 'standard'
 read_ahead: 10

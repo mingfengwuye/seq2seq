@@ -9,13 +9,11 @@ use_lstm: False
 eval_burn_in: 40000
 steps_per_checkpoint: 1000
 steps_per_eval: 1000
-max_steps: 0
 weight_scale: 0.01
 batch_size: 80
 read_ahead: 20
-max_output_len: 49    # faster decoding
-max_input_len: 49     # limit memory usage
-max_gradient_norm: 1
+max_output_len: 49
+max_input_len: 49
 
 data_dir: experiments/WMT14/data
 model_dir: experiments/WMT14/reinforce
@@ -29,7 +27,17 @@ encoders:
 decoder:
     name: fr
 
-
 loss_function: 'reinforce'
-baseline_steps: 10000
-reinforce_baseline: False
+baseline_steps: 3000
+reinforce_baseline: True
+
+max_gradient_norm: 1.0
+learning_rate: 0.01
+optimizer: 'sgd'
+
+reset: True
+
+learning_rate_decay_factor: 0.5
+decay_every_n_epoch: 1
+decay_if_no_progress: 0
+max_epochs: 5
