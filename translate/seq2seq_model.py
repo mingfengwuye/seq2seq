@@ -275,6 +275,7 @@ class Seq2SeqModel(object):
         input_feed = {
             self.decoder_inputs: decoder_inputs,
             self.decoder_input_length: decoder_input_length,
+            self.feed_previous: True
         }
 
         for i in range(self.encoder_count):
