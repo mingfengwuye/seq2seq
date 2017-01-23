@@ -88,6 +88,7 @@ class Seq2SeqModel(object):
             self.dropout = None
 
         self.feed_previous = tf.constant(feed_previous, dtype=tf.float32)
+        self.feed_argmax = tf.constant(True, dtype=tf.bool)  # feed with argmax or sample
         self.use_reinforce = tf.constant(False, dtype=tf.bool)
 
         self.reinforce_reward = getattr(utils, reinforce_reward)
@@ -132,35 +133,19 @@ class Seq2SeqModel(object):
         self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
         decoder = decoders.attention_decoder if attention else decoders.decoder
 
-        self.outputs, self.attention_weights, self.decoder_states, self.beam_tensors = decoder(
+        self.decoder_outputs, self.attention_weights, self.decoder_states, self.beam_tensors, self.sampled_output = decoder(
             attention_states=self.attention_states, initial_state=self.encoder_state,
             decoder_inputs=self.decoder_inputs, feed_previous=self.feed_previous,
-            decoder_input_length=self.decoder_input_length, **parameters
+            decoder_input_length=self.decoder_input_length, feed_argmax=self.feed_argmax, **parameters
         )
 
         self.xent_loss = decoders.sequence_loss(
-            logits=self.outputs, targets=self.targets, weights=self.target_weights,
+            logits=self.decoder_outputs, targets=self.targets, weights=self.target_weights,
             softmax_loss_function=softmax_loss_function
         )
 
-        def tensor_prod(x, w, b):
-            shape = tf.shape(x)
-            x = tf.reshape(x, tf.pack([tf.mul(shape[0], shape[1]), shape[2]]))
-            x = tf.matmul(x, w) + b
-            x = tf.reshape(x, tf.pack([shape[0], shape[1], b.get_shape()[0]]))
-            return x
-
-        if output_projection is not None:
-            w, b = output_projection
-            self.outputs = tensor_prod(self.outputs, w, b)
-
         time_steps = tf.shape(self.decoder_states)[0]
         batch_size = tf.shape(self.decoder_states)[1]
-
-        output_size = self.outputs.get_shape()[2]
-        outputs = tf.reshape(self.outputs, tf.pack([time_steps * batch_size, output_size]))
-        sampled_output = tf.multinomial(tf.log(tf.nn.softmax(outputs)), num_samples=1)
-        self.sampled_output = tf.reshape(sampled_output, tf.pack([time_steps, batch_size]))
 
         if reinforce_baseline:
             state_size = self.decoder_states.get_shape()[2]
@@ -182,9 +167,22 @@ class Seq2SeqModel(object):
             self.baseline_loss = tf.constant(0.0)
 
         self.reinforce_loss = decoders.sequence_loss(
-            logits=self.outputs, targets=self.targets, weights=self.target_weights,
+            logits=self.decoder_outputs, targets=self.targets, weights=self.target_weights,
             softmax_loss_function=softmax_loss_function, reward=reward
         )
+
+        def tensor_prod(x, w, b):
+            shape = tf.shape(x)
+            x = tf.reshape(x, tf.pack([tf.mul(shape[0], shape[1]), shape[2]]))
+            x = tf.matmul(x, w) + b
+            x = tf.reshape(x, tf.pack([shape[0], shape[1], b.get_shape()[0]]))
+            return x
+
+        if output_projection is not None:
+            w, b = output_projection
+            self.outputs = tensor_prod(self.decoder_outputs, w, b)
+        else:
+            self.outputs = self.decoder_outputs
 
         if not decode_only:
             # gradients and SGD update operation for training the model
@@ -272,20 +270,24 @@ class Seq2SeqModel(object):
         batch = self.get_batch(data)
         encoder_inputs, decoder_inputs, targets, target_weights, encoder_input_length, decoder_input_length = batch
 
+        # FIXME
+        decoder_input_length = np.ones(decoder_input_length.shape,
+                                       dtype=decoder_input_length.dtype) * self.max_output_len
+
         input_feed = {
             self.decoder_inputs: decoder_inputs,
             self.decoder_input_length: decoder_input_length,
-            self.feed_previous: True
+            self.feed_previous: 1.0,
+            self.feed_argmax: False   # sample from softmax instead of taking argmax
         }
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
 
-        output_feed = [self.sampled_output, self.decoder_states]
-        outputs, decoder_states = session.run(output_feed, input_feed)
+        sampled_outputs, decoder_outputs = session.run([self.sampled_output, self.decoder_outputs], input_feed)
 
-        outputs_ = outputs.T
+        outputs_ = sampled_outputs.T
         targets_ = targets.T
         lengths_ = decoder_input_length
 
@@ -304,6 +306,7 @@ class Seq2SeqModel(object):
             else:
                 weights_ = np.ones(time_steps)
 
+            # weights_ = np.ones(time_steps)  # TODO: try this
             weights.append(weights_)
 
             score = self.reinforce_reward(output_, target_)
@@ -314,15 +317,20 @@ class Seq2SeqModel(object):
         if self.dropout is not None:
             session.run(self.dropout_on)
 
+        # import pdb; pdb.set_trace()
+        # input_feed[self.encoder_inputs[0]] = np.zeros(encoder_inputs[0].shape)
+
         input_feed = {
             **input_feed,
+            self.decoder_outputs: decoder_outputs,
             self.reward: scores,
             self.target_weights: weights,
-            self.targets: outputs,
+            self.targets: sampled_outputs,
             self.use_reinforce: True,
+            # self.sampled_output: outputs   # FIXME (does this work?)
         }
 
-        output_feed = {'loss': self.xent_loss, 'baseline_loss': self.baseline_loss}
+        output_feed = {'loss': self.xent_loss, 'baseline_loss': self.baseline_loss, 'outputs': self.sampled_output}
 
         if update_model:
             output_feed['updates'] = self.updates
@@ -331,6 +339,8 @@ class Seq2SeqModel(object):
             output_feed['baseline_updates'] = self.baseline_updates
 
         res = session.run(output_feed, input_feed)
+
+        # import pdb; pdb.set_trace()
 
         return namedtuple('output', 'loss baseline_loss')(res['loss'], res['baseline_loss'])
 
@@ -353,8 +363,8 @@ class Seq2SeqModel(object):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
 
-        outputs, attn_weights = session.run([self.outputs, self.attention_weights], input_feed)
-        return [int(np.argmax(logit, axis=1)) for logit in outputs], attn_weights  # greedy decoder
+        outputs = session.run(self.outputs, input_feed)
+        return [int(np.argmax(logit, axis=1)) for logit in outputs]  # greedy decoder
 
     def beam_search_decoding(self, session, token_ids, beam_size, ngrams=None):
         if not isinstance(session, list):

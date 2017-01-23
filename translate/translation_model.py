@@ -202,7 +202,7 @@ class TranslationModel(BaseTranslationModel):
         ]
 
         if beam_size <= 1 and not isinstance(sess, list):
-            trg_token_ids, _ = self.seq2seq_model.greedy_decoding(sess, token_ids)
+            trg_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
         else:
             hypotheses, scores = self.seq2seq_model.beam_search_decoding(sess, token_ids, beam_size, ngrams=self.ngrams)
             trg_token_ids = hypotheses[0]  # first hypothesis is the highest scoring one

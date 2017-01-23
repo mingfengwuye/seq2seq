@@ -1,6 +1,6 @@
 # Really small model on BTEC for debugging purposes
 
-dropout_rate: 0.2
+dropout_rate: 0.0
 cell_size: 64
 attn_size: 64
 embedding_size: 32
@@ -15,8 +15,8 @@ max_input_len: 25
 weight_scale: 0.1
 
 data_dir: data/btec
-model_dir: models/xent_baseline
-log_file: models/xent_baseline/log.txt
+model_dir: models/btec_xent
+log_file: models/btec_xent/log.txt
 batch_size: 32
 dev_prefix: dev
 max_dev_size: 500

@@ -222,8 +222,8 @@ def main(args=None):
             sess = [tf.Session() for _ in config.checkpoints]
             for sess_, checkpoint in zip(sess, config.checkpoints):
                 model.initialize(sess_, [checkpoint], reset=True)
-        elif (not config.checkpoints and (args.eval or args.decode is not None or args.align)
-              and os.path.isfile(best_checkpoint)):
+        elif (not config.checkpoints and (args.eval or args.decode is not None or args.align) and
+             (os.path.isfile(best_checkpoint + '.index') or os.path.isfile(best_checkpoint + '.index'))):
             # in decoding and evaluation mode, unless specified otherwise (by `checkpoints`),
             # try to load the best checkpoint)
             model.initialize(sess, [best_checkpoint], reset=True)
