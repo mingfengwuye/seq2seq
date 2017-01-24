@@ -282,7 +282,7 @@ class Seq2SeqModel(object):
             self.feed_argmax: False   # sample from softmax instead of taking argmax
         }
 
-        # FIXME: dropout, target length, target weights, less parameters
+        # FIXME: dropout, target length, target weights, less parameters, time
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]

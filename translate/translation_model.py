@@ -66,7 +66,7 @@ class BaseTranslationModel(object):
 
         with open(score_filename, 'w') as f:
             for score_, step_ in scores:
-                f.write('{} {}\n'.format(score_, step_))
+                f.write('{:.2f} {}\n'.format(score_, step_))
 
     def initialize(self, sess, checkpoints=None, reset=False, reset_learning_rate=False, **kwargs):
         self.saver = tf.train.Saver(max_to_keep=3, keep_checkpoint_every_n_hours=5, sharded=False)
