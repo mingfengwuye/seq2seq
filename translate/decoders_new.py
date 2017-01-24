@@ -440,9 +440,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         weights = [tf.zeros(tf.pack([batch_size, length])) for length in attn_lengths]
         output = tf.zeros(tf.pack([batch_size, cell.output_size]), dtype=tf.float32)
 
-        input_ = embed(input_ta.read(0))   # first symbol is BOS   # FIXME
-
-        def _time_step(time, input_, state, output, weights, output_ta, weights_ta, state_ta, sample_ta):
+        def _time_step(time, state, output, weights, output_ta, weights_ta, state_ta, sample_ta):
             r = tf.random_uniform([])
             input_ = tf.cond(tf.logical_and(time > 0, r < feed_previous),
                              lambda: sample_ta.read(time - 1),
@@ -500,12 +498,12 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             else:
                 new_output, new_state = call_cell()
 
-            return time + 1, input_, new_state, new_output, new_weights, output_ta, weights_ta, state_ta, sample_ta
+            return time + 1, new_state, new_output, new_weights, output_ta, weights_ta, state_ta, sample_ta
 
-        _, _, new_state, new_output, _, output_final_ta, weights_final, state_final_ta, sample_final_ta = tf.while_loop(
+        _, new_state, new_output, _, output_final_ta, weights_final, state_final_ta, sample_final_ta = tf.while_loop(
             cond=lambda time, *_: time < time_steps,
             body=_time_step,
-            loop_vars=(time, input_, state, output, weights, output_ta, weights_ta, state_ta, sample_ta),
+            loop_vars=(time, state, output, weights, output_ta, weights_ta, state_ta, sample_ta),
             parallel_iterations=decoder.parallel_iterations,
             swap_memory=decoder.swap_memory)
 

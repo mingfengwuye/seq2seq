@@ -322,7 +322,7 @@ class Seq2SeqModel(object):
 
         input_feed = {
             **input_feed,
-            self.decoder_outputs: decoder_outputs,
+            self.decoder_outputs: decoder_outputs,   # FIXME
             self.reward: scores,
             self.target_weights: weights,
             self.targets: sampled_outputs,
