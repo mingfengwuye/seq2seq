@@ -4,6 +4,7 @@ import math
 from tensorflow.python.ops import rnn_cell, rnn
 from translate.rnn import get_variable_unsafe, linear_unsafe, multi_rnn_unsafe, orthogonal_initializer
 from translate.rnn import multi_bidirectional_rnn_unsafe, unsafe_decorator, MultiRNNCell, GRUCell
+from translate import utils
 from collections import namedtuple
 
 
@@ -568,3 +569,59 @@ def baseline_loss(baseline, reward, weights, average_across_timesteps=False,
         cost /= tf.cast(batch_size, tf.float32)
 
     return cost
+
+
+def batch_bleu(hyps, refs):
+    fn = lambda pair: sentence_bleu(pair[0], pair[1])
+    scores = tf.map_fn(fn, (hyps, refs), dtype=tf.float32)
+    return tf.squeeze(scores, 1)
+
+
+def sentence_bleu(hyp, ref):
+    def truncate(s):
+        indices = tf.squeeze(tf.where(tf.equal(s, utils.EOS_ID)), 1)
+        indices = tf.concat(0, [tf.cast(indices, tf.int32), tf.shape(s)])
+        index = indices[0]
+        return s[:index]
+
+    hyp = tf.cast(truncate(hyp), tf.int64) + 1
+    ref = tf.cast(truncate(ref), tf.int64) + 1
+
+    max_value = tf.reduce_max(tf.concat(0, [hyp, ref]))
+    tf.assert_greater_equal(max_value ** 4, 2**63 - 1)
+
+    ngrams = [
+        (lambda s: s),
+        (lambda s: s[:-1] * max_value + s[1:]),
+        (lambda s: s[:-2] * max_value**2 + s[1:-1] * max_value + s[2:]),
+        (lambda s: s[:-3] * max_value**3 + s[1:-2] * max_value**2 + s[2:-1] * max_value + s[3:]),
+    ]
+
+    score = tf.constant(0.0)
+
+    for ngram in ngrams:
+        hyp_ngrams = ngram(hyp)
+        ref_ngrams = ngram(ref)
+
+        hyp_plus_ref = tf.unique_with_counts(tf.concat(0, [hyp_ngrams, ref_ngrams])).y
+
+        hyp_ = tf.concat(0, [hyp_ngrams, hyp_plus_ref])
+        ref_ = tf.concat(0, [ref_ngrams, hyp_plus_ref])
+
+        hyp_ = tf.nn.top_k(hyp_, tf.shape(hyp_)[0]).values
+        ref_ = tf.nn.top_k(ref_, tf.shape(ref_)[0]).values
+
+        hyp_counts = tf.unique_with_counts(hyp_).count - 1
+        ref_counts = tf.unique_with_counts(ref_).count - 1
+
+        numerator = tf.cast(tf.reduce_sum(tf.minimum(hyp_counts, ref_counts)), tf.float32) + 1.0
+        denominator = tf.cast(tf.reduce_sum(hyp_counts), tf.float32) + 1.0
+
+        score += tf.log(numerator / denominator) / 4
+
+    hyp_len = tf.cast(tf.shape(hyp), tf.float32)
+    ref_len = tf.cast(tf.shape(ref), tf.float32)
+
+    bp = tf.minimum(1.0, tf.exp(1.0 - ref_len / hyp_len))
+
+    return tf.exp(score) * bp
