@@ -124,7 +124,6 @@ class Seq2SeqModel(object):
 
         self.decoder_input_length = tf.placeholder(tf.int64, shape=[None],
                                                    name='decoder_{}_length'.format(decoder.name))
-        self.reward = tf.placeholder(tf.float32, shape=[None], name='reward')
 
         parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
                           output_projection=output_projection,
@@ -138,6 +137,8 @@ class Seq2SeqModel(object):
             decoder_inputs=self.decoder_inputs, feed_previous=self.feed_previous,
             decoder_input_length=self.decoder_input_length, feed_argmax=self.feed_argmax, **parameters
         )
+
+        self.reward = decoders.batch_bleu(tf.transpose(self.sampled_output), tf.transpose(self.targets))
 
         self.xent_loss = decoders.sequence_loss(
             logits=self.decoder_outputs, targets=self.targets, weights=self.target_weights,
@@ -167,7 +168,7 @@ class Seq2SeqModel(object):
             self.baseline_loss = tf.constant(0.0)
 
         self.reinforce_loss = decoders.sequence_loss(
-            logits=self.decoder_outputs, targets=self.targets, weights=self.target_weights,
+            logits=self.decoder_outputs, targets=self.sampled_output, weights=self.target_weights,
             softmax_loss_function=softmax_loss_function, reward=reward
         )
 
@@ -240,14 +241,11 @@ class Seq2SeqModel(object):
         batch = self.get_batch(data)
         encoder_inputs, decoder_inputs, targets, target_weights, encoder_input_length, decoder_input_length = batch
 
-        batch_size = targets.shape[1]
-
         input_feed = {
             self.target_weights: target_weights,
             self.decoder_inputs: decoder_inputs,
             self.decoder_input_length: decoder_input_length,
             self.targets: targets,
-            self.reward: np.zeros((batch_size,)),
         }
 
         for i in range(self.encoder_count):
@@ -261,6 +259,7 @@ class Seq2SeqModel(object):
             output_feed['attn_weights'] = self.attention_weights
 
         res = session.run(output_feed, input_feed)
+
         return namedtuple('output', 'loss attn_weights')(res['loss'], res.get('attn_weights'))
 
     def reinforce_step(self, session, data, update_model=True, update_baseline=True, **kwargs):
@@ -270,67 +269,26 @@ class Seq2SeqModel(object):
         batch = self.get_batch(data)
         encoder_inputs, decoder_inputs, targets, target_weights, encoder_input_length, decoder_input_length = batch
 
-        # FIXME
-        decoder_input_length = np.ones(decoder_input_length.shape,
-                                       dtype=decoder_input_length.dtype) * self.max_output_len
+        # decoder_input_length = np.ones(decoder_input_length.shape,
+        #                                dtype=decoder_input_length.dtype) * self.max_output_len
 
         input_feed = {
             self.decoder_inputs: decoder_inputs,
             self.decoder_input_length: decoder_input_length,
+            self.target_weights: target_weights,   # TODO: replace with sampled output weights
+            self.targets: targets,
+            self.use_reinforce: True,
             self.feed_previous: 1.0,
             self.feed_argmax: False   # sample from softmax instead of taking argmax
         }
+
+        # FIXME: dropout, target length, target weights, less parameters
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
 
-        sampled_outputs, decoder_outputs = session.run([self.sampled_output, self.decoder_outputs], input_feed)
-
-        outputs_ = sampled_outputs.T
-        targets_ = targets.T
-        lengths_ = decoder_input_length
-
-        scores = []
-        weights = []
-        for output_, target_, length_ in zip(outputs_, targets_, lengths_):
-            target_ = target_[:length_]    # includes first EOS (good idea?)
-
-            i, = np.where(output_ == utils.EOS_ID)  # array of indices whose value is EOS_ID
-
-            time_steps = output_.shape[0]
-            if len(i) > 0:
-                i = i[0]  # index of the first EOS symbol
-                weights_ = (np.arange(time_steps) <= i).astype(np.float32)
-                output_ = output_[:i + 1]  # includes first EOS
-            else:
-                weights_ = np.ones(time_steps)
-
-            # weights_ = np.ones(time_steps)  # TODO: try this
-            weights.append(weights_)
-
-            score = self.reinforce_reward(output_, target_)
-            scores.append(score)
-
-        weights = np.transpose(weights)
-
-        if self.dropout is not None:
-            session.run(self.dropout_on)
-
-        # import pdb; pdb.set_trace()
-        # input_feed[self.encoder_inputs[0]] = np.zeros(encoder_inputs[0].shape)
-
-        input_feed = {
-            **input_feed,
-            self.decoder_outputs: decoder_outputs,   # FIXME
-            self.reward: scores,
-            self.target_weights: weights,
-            self.targets: sampled_outputs,
-            self.use_reinforce: True,
-            # self.sampled_output: outputs   # FIXME (does this work?)
-        }
-
-        output_feed = {'loss': self.xent_loss, 'baseline_loss': self.baseline_loss, 'outputs': self.sampled_output}
+        output_feed = {'loss': self.xent_loss, 'baseline_loss': self.baseline_loss}
 
         if update_model:
             output_feed['updates'] = self.updates
@@ -339,8 +297,6 @@ class Seq2SeqModel(object):
             output_feed['baseline_updates'] = self.baseline_updates
 
         res = session.run(output_feed, input_feed)
-
-        # import pdb; pdb.set_trace()
 
         return namedtuple('output', 'loss baseline_loss')(res['loss'], res['baseline_loss'])
 

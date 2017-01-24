@@ -16,7 +16,7 @@ weight_scale: 0.1
 
 data_dir: data/btec
 model_dir: models/btec_reinforce
-# log_file: models/btec_reinforce/log.txt
+log_file: models/btec_reinforce/log.txt
 batch_size: 32
 dev_prefix: dev
 max_dev_size: 500
@@ -36,7 +36,7 @@ decay_every_n_epoch: 1
 decay_after_n_epoch: 5
 max_epochs: 25
 
-batch_mode: 'standard'  # FIXME
+batch_mode: 'standard'
 read_ahead: 10
 
 encoders:
