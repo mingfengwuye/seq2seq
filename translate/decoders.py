@@ -381,22 +381,10 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     if decoder.layers > 1:
         cell = MultiRNNCell([cell] * decoder.layers, residual_connections=decoder.residual_connections)
 
-    if output_projection is None:
-        output_size = decoder.vocab_size
-    else:
-        output_size = cell.output_size
-
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
         def embed(input_):
             if embedding is not None:
                 return tf.nn.embedding_lookup(embedding, input_)
-            else:
-                return input_
-
-        def do_proj(input_):
-            if output_projection is not None:
-                w, b = output_projection
-                return tf.nn.xw_plus_b(input_, w, b)
             else:
                 return input_
 
@@ -407,6 +395,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         input_shape = tf.shape(decoder_inputs)
         time_steps = input_shape[0]
         batch_size = input_shape[1]
+        output_size = decoder.vocab_size
         state_size = cell.state_size
 
         if initial_state is not None:
@@ -430,60 +419,52 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
         zero_output = tf.zeros(tf.pack([batch_size, cell.output_size]), tf.float32)
 
-        output_ta = tf.TensorArray(dtype=tf.float32, size=time_steps, clear_after_read=False)
-        state_ta = tf.TensorArray(dtype=tf.float32, size=time_steps)
-        input_ta = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False).unpack(
-            tf.cast(decoder_inputs, tf.int64))
-        sample_ta = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False)
-        weights_ta = tf.TensorArray(dtype=tf.float32, size=time_steps)
+        proj_outputs = tf.TensorArray(dtype=tf.float32, size=time_steps, clear_after_read=False)
+        decoder_outputs = tf.TensorArray(dtype=tf.float32, size=time_steps)
+
+        inputs = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False).unpack(
+                                tf.cast(decoder_inputs, tf.int64))
+        samples = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False)
 
         attn_lengths = [tf.shape(states)[1] for states in attention_states]
-        weights = [tf.zeros(tf.pack([batch_size, length])) for length in attn_lengths]
+
+        weights = tf.TensorArray(dtype=tf.float32, size=time_steps)
+        initial_weights = [tf.zeros(tf.pack([batch_size, length])) for length in attn_lengths]
+
         output = tf.zeros(tf.pack([batch_size, cell.output_size]), dtype=tf.float32)
 
-        input_ = embed(input_ta.read(0))   # first symbol is BOS   # FIXME
+        initial_input = embed(inputs.read(0))   # first symbol is BOS   # FIXME
 
-        def _time_step(time, input_, state, output, weights, output_ta, weights_ta, state_ta, sample_ta):
-            r = tf.random_uniform([])
-            input_ = tf.cond(tf.logical_and(time > 0, r < feed_previous),
-                             lambda: sample_ta.read(time - 1),
-                             lambda: input_ta.read(time))
-
-            # restore some shape information
-            input_.set_shape([None])
-            input_ = embed(input_)
-
-            # using decoder state instead of decoder output in the attention model seems
-            # to give much better results
-            context_vector, new_weights = attention_(state, prev_weights=weights)
+        def _time_step(time, input_, state, output,
+                       proj_outputs, decoder_outputs, samples,
+                       weights, prev_weights):
+            context_vector, new_weights = attention_(state, prev_weights=prev_weights)
+            weights = weights.write(time, new_weights)
 
             # FIXME use `output` or `state` here?
             output_ = linear_unsafe([state, input_, context_vector], decoder.cell_size, False, scope='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.pack([batch_size, decoder.cell_size // 2, 2])), axis=2)
             output_ = linear_unsafe(output_, decoder.embedding_size, False, scope='softmax0')
-
-            state_ta = state_ta.write(time, output_)
-
+            decoder_outputs = decoder_outputs.write(time, output_)
             output_ = linear_unsafe(output_, output_size, True, scope='softmax1')
-            output_ta = output_ta.write(time, output_)
+            proj_outputs = proj_outputs.write(time, output_)
 
-            argmax = lambda: tf.argmax(do_proj(output_), 1)
-            softmax = lambda: tf.squeeze(tf.multinomial(tf.log(tf.nn.softmax(do_proj(output_))), num_samples=1),
+            argmax = lambda: tf.argmax(output_, 1)
+            softmax = lambda: tf.squeeze(tf.multinomial(tf.log(tf.nn.softmax(output_)), num_samples=1),
                                          axis=1)
-            target = lambda: input_ta.read(time + 1)
+            target = lambda: inputs.read(time + 1)
 
             sample = tf.case([
-                (tf.logical_and(time < time_steps - 1, r >= feed_previous), target),
+                (tf.logical_and(time < time_steps - 1, tf.random_uniform([]) >= feed_previous), target),
                 (tf.logical_not(feed_argmax), softmax)],
                 default=argmax)   # default case is useful for beam-search
 
             sample.set_shape([None])
             sample = tf.stop_gradient(sample)
 
-            sample_ta = sample_ta.write(time, sample)
+            samples = samples.write(time, sample)
             input_ = embed(sample)
 
-            # weights_ta = weights_ta.write(time, weights)
             x = tf.concat(1, [input_, context_vector])
             call_cell = lambda: unsafe_decorator(cell)(x, state)
 
@@ -501,36 +482,33 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             else:
                 new_output, new_state = call_cell()
 
-            return time + 1, input_, new_state, new_output, new_weights, output_ta, weights_ta, state_ta, sample_ta
+            return time + 1, input_, new_state, new_output, proj_outputs, decoder_outputs, samples, weights, new_weights
 
-        _, _, new_state, new_output, _, output_final_ta, weights_final, state_final_ta, sample_final_ta = tf.while_loop(
+        _, _, new_state, new_output, proj_outputs, decoder_outputs, samples, weights, _ = tf.while_loop(
             cond=lambda time, *_: time < time_steps,
             body=_time_step,
-            loop_vars=(time, input_, state, output, weights, output_ta, weights_ta, state_ta, sample_ta),
+            loop_vars=(time, initial_input, state, output, proj_outputs, decoder_outputs, samples, weights,
+                       initial_weights),
             parallel_iterations=decoder.parallel_iterations,
             swap_memory=decoder.swap_memory)
 
-        outputs = output_final_ta.pack()
-        states = state_final_ta.pack()
-        samples = sample_final_ta.pack()
+        proj_outputs = proj_outputs.pack()
+        decoder_outputs = decoder_outputs.pack()
+        samples = samples.pack()
 
         beam_tensors = namedtuple('beam_tensors', 'state new_state output new_output')
-        return outputs, weights, states, beam_tensors(state, new_state, output, new_output), samples
+        return proj_outputs, None, decoder_outputs, beam_tensors(state, new_state, output, new_output), samples
 
 
 def sequence_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True,
-                  softmax_loss_function=None, reward=None):
+                  reward=None):
     time_steps = tf.shape(targets)[0]
     batch_size = tf.shape(targets)[1]
 
     logits_ = tf.reshape(logits, tf.pack([time_steps * batch_size, logits.get_shape()[2].value]))
     targets_ = tf.reshape(targets, tf.pack([time_steps * batch_size]))
 
-    if softmax_loss_function is None:
-        crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(logits_, targets_)
-    else:
-        crossent = softmax_loss_function(logits_, targets_)
-
+    crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(logits_, targets_)
     crossent = tf.reshape(crossent, tf.pack([time_steps, batch_size]))
 
     if reward is not None:
@@ -572,9 +550,13 @@ def baseline_loss(baseline, reward, weights, average_across_timesteps=False,
 
 
 def batch_bleu(hyps, refs):
+    """
+    :param hyps: tensor of shape (batch_size x hyp_time_steps)
+    :param refs: tensor of shape (batch_size x ref_time_steps)
+    :return: tensor of shape (batch_size,)
+    """
     fn = lambda pair: sentence_bleu(pair[0], pair[1])
-    scores = tf.map_fn(fn, (hyps, refs), dtype=tf.float32)
-    return tf.squeeze(scores, 1)
+    return tf.map_fn(fn, (hyps, refs), dtype=tf.float32)
 
 
 def sentence_bleu(hyp, ref):
@@ -584,8 +566,8 @@ def sentence_bleu(hyp, ref):
         index = indices[0]
         return s[:index]
 
-    hyp = tf.cast(truncate(hyp), tf.int64) + 1
-    ref = tf.cast(truncate(ref), tf.int64) + 1
+    hyp = tf.cast(truncate(hyp), tf.int64)
+    ref = tf.cast(truncate(ref), tf.int64)
 
     max_value = tf.reduce_max(tf.concat(0, [hyp, ref]))
     tf.assert_greater_equal(max_value ** 4, 2**63 - 1)
@@ -617,10 +599,10 @@ def sentence_bleu(hyp, ref):
         numerator = tf.cast(tf.reduce_sum(tf.minimum(hyp_counts, ref_counts)), tf.float32) + 1.0
         denominator = tf.cast(tf.reduce_sum(hyp_counts), tf.float32) + 1.0
 
-        score += tf.log(numerator / denominator) / 4
+        score += tf.log(numerator / denominator) / len(ngrams)
 
-    hyp_len = tf.cast(tf.shape(hyp), tf.float32)
-    ref_len = tf.cast(tf.shape(ref), tf.float32)
+    hyp_len = tf.cast(tf.shape(hyp)[0], tf.float32)
+    ref_len = tf.cast(tf.shape(ref)[0], tf.float32)
 
     bp = tf.minimum(1.0, tf.exp(1.0 - ref_len / hyp_len))
 

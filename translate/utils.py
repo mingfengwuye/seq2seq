@@ -155,7 +155,7 @@ def sentence_bleu(hypothesis, reference, smoothing=True, order=4, **kwargs):
         ref_ngrams = Counter(zip(*[reference[j:] for j in range(i + 1)]))
 
         numerator = sum(min(count, ref_ngrams[bigram]) for bigram, count in hyp_ngrams.items())
-        denominator = max(1, sum(hyp_ngrams.values()))
+        denominator = sum(hyp_ngrams.values())
 
         if smoothing:
             numerator += 1
@@ -169,6 +169,7 @@ def sentence_bleu(hypothesis, reference, smoothing=True, order=4, **kwargs):
             log_score += math.log(score) / order
 
     bp = min(1, math.exp(1 - len(reference) / len(hypothesis)))
+
     return math.exp(log_score) * bp
 
 

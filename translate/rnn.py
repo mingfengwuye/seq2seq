@@ -138,8 +138,8 @@ def apply_time_pooling(inputs, sequence_length, stride, pooling_avg=False):
 def unsafe_decorator(fun):
     """
     Wrapper that automatically handles the `reuse' parameter.
-    This is rather unsafe, as it can lead to reusing variables
-    by mistake, without knowing about it.
+    This is rather risky, as it can lead to reusing variables
+    by mistake.
     """
 
     def fun_(*args, **kwargs):
@@ -232,56 +232,56 @@ class GRUCell(rnn_cell.RNNCell):
 
 
 def linear(args, output_size, bias, bias_start=0.0, scope=None, initializer=None):
-  """
-  Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
+    """
+    Linear map: sum_i(args[i] * W[i]), where W[i] is a variable.
 
-  Same as as `tf.nn.rnn_cell._linear`, with the addition of an `initializer` parameter.
+    Same as as `tf.nn.rnn_cell._linear`, with the addition of an `initializer` parameter.
 
-  Args:
-    args: a 2D Tensor or a list of 2D, batch x n, Tensors.
-    output_size: int, second dimension of W[i].
-    bias: boolean, whether to add a bias term or not.
-    bias_start: starting value to initialize the bias; 0 by default.
-    scope: VariableScope for the created subgraph; defaults to "Linear".
-    initializer: used to initialize W
+    Args:
+      args: a 2D Tensor or a list of 2D, batch x n, Tensors.
+      output_size: int, second dimension of W[i].
+      bias: boolean, whether to add a bias term or not.
+      bias_start: starting value to initialize the bias; 0 by default.
+      scope: VariableScope for the created subgraph; defaults to "Linear".
+      initializer: used to initialize W
 
-  Returns:
-    A 2D Tensor with shape [batch x output_size] equal to
-    sum_i(args[i] * W[i]), where W[i]s are newly created matrices.
+    Returns:
+      A 2D Tensor with shape [batch x output_size] equal to
+      sum_i(args[i] * W[i]), where W[i]s are newly created matrices.
 
-  Raises:
-    ValueError: if some of the arguments has unspecified or wrong shape.
-  """
-  if args is None or (tf.nn.nest.is_sequence(args) and not args):
-    raise ValueError("`args` must be specified")
-  if not tf.nn.nest.is_sequence(args):
-    args = [args]
+    Raises:
+      ValueError: if some of the arguments has unspecified or wrong shape.
+    """
+    if args is None or (tf.nn.nest.is_sequence(args) and not args):
+        raise ValueError("`args` must be specified")
+    if not tf.nn.nest.is_sequence(args):
+        args = [args]
 
-  # calculate the total size of arguments on dimension 1
-  total_arg_size = 0
-  shapes = [a.get_shape().as_list() for a in args]
-  for shape in shapes:
-    if len(shape) != 2:
-      raise ValueError("Linear is expecting 2D arguments: %s" % str(shapes))
-    if not shape[1]:
-      raise ValueError("Linear expects shape[1] of arguments: %s" % str(shapes))
-    else:
-      total_arg_size += shape[1]
+    # calculate the total size of arguments on dimension 1
+    total_arg_size = 0
+    shapes = [a.get_shape().as_list() for a in args]
+    for shape in shapes:
+        if len(shape) != 2:
+            raise ValueError("Linear is expecting 2D arguments: %s" % str(shapes))
+        if not shape[1]:
+            raise ValueError("Linear expects shape[1] of arguments: %s" % str(shapes))
+        else:
+            total_arg_size += shape[1]
 
-  dtype = [a.dtype for a in args][0]
+    dtype = [a.dtype for a in args][0]
 
-  with tf.variable_scope(scope or "Linear"):
-    matrix = tf.get_variable("Matrix", [total_arg_size, output_size], dtype=dtype,
-                             initializer=initializer)
-    if len(args) == 1:
-      res = tf.matmul(args[0], matrix)
-    else:
-      res = tf.matmul(tf.concat(1, args), matrix)
-    if not bias:
-      return res
-    bias_term = tf.get_variable("Bias", [output_size], dtype=dtype,
-                                initializer=tf.constant_initializer(bias_start, dtype=dtype))
-  return res + bias_term
+    with tf.variable_scope(scope or "Linear"):
+        matrix = tf.get_variable("Matrix", [total_arg_size, output_size], dtype=dtype,
+                                 initializer=initializer)
+        if len(args) == 1:
+            res = tf.matmul(args[0], matrix)
+        else:
+            res = tf.matmul(tf.concat(1, args), matrix)
+        if not bias:
+            return res
+        bias_term = tf.get_variable("Bias", [output_size], dtype=dtype,
+                                    initializer=tf.constant_initializer(bias_start, dtype=dtype))
+    return res + bias_term
 
 
 def orthogonal_initializer(scale=1.0, dtype=tf.float32):

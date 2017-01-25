@@ -62,24 +62,6 @@ class Seq2SeqModel(object):
         self.max_input_len = max_input_len
         self.len_normalization = len_normalization
 
-        # if we use sampled softmax, we need an output projection
-        # sampled softmax only makes sense if we sample less than vocabulary size
-        if num_samples == 0 or num_samples >= self.trg_vocab_size:
-            output_projection = None
-            softmax_loss_function = None
-        else:
-            with tf.device('/cpu:0'):
-                with variable_scope.variable_scope('decoder_{}'.format(decoder.name)):
-                    w = decoders.get_variable_unsafe('proj_w', [self.trg_cell_size, self.trg_vocab_size])
-                    w_t = tf.transpose(w)
-                    b = decoders.get_variable_unsafe('proj_b', [self.trg_vocab_size])
-                output_projection = (w, b)
-
-            def softmax_loss_function(inputs, labels):
-                with tf.device('/cpu:0'):
-                    labels = tf.reshape(labels, [-1, 1])
-                    return tf.nn.sampled_softmax_loss(w_t, b, inputs, labels, num_samples, self.trg_vocab_size)
-
         if dropout_rate > 0:
             self.dropout = tf.Variable(1 - dropout_rate, trainable=False, name='dropout_keep_prob')
             self.dropout_off = self.dropout.assign(1.0)
@@ -126,27 +108,26 @@ class Seq2SeqModel(object):
                                                    name='decoder_{}_length'.format(decoder.name))
 
         parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
-                          output_projection=output_projection,
                           encoder_input_length=self.encoder_input_length)
 
         self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
         decoder = decoders.attention_decoder if attention else decoders.decoder
 
-        self.decoder_outputs, self.attention_weights, self.decoder_states, self.beam_tensors, self.sampled_output = decoder(
+        self.outputs, self.attention_weights, self.decoder_states, self.beam_tensors, self.sampled_output = decoder(
             attention_states=self.attention_states, initial_state=self.encoder_state,
             decoder_inputs=self.decoder_inputs, feed_previous=self.feed_previous,
             decoder_input_length=self.decoder_input_length, feed_argmax=self.feed_argmax, **parameters
         )
 
-        self.reward = decoders.batch_bleu(tf.transpose(self.sampled_output), tf.transpose(self.targets))
-
-        self.xent_loss = decoders.sequence_loss(
-            logits=self.decoder_outputs, targets=self.targets, weights=self.target_weights,
-            softmax_loss_function=softmax_loss_function
-        )
-
         time_steps = tf.shape(self.decoder_states)[0]
         batch_size = tf.shape(self.decoder_states)[1]
+
+        self.transposed_sampled_output = tf.transpose(self.sampled_output)
+
+        with tf.device('/cpu:0'):
+            self.reward = decoders.batch_bleu(tf.transpose(self.sampled_output), tf.transpose(self.targets))
+
+        self.xent_loss = decoders.sequence_loss(logits=self.outputs, targets=self.targets, weights=self.target_weights)
 
         if reinforce_baseline:
             state_size = self.decoder_states.get_shape()[2]
@@ -168,22 +149,9 @@ class Seq2SeqModel(object):
             self.baseline_loss = tf.constant(0.0)
 
         self.reinforce_loss = decoders.sequence_loss(
-            logits=self.decoder_outputs, targets=self.sampled_output, weights=self.target_weights,
-            softmax_loss_function=softmax_loss_function, reward=reward
+            logits=self.outputs, targets=self.sampled_output, weights=self.target_weights,
+            reward=reward
         )
-
-        def tensor_prod(x, w, b):
-            shape = tf.shape(x)
-            x = tf.reshape(x, tf.pack([tf.mul(shape[0], shape[1]), shape[2]]))
-            x = tf.matmul(x, w) + b
-            x = tf.reshape(x, tf.pack([shape[0], shape[1], b.get_shape()[0]]))
-            return x
-
-        if output_projection is not None:
-            w, b = output_projection
-            self.outputs = tensor_prod(self.decoder_outputs, w, b)
-        else:
-            self.outputs = self.decoder_outputs
 
         if not decode_only:
             # gradients and SGD update operation for training the model
@@ -212,6 +180,7 @@ class Seq2SeqModel(object):
                 lambda: self.reinforce_loss,
                 lambda: self.xent_loss
             )
+            self.loss = self.xent_loss
 
             gradients = tf.gradients(self.loss, params)
             clipped_gradients, self.gradient_norms = tf.clip_by_global_norm(gradients, max_gradient_norm)

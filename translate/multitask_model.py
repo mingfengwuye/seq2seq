@@ -112,7 +112,7 @@ class MultiTaskModel(BaseTranslationModel):
                     else:
                         baseline_loss_ = ''
 
-                    utils.log('{} step {} learning rate {:.4f} step-time {:.3f}{} loss {:.4f}'.format(
+                    utils.log('{} step {} learning rate {:.4f} step-time {:.4f}{} loss {:.4f}'.format(
                         model_.name, model_.global_step.eval(sess), model_.learning_rate.eval(),
                         step_time_, baseline_loss_, loss_))
                     
