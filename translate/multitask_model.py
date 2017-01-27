@@ -94,9 +94,9 @@ class MultiTaskModel(BaseTranslationModel):
                     model.last_decay = epoch
 
             if sgd_after_n_epoch is not None and epoch >= sgd_after_n_epoch:
-                if model.seq2seq_model.sgd_updates is not model.seq2seq_model.updates:
-                    model.seq2seq_model.updates = model.seq2seq_model.sgd_updates
+                if not model.use_sgd:
                     utils.debug('  starting to use SGD')
+                    model.use_sgd = True
 
             if steps_per_checkpoint and self.global_step % steps_per_checkpoint == 0:
                 for model_ in self.models:
@@ -122,7 +122,7 @@ class MultiTaskModel(BaseTranslationModel):
 
                     model_.previous_losses.append(loss_)
                     model_.loss, model_.time, model_.steps = 0, 0, 0
-                    model_.eval_step(sess, loss_function=loss_function)
+                    model_.eval_step(sess)
 
                 self.save(sess)
 
@@ -155,7 +155,7 @@ class MultiTaskModel(BaseTranslationModel):
 
                 self.manage_best_checkpoints(self.global_step, score)
 
-            if 0 < max_steps <= self.global_step and 0 < max_epochs <= epoch:
+            if 0 < max_steps <= self.global_step or 0 < max_epochs <= epoch:
                 utils.log('finished training')
                 # TODO: save models
                 return

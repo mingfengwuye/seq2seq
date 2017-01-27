@@ -164,11 +164,11 @@ class TranslationModel(BaseTranslationModel):
 
     def train_step(self, sess, loss_function='xent'):
         if loss_function == 'reinforce':
-            fun = self.seq2seq_model.reinforce_step   # FIXME
+            fun = self.seq2seq_model.reinforce_step
         else:
             fun = self.seq2seq_model.step
 
-        return fun(sess, next(self.batch_iterator), update_model=True, update_baseline=True)
+        return fun(sess, next(self.batch_iterator), update_model=True, update_baseline=True, use_sgd=self.use_sgd)
 
     def baseline_step(self, sess):
         return self.seq2seq_model.reinforce_step(sess,
@@ -176,51 +176,68 @@ class TranslationModel(BaseTranslationModel):
                                                  update_model=False,
                                                  update_baseline=True).baseline_loss
 
-    def eval_step(self, sess, loss_function='xent'):
-        if loss_function == 'reinforce':
-            # fun = self.seq2seq_model.reinforce_step  # TODO (print both, same for train loss)
-            fun = self.seq2seq_model.step
-        else:
-            fun = self.seq2seq_model.step
-
+    def eval_step(self, sess):
         # compute perplexity on dev set
         for dev_batches in self.dev_batches:
             eval_loss = sum(
-                fun(sess, batch, update_model=False, update_baseline=False).loss * len(batch)
+                self.seq2seq_model.step(sess, batch, update_model=False, update_baseline=False).loss * len(batch)
                 for batch in dev_batches
             )
             eval_loss /= sum(map(len, dev_batches))
 
             utils.log("  eval: loss {:.2f}".format(eval_loss))
 
-    def _decode_sentence(self, sess, src_sentences, beam_size=1, remove_unk=False):
-        # TODO: merge this with read_dataset
-        token_ids = [
-            utils.sentence_to_token_ids(sentence, vocab.vocab, character_level=char_level)
-            if vocab is not None else sentence  # when `sentence` is not a sentence but a vector...
-            for vocab, sentence, char_level in zip(self.vocabs, src_sentences, self.character_level)
-        ]
+    def _decode_sentence(self, sess, sentence_tuple, beam_size=1, remove_unk=False, early_stopping=True):
+        return next(self._decode_batch(sess, [sentence_tuple], beam_size, remove_unk, early_stopping))
 
-        if beam_size <= 1 and not isinstance(sess, list):
-            trg_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
+    def _decode_batch(self, sess, sentence_tuples, batch_size, beam_size=1, remove_unk=False, early_stopping=True):
+        beam_search = beam_size > 1 or isinstance(sess, list)
+
+        if beam_search:
+            batch_size = 1
+
+        if batch_size == 1:
+            batches = ([sentence_tuple] for sentence_tuple in sentence_tuples)   # lazy
         else:
-            hypotheses, scores = self.seq2seq_model.beam_search_decoding(sess, token_ids, beam_size, ngrams=self.ngrams)
-            trg_token_ids = hypotheses[0]  # first hypothesis is the highest scoring one
+            batch_count = int(math.ceil(len(sentence_tuples) / batch_size))
+            batches = [sentence_tuples[i * batch_size:(i + 1) * batch_size] for i in range(batch_count)]
 
-        # remove EOS symbols from output
-        if utils.EOS_ID in trg_token_ids:
-            trg_token_ids = trg_token_ids[:trg_token_ids.index(utils.EOS_ID)]
+        def map_to_ids(sentence_tuple):
+            token_ids = [
+                utils.sentence_to_token_ids(sentence, vocab.vocab, character_level=char_level)
+                if vocab is not None else sentence  # when `sentence` is not a sentence but a vector...
+                for vocab, sentence, char_level in zip(self.vocabs, sentence_tuple, self.character_level)
+            ]
+            return token_ids
 
-        trg_tokens = [self.trg_vocab.reverse[i] if i < len(self.trg_vocab.reverse) else utils._UNK
-                      for i in trg_token_ids]
+        for batch in batches:
+            token_ids = list(map(map_to_ids, batch))
 
-        if remove_unk:
-            trg_tokens = [token for token in trg_tokens if token != utils._UNK]
+            if beam_search:
+                hypotheses, _ = self.seq2seq_model.beam_search_decoding(sess, token_ids[0], beam_size,
+                                                                        ngrams=self.ngrams,
+                                                                        early_stopping=early_stopping)
+                batch_token_ids = [hypotheses[0]]  # first hypothesis is the highest scoring one
 
-        if self.character_level[-1]:
-            return ''.join(trg_tokens)
-        else:
-            return ' '.join(trg_tokens).replace('@@ ', '')  # merge subword units
+            else:
+                batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
+
+            for trg_token_ids in batch_token_ids:
+                trg_token_ids = list(trg_token_ids)
+
+                if utils.EOS_ID in trg_token_ids:
+                    trg_token_ids = trg_token_ids[:trg_token_ids.index(utils.EOS_ID)]
+
+                trg_tokens = [self.trg_vocab.reverse[i] if i < len(self.trg_vocab.reverse) else utils._UNK
+                              for i in trg_token_ids]
+
+                if remove_unk:
+                    trg_tokens = [token for token in trg_tokens if token != utils._UNK]
+
+                if self.character_level[-1]:
+                    yield ''.join(trg_tokens)
+                else:
+                    yield ' '.join(trg_tokens).replace('@@ ', '')  # merge subword units
 
     def align(self, sess, output=None, wav_files=None, **kwargs):
         if len(self.src_ext) != 1:
@@ -257,7 +274,7 @@ class TranslationModel(BaseTranslationModel):
             output_file = '{}.{}.svg'.format(output, line_id + 1) if output is not None else None
             utils.heatmap(src_tokens, trg_tokens, weights.T, wav_file=wav_file, output_file=output_file)
 
-    def decode(self, sess, beam_size, output=None, remove_unk=False, **kwargs):
+    def decode(self, sess, beam_size, output=None, remove_unk=False, early_stopping=True, **kwargs):
         utils.log('starting decoding')
 
         # empty `test` means that we read from standard input, which is not possible with multiple encoders
@@ -271,16 +288,26 @@ class TranslationModel(BaseTranslationModel):
         try:
             output_file = sys.stdout if output is None else open(output, 'w')
 
-            for lines in utils.read_lines(self.filenames.test, self.src_ext, self.binary_input):
-                trg_sentence = self._decode_sentence(sess, lines, beam_size, remove_unk)
-                output_file.write(trg_sentence + '\n')
+            lines = utils.read_lines(self.filenames.test, self.src_ext, self.binary_input)
+
+            if self.filenames.test is None:   # interactive mode
+                batch_size = 1
+            else:
+                batch_size = self.batch_size
+                lines = list(lines)
+
+            hypothesis_iter = self._decode_batch(sess, lines, batch_size, beam_size=beam_size,
+                                                 early_stopping=early_stopping, remove_unk=remove_unk)
+
+            for hypothesis in hypothesis_iter:
+                output_file.write(hypothesis + '\n')
                 output_file.flush()
         finally:
             if output_file is not None:
                 output_file.close()
 
     def evaluate(self, sess, beam_size, score_function, on_dev=True, output=None, remove_unk=False, max_dev_size=None,
-                 auxiliary_score_function=None, script_dir='scripts', **kwargs):
+                 script_dir='scripts', early_stopping=True, **kwargs):
         """
         :param score_function: name of the scoring function used to score and rank models
           (typically 'bleu_score')
@@ -288,8 +315,6 @@ class TranslationModel(BaseTranslationModel):
         :param output: save the hypotheses to this file
         :param remove_unk: remove the UNK symbols from the output
         :param max_dev_size: maximum number of lines to read from dev files
-        :param auxiliary_score_function: optional scoring function used to display a more
-          detailed summary.
         :param script_dir: parameter of scoring functions
         :return: scores of each corpus to evaluate
         """
@@ -317,11 +342,17 @@ class TranslationModel(BaseTranslationModel):
             try:
                 output_file = open(output_, 'w') if output_ is not None else None
 
-                for *src_sentences, trg_sentence in lines:
-                    hypotheses.append(self._decode_sentence(sess, src_sentences, beam_size, remove_unk))
-                    references.append(trg_sentence.strip().replace('@@ ', ''))
+                *src_sentences, trg_sentences = zip(*lines)
+                src_sentences = list(zip(*src_sentences))
+
+                hypothesis_iter = self._decode_batch(sess, src_sentences, self.batch_size, beam_size=beam_size,
+                                                     early_stopping=early_stopping, remove_unk=remove_unk)
+                for hypothesis, reference in zip(hypothesis_iter, trg_sentences):
+                    hypotheses.append(hypothesis)
+                    references.append(reference.strip().replace('@@ ', ''))
+
                     if output_file is not None:
-                        output_file.write(hypotheses[-1] + '\n')
+                        output_file.write(hypothesis + '\n')
                         output_file.flush()
 
             finally:
@@ -331,13 +362,6 @@ class TranslationModel(BaseTranslationModel):
             # main scoring function (used to choose which checkpoints to keep)
             # default is utils.bleu_score
             score, score_summary = getattr(utils, score_function)(hypotheses, references, script_dir=script_dir)
-
-            # optionally use an auxiliary function to get different scoring information
-            if auxiliary_score_function is not None and auxiliary_score_function != score_function:
-                try:
-                    _, score_summary = getattr(utils, auxiliary_score_function)(hypotheses, references, script_dir)
-                except:
-                    pass
 
             # print the scoring information
             score_info = []

@@ -2,6 +2,7 @@ import tensorflow as tf
 import functools
 import math
 from tensorflow.python.ops import rnn_cell, rnn
+from tensorflow.contrib.layers import fully_connected
 from translate.rnn import get_variable_unsafe, linear_unsafe, multi_rnn_unsafe, orthogonal_initializer
 from translate.rnn import multi_bidirectional_rnn_unsafe, unsafe_decorator, MultiRNNCell, GRUCell
 from translate import utils
@@ -336,8 +337,7 @@ def decoder(*args, **kwargs):
 
 
 def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
-                      decoder_input_length=None, output_projection=None, dropout=None, feed_previous=0.0,
-                      feed_argmax=True, **kwargs):
+                      decoder_input_length=None, dropout=None, feed_previous=0.0, feed_argmax=True, **kwargs):
     """
     :param decoder_inputs: tensor of shape (batch_size, output_length)
     :param initial_state: initial state of the decoder (usually the final state of the encoder),
@@ -348,7 +348,6 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     :param encoders: configuration of the encoders
     :param decoder: configuration of the decoder
     :param decoder_input_length:
-    :param output_projection: None if no softmax sampling, or tuple (weight matrix, bias vector)
     :param dropout: scalar tensor or None, specifying the keep probability (1 - dropout)
     :param feed_previous: scalar tensor corresponding to the probability to use previous decoder output
       instead of the groundtruth as input for the decoder (1 when decoding, between 0 and 1 when training)
@@ -512,7 +511,7 @@ def sequence_loss(logits, targets, weights, average_across_timesteps=False, aver
     crossent = tf.reshape(crossent, tf.pack([time_steps, batch_size]))
 
     if reward is not None:
-        crossent *= reward
+        crossent *= tf.stop_gradient(reward)
 
     log_perp = tf.reduce_sum(crossent * weights, 0)
 
@@ -530,10 +529,10 @@ def sequence_loss(logits, targets, weights, average_across_timesteps=False, aver
         return cost
 
 
-def baseline_loss(baseline, reward, weights, average_across_timesteps=False,
+def baseline_loss(reward, weights, average_across_timesteps=False,
                   average_across_batch=True):
-    batch_size = tf.shape(baseline)[0]
-    cost = (reward - baseline) ** 2
+    batch_size = tf.shape(reward)[0]
+    cost = reward ** 2
     cost = tf.reduce_sum(cost * weights, axis=0)
 
     if average_across_timesteps:
@@ -549,19 +548,19 @@ def baseline_loss(baseline, reward, weights, average_across_timesteps=False,
     return cost
 
 
-def batch_bleu(hyps, refs):
+def batch_bleu(hyps, refs, eos_id):
     """
     :param hyps: tensor of shape (batch_size x hyp_time_steps)
     :param refs: tensor of shape (batch_size x ref_time_steps)
     :return: tensor of shape (batch_size,)
     """
-    fn = lambda pair: sentence_bleu(pair[0], pair[1])
+    fn = lambda pair: sentence_bleu(pair[0], pair[1], eos_id)
     return tf.map_fn(fn, (hyps, refs), dtype=tf.float32)
 
 
-def sentence_bleu(hyp, ref):
+def sentence_bleu(hyp, ref, eos_id):
     def truncate(s):
-        indices = tf.squeeze(tf.where(tf.equal(s, utils.EOS_ID)), 1)
+        indices = tf.squeeze(tf.where(tf.equal(s, eos_id)), 1)
         indices = tf.concat(0, [tf.cast(indices, tf.int32), tf.shape(s)])
         index = indices[0]
         return s[:index]
@@ -606,4 +605,49 @@ def sentence_bleu(hyp, ref):
 
     bp = tf.minimum(1.0, tf.exp(1.0 - ref_len / hyp_len))
 
-    return tf.exp(score) * bp
+    return tf.stop_gradient(tf.exp(score) * bp)
+
+
+def reinforce_baseline(decoder_states, reward):
+    time_steps = tf.shape(decoder_states)[0]
+    batch_size = tf.shape(decoder_states)[1]
+    state_size = decoder_states.get_shape()[2]
+
+    states = tf.reshape(decoder_states, shape=tf.pack([time_steps * batch_size, state_size]))
+
+    baseline = fully_connected(tf.stop_gradient(states), num_outputs=1, activation_fn=None,
+                               scope='reward_baseline',
+                               weights_initializer=tf.constant_initializer(0.0),
+                               biases_initializer=tf.constant_initializer(0.01))
+
+    baseline = tf.reshape(baseline, shape=tf.pack([time_steps, batch_size]))
+
+    reward = tf.reshape(tf.tile(reward, [time_steps]),
+                        shape=tf.pack([time_steps, batch_size]))
+    return reward - baseline
+
+
+def softmax(x, dim=-1, temperature=1.0):
+    """
+    Softmax with a `temperature` parameter:
+        - 1.0: normal softmax
+        - < 0: closer to argmax
+        - > 1: closer to uniform distribution
+    """
+    e = tf.exp(x / temperature)
+    return e / tf.reduce_sum(e, axis=dim, keep_dims=True)
+
+
+def get_weights(sequence, eos_id, time_major=False, include_first_eos=True):
+    axis = 1 - time_major
+
+    weights = (1.0 - tf.minimum(
+        tf.cumsum(tf.cast(tf.equal(sequence, eos_id), tf.float32), axis=axis), 1.0))
+
+    if include_first_eos:
+        weights = weights[:-1,:] if time_major else weights[:,:-1]
+        shape = [tf.shape(weights)[0], tf.shape(weights)[1]]
+        shape[axis] = 1
+        weights = tf.concat(axis, [tf.ones(tf.pack(shape)), weights])
+
+    return tf.stop_gradient(weights)

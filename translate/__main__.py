@@ -234,7 +234,6 @@ def main(args=None):
         # Inspect variables:
         # tf.get_variable_scope().reuse_variables()
         # import pdb; pdb.set_trace()
-
         if args.decode is not None:
             model.decode(sess, **config)
         elif args.eval:
