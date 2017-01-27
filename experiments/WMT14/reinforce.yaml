@@ -6,7 +6,6 @@ embedding_size: 620
 layers: 1
 bidir: True
 use_lstm: False
-eval_burn_in: 0
 steps_per_checkpoint: 1000
 steps_per_eval: 1000
 weight_scale: 0.01
@@ -37,5 +36,5 @@ reset: True
 
 learning_rate_decay_factor: 0.5
 decay_every_n_epoch: 1
-decay_if_no_progress: 0
+decay_if_no_progress: null
 max_epochs: 5

@@ -6,7 +6,6 @@ embedding_size: 620
 layers: 1
 bidir: True
 use_lstm: False
-eval_burn_in: 40000
 steps_per_checkpoint: 1000
 steps_per_eval: 4000
 max_steps: 0
