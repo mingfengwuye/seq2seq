@@ -10,9 +10,10 @@ eval_burn_in: 40000
 steps_per_checkpoint: 1000
 steps_per_eval: 4000
 max_steps: 0
-optimizer: 'adadelta'
+optimizer: 'adam'
 weight_scale: 0.01
 batch_size: 80
+shuffle_data: True    # shuffle dataset at each new epoch
 read_ahead: 20
 max_output_len: 49    # faster decoding
 max_input_len: 49     # limit memory usage
@@ -27,3 +28,11 @@ encoders:
 
 decoder:
     name: fr
+
+# SGD parameters
+sgd_after_n_epoch: 1    # only use Adam for the first epoch, to speed up training (one epoch ~= 150k steps)
+learning_rate: 0.5
+learning_rate_decay_factor: 0.5
+decay_every_n_epoch: 1
+decay_after_n_epoch: 2
+decay_if_no_progress: null
