@@ -23,8 +23,6 @@ data_dir: experiments/WMT14/data_subwords
 model_dir: experiments/WMT14/subwords
 log_file: experiments/WMT14/subwords/log.txt
 
-max_dev_size: 2000
-
 encoders:
   - name: en
 

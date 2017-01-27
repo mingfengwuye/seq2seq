@@ -22,8 +22,6 @@ data_dir: experiments/WMT14/data
 model_dir: experiments/WMT14/baseline
 log_file: experiments/WMT14/baseline/log.txt
 
-max_dev_size: 2000
-
 encoders:
   - name: en
 

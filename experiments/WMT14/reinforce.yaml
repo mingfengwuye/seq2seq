@@ -19,8 +19,6 @@ data_dir: experiments/WMT14/data
 model_dir: experiments/WMT14/reinforce
 log_file: experiments/WMT14/reinforce/log.txt
 
-max_dev_size: 2000
-
 encoders:
   - name: en
 
