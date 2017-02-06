@@ -630,7 +630,7 @@ def reinforce_baseline(decoder_states, reward):
 def softmax(x, dim=-1, temperature=1.0):
     """
     Softmax with a `temperature` parameter:
-        - 1.0: normal softmax
+        - 1.0: same as tf.softmax
         - < 0: closer to argmax
         - > 1: closer to uniform distribution
     """

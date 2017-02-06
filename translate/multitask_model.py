@@ -45,7 +45,7 @@ class MultiTaskModel(BaseTranslationModel):
             model.previous_losses = []
             global_step = model.global_step.eval(sess)
             model.epoch = model.batch_size * global_step // model.train_size
-            model.last_decay = model.epoch
+            model.last_decay = global_step
 
             for _ in range(global_step):   # read all the data up to this step
                 next(model.batch_iterator)
@@ -82,16 +82,17 @@ class MultiTaskModel(BaseTranslationModel):
             self.global_step += 1
             model_global_step = model.global_step.eval(sess)
 
-            epoch = model.batch_size * model_global_step // model.train_size
-            if epoch > model.epoch:
-                utils.log('{} starting epoch {}'.format(model.name, epoch + 1))
-                model.epoch = epoch
+            epoch = model.batch_size * model_global_step / model.train_size
+            if int(epoch) > model.epoch:
+                utils.log('{} starting epoch {}'.format(model.name, int(epoch) + 1))
+                model.epoch = int(epoch)
 
             if decay_after_n_epoch is not None and epoch >= decay_after_n_epoch:
-                if decay_every_n_epoch is not None and epoch - model.last_decay >= decay_every_n_epoch:
+                if decay_every_n_epoch is not None and (model.batch_size * (model_global_step - model.last_decay)
+                                                            >= decay_every_n_epoch * model.train_size):
                     sess.run(model.learning_rate_decay_op)
                     utils.debug('  decaying learning rate to: {:.4f}'.format(model.learning_rate.eval()))
-                    model.last_decay = epoch
+                    model.last_decay = model_global_step
 
             if sgd_after_n_epoch is not None and epoch >= sgd_after_n_epoch:
                 if not model.use_sgd:

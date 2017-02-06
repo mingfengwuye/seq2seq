@@ -180,7 +180,7 @@ class Seq2SeqModel(object):
         weights = decoders.get_weights(self.sampled_output, utils.EOS_ID, time_major=True,
                                        include_first_eos=True)   # FIXME: True or False?
         self.reinforce_loss = decoders.sequence_loss(logits=self.outputs, targets=self.sampled_output,
-                                                     weights=weights, reward=reward, )
+                                                     weights=weights, reward=reward)
 
         if not decode_only:
             self.update_op, self.sgd_update_op = self.get_update_op(self.reinforce_loss,
@@ -217,7 +217,7 @@ class Seq2SeqModel(object):
         return namedtuple('output', 'loss attn_weights')(res['loss'], res.get('attn_weights'))
 
     def reinforce_step(self, session, data, update_model=True, update_baseline=True, use_sgd=False, **kwargs):
-        if self.dropout is not None:   # FIXME
+        if self.dropout is not None:
             session.run(self.dropout_off)
 
         batch = self.get_batch(data)

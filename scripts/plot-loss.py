@@ -38,14 +38,14 @@ for label, log_file in zip(labels, args.log_files):
             if 0 < args.max_steps < current_step:
                 continue
 
-            m = re.search(r'eval: loss (.*)', line)
+            m = re.search(r'eval: loss (-?\d+.\d+)', line)
             m = m or re.search(r'dev_decoder_cost_cost: (\d+\.\d+)', line)
             if m:
                 perplexity = float(m.group(1))
                 dev_perplexities.append((current_step, perplexity))
                 continue
 
-            m = re.search(r'loss (.*)', line)
+            m = re.search(r'.* loss (-?\d+.\d+)', line)
             m = m or re.search(r'decoder_cost_cost: (\d+\.\d+)', line)
             if m:
                 perplexity = float(m.group(1))

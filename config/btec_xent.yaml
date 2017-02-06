@@ -1,9 +1,9 @@
 # Really small model on BTEC for debugging purposes
 
-dropout_rate: 0.0
-cell_size: 64
-attn_size: 64
-embedding_size: 32
+dropout_rate: 0.5
+cell_size: 256
+attn_size: 256
+embedding_size: 128
 
 layers: 1
 bidir: True
@@ -22,16 +22,17 @@ loss_function: 'xent'
 optimizer: 'adam'
 
 # optimizer: 'sgd'
-# learning_rate: 0.5
-# learning_rate_decay_factor: 0.9
-# decay_every_n_epoch: 1
-# decay_after_n_epoch: 5
+sgd_after_n_epoch: 20
+learning_rate: 0.2
+learning_rate_decay_factor: 0.9
+decay_every_n_epoch: 1
+decay_after_n_epoch: 21
 
 steps_per_checkpoint: 1000
 steps_per_eval: 1000
 
 max_gradient_norm: 1.0
-max_epochs: 25
+max_epochs: 0
 batch_mode: 'standard'
 read_ahead: 10
 

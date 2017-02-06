@@ -30,7 +30,7 @@ decoder:
 
 # SGD parameters
 sgd_after_n_epoch: 1    # only use Adam for the first epoch, to speed up training (one epoch ~= 150k steps)
-learning_rate: 0.5
+learning_rate: 0.2
 learning_rate_decay_factor: 0.5
 decay_every_n_epoch: 1
 decay_after_n_epoch: 2
