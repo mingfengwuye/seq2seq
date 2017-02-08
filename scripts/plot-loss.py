@@ -45,7 +45,7 @@ for label, log_file in zip(labels, args.log_files):
                 dev_perplexities.append((current_step, perplexity))
                 continue
 
-            m = re.search(r'.* loss (-?\d+.\d+)', line)
+            m = re.search(r'loss (-?\d+.\d+)$', line)
             m = m or re.search(r'decoder_cost_cost: (\d+\.\d+)', line)
             if m:
                 perplexity = float(m.group(1))

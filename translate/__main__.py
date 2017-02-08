@@ -64,18 +64,12 @@ Scores on English->French WMT14 (ntst14)
                     28.69 (after 940k iterations, with Adadelta + SGD)
                     29.75 (with subword units, after 200k iterations, with Adam + SGD)
 
-Sutskever and Jean use a beam-size of 12, while Bahdanau uses beam-search with unspecified beam-size (might explain
-the difference in score in addition to tuning)
-
-
 TODO:
 - pervasive dropout (dropout in the recurrent connections)
-- reading files as a stream when decoding (useful for large files)
 - symbolic beam-search
 - possibility to build an encoder with 1 bi-directional layer, and several uni-directional layers
 - pre-load data on GPU for small datasets
-- mixture of Adam and SGD training
-- decay learning rate after a certain number of epochs
+- load training data as a stream for large datasets
 - possibility to run model on several GPUs
 - copy vocab and config to model dir
 """

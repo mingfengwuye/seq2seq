@@ -42,7 +42,8 @@ class Seq2SeqModel(object):
     def __init__(self, encoders, decoder, learning_rate, global_step, max_gradient_norm, dropout_rate=0.0,
                  freeze_variables=None, lm_weight=None, max_output_len=50, attention=True, feed_previous=0.0,
                  optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
-                 reinforce_baseline=True, softmax_temperature=1.0, loss_function='xent', **kwargs):
+                 reinforce_baseline=True, softmax_temperature=1.0, loss_function='xent', rollouts=None,
+                 partial_rewards=False, **kwargs):
         self.lm_weight = lm_weight
         self.encoders = encoders
         self.decoder = decoder
@@ -100,15 +101,23 @@ class Seq2SeqModel(object):
                                                    include_first_eos=True)
         self.target_length = tf.reduce_sum(self.target_weights, axis=0)
 
+        if loss_function == 'xent' or decode_only:  # FIXME: use tensor instead
+            self.rollouts = None
+        else:
+            self.rollouts = rollouts
+
+        self.partial_rewards = partial_rewards
+
         parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
-                          encoder_input_length=self.encoder_input_length)
+                          encoder_input_length=self.encoder_input_length, rollouts=self.rollouts)
 
         self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
         decoder = decoders.attention_decoder if attention else decoders.decoder
 
-        self.outputs, self.attention_weights, self.decoder_outputs, self.beam_tensors, self.sampled_output = decoder(
+        (self.outputs, self.attention_weights, self.decoder_outputs, self.beam_tensors,
+         self.sampled_output, self.rewards) = decoder(
             attention_states=self.attention_states, initial_state=self.encoder_state,
-            decoder_inputs=self.targets[:-1,:], feed_previous=self.feed_previous,
+            targets=self.targets, feed_previous=self.feed_previous,
             decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
         )
 
@@ -118,7 +127,7 @@ class Seq2SeqModel(object):
 
         self.xent_loss, self.reinforce_loss, self.baseline_loss = None, None, None
         self.update_op, self.sgd_update_op, self.baseline_update_op = None, None, None
-        self.reward = None
+        self.reward = None    # sentence-level reward
 
         if loss_function == 'xent':
             self.init_xent(optimizers, decode_only)
@@ -163,18 +172,29 @@ class Seq2SeqModel(object):
             self.update_op, self.sgd_update_op = self.get_update_op(self.xent_loss, optimizers, self.global_step)
 
     def init_reinforce(self, optimizers, reinforce_baseline=True, decode_only=False):
-        with tf.device('/cpu:0'):
-            self.reward = decoders.batch_bleu(tf.transpose(self.sampled_output),
-                                              tf.transpose(self.targets[1:,:]),
-                                              eos_id=utils.EOS_ID)
+        if self.rollouts is None or self.rollouts <= 1:
+            hyps = tf.transpose(self.sampled_output)
+            refs = tf.transpose(self.targets[1:,:])
+
+            with tf.device('/cpu:0'):
+                self.reward = decoders.batch_bleu(hyps, refs, eos_id=utils.EOS_ID)
+                self.rewards = decoders.batch_partial_bleu(hyps, refs, eos_id=utils.EOS_ID)
+                self.rewards = tf.transpose(self.rewards)
+
+            if not self.partial_rewards:
+                time_steps = tf.shape(self.decoder_outputs)[0]
+                batch_size = tf.shape(self.decoder_outputs)[1]
+
+                self.rewards = tf.reshape(tf.tile(self.reward, [time_steps]),
+                                          shape=tf.pack([time_steps, batch_size]))
 
         if reinforce_baseline:
-            reward = decoders.reinforce_baseline(self.decoder_outputs, self.reward)
+            reward = decoders.reinforce_baseline(self.decoder_outputs, self.rewards)
             weights = decoders.get_weights(self.sampled_output, utils.EOS_ID, time_major=True,
                                            include_first_eos=False)
             self.baseline_loss = decoders.baseline_loss(reward=reward, weights=weights)
         else:
-            reward = self.reward
+            reward = self.rewards
             self.baseline_loss = tf.constant(0.0)
 
         weights = decoders.get_weights(self.sampled_output, utils.EOS_ID, time_major=True,
@@ -377,7 +397,6 @@ class Seq2SeqModel(object):
                 lm_score = np.zeros((1, self.trg_vocab_size))
                 weights = None
 
-            # FIXME: divide by zero encountered in log
             proba = [np.maximum(proba_, 1e-10) for proba_ in proba]
             scores_ = scores[:, None] - np.average([np.log(proba_) for proba_ in proba] +
                                                    [lm_score], axis=0, weights=weights)
