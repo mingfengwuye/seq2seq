@@ -11,3 +11,5 @@
 # + Beam-search + LM + Ensemble
 # other info ? e.g. POS tags
 # Finetune with REINFORCE
+
+# xz -dkf commoncrawl.de.xz --verbose
