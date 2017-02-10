@@ -6,14 +6,16 @@ parser = argparse.ArgumentParser()
 parser.add_argument('filename')
 parser.add_argument('--lower', action='store_true')
 parser.add_argument('--count-whitespaces', action='store_true')
-parser.add_argument('-c', '--chars', action='store_true')
-parser.add_argument('-l', '--lines', action='store_true')
-parser.add_argument('-w', '--words', action='store_true')
+parser.add_argument('-c', '-b', '--chars', action='store_true', help='display char info')
+parser.add_argument('-l', '--lines', action='store_true', help='display line count')
+parser.add_argument('-w', '--words', action='store_true', help='display word info')
+parser.add_argument('-a', '--all', action='store_true',
+                    help='display all info and more (large memory usage)')
 
 args = parser.parse_args()
 
-if not args.chars and not args.lines and not args.words:
-    args.chars = args.lines = args.words = True
+if not args.chars and not args.lines and not args.words or args.all:
+    args.chars = args.words = args.lines = True
 
 word_counts = Counter()
 char_counts = Counter()
@@ -22,6 +24,7 @@ word_dict = Counter()
 char_dict = Counter()
 
 line_dict = Counter()
+lines = 0
 
 with open(args.filename) as f:
     for line in f:
@@ -43,7 +46,8 @@ with open(args.filename) as f:
             for char in line:
                 char_dict[char] += 1
 
-        if args.lines:
+        lines += 1
+        if args.all:
             line_dict[line] += 1
 
 
@@ -62,7 +66,7 @@ def info_dict(title, counter):
         cumulative_count += count
 
         for percent, count in coverage.items():
-            if count == 0 and cumulative_count >= percent * total / 100:
+            if count == 0 and cumulative_count * 100 >= percent * total:
                 coverage[percent] = i
 
     summary = [
@@ -84,39 +88,45 @@ def info_lengths(title, counter):
     total = sum(counter.values())
     avg = sum(k * v for k, v in counter.items()) / total
 
-    l = [[k] * v for k, v in sorted(counter.items())]
-    l = [x for l_ in l for x in l_]
-    mode = l[len(l) // 2]
+    coverage = OrderedDict([(1, 0), (5, 0), (10, 0),
+                            (50, 0), (90, 0), (95, 0), (99, 0)])
 
-    tenth = l[len(l) // 10]
-    nineth = l[len(l) * 9 // 10]
+    cumulative_count = 0
+    prev_k = 0
+
+    for k, v in sorted(counter.items()):
+        cumulative_count += v
+
+        for percent, count in coverage.items():
+            if count == 0 and cumulative_count * 100 >= percent * total:
+                coverage[percent] = prev_k if percent < 50 else k
+
+        prev_k = k
 
     summary = [
         '{}\n{}'.format(title, '-' * len(title)),
         'Minimum: {}'.format(min(counter)),
         'Maximum: {}'.format(max(counter)),
         'Average: {:.1f}'.format(avg),
-        'Mode:    {}'.format(mode),
-        '<10%:    {}'.format(tenth),
-        '<90%:    {}'.format(nineth),
     ]
+
+    for percent, count in coverage.items():
+        summary.append('{}{:2d}%:   {}'.format('<=' if percent < 50 else '>=', percent, count))
 
     return '\n  '.join(summary) + '\n'
 
+
 if args.lines:
-    total = sum(line_dict.values())
-    unique = len(line_dict)
-    avg = total / unique
-    title = 'Lines'
+    print("Lines\n-----\n  Total:   {}".format(lines))
 
+if args.all:
     summary = [
-        '{}\n{}'.format(title, '-' * len(title)),
-        'Total:   {}'.format(total),
-        'Unique:  {}'.format(unique),
-        'Average: {:.2f}'.format(avg)
+        'Unique:  {}'.format(len(line_dict)),
+        'Average: {:.2f}'.format(lines / len(line_dict))
     ]
+    print('  ' + '\n  '.join(summary))
 
-    print('\n  '.join(summary) + '\n')
+print()
 
 if args.words:
     print(info_lengths('Words per line', word_counts))
