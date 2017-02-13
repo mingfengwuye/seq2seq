@@ -91,8 +91,9 @@ log_file: null           # log to this file instead of standard output
 parallel_iterations: 16  # parameter of Tensorflow's while_loop
 swap_memory: True        # parameter of Tensorflow's while_loop
 
-encoders:
-  - name: fr
+encoders:                # this is a list (you can specify several encoders)
+  - name: fr             # each encoder or decoder has a name (used for naming variables) and an extension (for files)
+    ext: fr              # If undefined, `ext` is the same as `name`
 
-decoder:
-    name: en
+decoder:                 # Each encoder or decoder can redefine its own values for a number of parameters,
+    name: en             # including `cell_size`, `embedding_size` and `attn_size`

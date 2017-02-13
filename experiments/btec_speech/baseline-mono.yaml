@@ -11,12 +11,16 @@ max_output_len: 25
 max_input_len: 600
 optimizer: 'adam'
 max_steps: 20000
+batch_size: 64
+steps_per_checkpoint: 1000
+steps_per_eval: 1000
 
 train_prefix: train.Michel   # 'easy' mono-speaker settings
 dev_prefix: dev.Michel
 
 cell_size: 256
 embedding_size: 256
+attn_size: 256
 
 encoders:
   - name: feats41

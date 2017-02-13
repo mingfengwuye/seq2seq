@@ -72,11 +72,12 @@ class BaseTranslationModel(object):
         self.saver = tf.train.Saver(max_to_keep=3, keep_checkpoint_every_n_hours=5, sharded=False)
 
         sess.run(tf.global_variables_initializer())
-        blacklist = ('dropout_keep_prob',)
+        blacklist = ['dropout_keep_prob']
+
         if reset_learning_rate or reset:
-            blacklist += ('learning_rate',)
+            blacklist.append('learning_rate')
         if reset:
-            blacklist += ('global_step',)
+            blacklist.append('global_step')
         
         if checkpoints:  # load partial checkpoints
             for checkpoint in checkpoints:  # checkpoint files to load
@@ -339,8 +340,11 @@ class TranslationModel(BaseTranslationModel):
             hypotheses = []
             references = []
 
+            output_file = None
+
             try:
-                output_file = open(output_, 'w') if output_ is not None else None
+                if output_ is not None:
+                    output_file = open(output_, 'w')
 
                 *src_sentences, trg_sentences = zip(*lines)
                 src_sentences = list(zip(*src_sentences))
@@ -359,8 +363,7 @@ class TranslationModel(BaseTranslationModel):
                 if output_file is not None:
                     output_file.close()
 
-            # main scoring function (used to choose which checkpoints to keep)
-            # default is utils.bleu_score
+            # default scoring function is utils.bleu_score
             score, score_summary = getattr(utils, score_function)(hypotheses, references, script_dir=script_dir)
 
             # print the scoring information
