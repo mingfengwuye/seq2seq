@@ -115,7 +115,7 @@ class TranslationModel(BaseTranslationModel):
         self._read_vocab()
 
         for encoder_or_decoder, vocab in zip(encoders + [decoder], self.vocabs):
-            if encoder_or_decoder.vocab_size <= 0:
+            if encoder_or_decoder.vocab_size <= 0 and vocab is not None:
                 encoder_or_decoder.vocab_size = len(vocab.reverse)
 
         # this adds an `embedding' attribute to each encoder and decoder

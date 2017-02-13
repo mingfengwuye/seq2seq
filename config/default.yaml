@@ -20,7 +20,7 @@ dropout_rate: 0.0        # dropout rate applied to the RNN units
 max_train_size: 0        # maximum size of the training data (0 for unlimited)
 max_dev_size: 0          # maximum size of the dev data
 steps_per_checkpoint: 1000   # number of updates between each checkpoint
-steps_per_eval: 4000     # number of updates between each BLEU eval (on dev set)
+steps_per_eval: 1000     # number of updates between each BLEU eval (on dev set)
 eval_burn_in: 0          # minimum number of steps before starting BLEU eval
 max_steps: 0             # maximum number of updates before stopping
 max_epochs: 0            # maximum number of epochs before stopping

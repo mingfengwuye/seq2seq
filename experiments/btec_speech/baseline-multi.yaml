@@ -9,10 +9,7 @@ log_file: experiments/btec_speech/baseline_multi/log.txt
 
 max_output_len: 25
 max_input_len: 600
-parallel_iterations: 32
-swap_memory: True
 optimizer: 'adam'
-learning_rate: 0.001
 max_steps: 20000
 
 train_prefix: train.concat  # Michel, Philippe, Loic, Marion, Helene, Fabienne

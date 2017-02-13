@@ -1,0 +1,40 @@
+
+dropout_rate: 0.5
+bidir: True
+use_lstm: False
+
+data_dir: experiments/btec_speech/data
+model_dir: experiments/btec_speech/debug
+# log_file: experiments/btec_speech/debug/log.txt
+
+max_output_len: 18
+max_input_len: 400
+optimizer: 'adam'
+max_steps: 20000
+
+cell_size: 64
+embedding_size: 64
+
+train_prefix: train.1000
+dev_prefix: dev.100
+
+steps_per_checkpoint: 10
+steps_per_eval: 10
+
+encoders:
+  - name: feats41
+    embedding_size: 41
+    # vocab_size: 0
+    layers: 2
+    time_pooling: [4]
+    # layers: 3
+    # time_pooling: [2, 2]
+    pooling_avg: True
+    binary: True
+    # attention_filters: 1
+    # attention_filter_length: 25
+    # input_layers: [256, 256]
+
+decoder:
+    name: en
+    layers: 1
