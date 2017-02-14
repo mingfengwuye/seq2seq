@@ -254,12 +254,13 @@ class TranslationModel(BaseTranslationModel):
                 for vocab, sentence, char_level in zip(self.vocabs, lines, self.character_level)
             ]
 
-            _, weights = self.seq2seq_model.step(sess, data=[token_ids], forward_only=True, align=True)
+            _, weights = self.seq2seq_model.step(sess, data=[token_ids], forward_only=True, align=True,
+                                                 update_model=False)
             trg_tokens = [self.trg_vocab.reverse[i] if i < len(self.trg_vocab.reverse) else utils._UNK
                           for i in token_ids[-1]]
 
-            weights = weights.squeeze()[:len(trg_tokens), ::-1].T
-
+            # weights = weights.squeeze()[:len(trg_tokens)].T
+            weights = weights.squeeze()
             max_len = weights.shape[0]
 
             if self.binary_input[0]:

@@ -171,10 +171,10 @@ def main(args=None):
             utils.log('  {:<20} {}'.format(k, pformat(v)))
 
     device = None
-    if args.no_gpu:
+    if config.no_gpu:
         device = '/cpu:0'
-    elif args.gpu_id is not None:
-        device = '/gpu:{}'.format(args.gpu_id)
+    elif config.gpu_id is not None:
+        device = '/gpu:{}'.format(config.gpu_id)
 
     utils.log('creating model')
     utils.log('using device: {}'.format(device))

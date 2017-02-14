@@ -83,9 +83,7 @@ class MultiTaskModel(BaseTranslationModel):
             model_global_step = model.global_step.eval(sess)
 
             epoch = model.batch_size * model_global_step / model.train_size
-            if int(epoch) > model.epoch:
-                utils.log('{} starting epoch {}'.format(model.name, int(epoch) + 1))
-                model.epoch = int(epoch)
+            model.epoch = int(epoch) + 1
 
             if decay_after_n_epoch is not None and epoch >= decay_after_n_epoch:
                 if decay_every_n_epoch is not None and (model.batch_size * (model_global_step - model.last_decay)
@@ -96,7 +94,7 @@ class MultiTaskModel(BaseTranslationModel):
 
             if sgd_after_n_epoch is not None and epoch >= sgd_after_n_epoch:
                 if not model.use_sgd:
-                    utils.debug('  starting to use SGD')
+                    utils.debug('  epoch {}, starting to use SGD'.format(model.epoch))
                     model.use_sgd = True
 
             if steps_per_checkpoint and self.global_step % steps_per_checkpoint == 0:
@@ -113,8 +111,8 @@ class MultiTaskModel(BaseTranslationModel):
                     else:
                         baseline_loss_ = ''
 
-                    utils.log('{} step {} learning rate {:.4f} step-time {:.4f}{} loss {:.4f}'.format(
-                        model_.name, model_.global_step.eval(sess), model_.learning_rate.eval(),
+                    utils.log('{} step {} epoch {} learning rate {:.4f} step-time {:.4f}{} loss {:.4f}'.format(
+                        model_.name, model_.global_step.eval(sess), model.epoch, model_.learning_rate.eval(),
                         step_time_, baseline_loss_, loss_))
                     
                     if decay_if_no_progress and len(model_.previous_losses) >= decay_if_no_progress:

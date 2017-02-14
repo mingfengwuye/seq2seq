@@ -81,7 +81,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, 
                             flat_inputs = tf.nn.dropout(flat_inputs, dropout)
 
                 encoder_inputs_ = tf.reshape(flat_inputs,
-                                             tf.pack([batch_size, time_steps, flat_inputs.get_shape()[1].value]))
+                                             tf.stack([batch_size, time_steps, flat_inputs.get_shape()[1].value]))
 
             # Contrary to Theano's RNN implementation, states after the sequence length are zero
             # (while Theano repeats last state)
@@ -145,7 +145,7 @@ def mixer_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, 
         # positions start at `1`, `0` is reserved for dummy words
         positions = tf.range(1, time_steps + 1)
         positions = tf.tile(positions, [batch_size])
-        positions = tf.reshape(positions, tf.pack([batch_size, time_steps]))
+        positions = tf.reshape(positions, tf.stack([batch_size, time_steps]))
 
         # this only works because _PAD symbol's index in the vocabulary is 0
         # for other values substract before padding, then add after padding
@@ -181,9 +181,9 @@ def compute_energy(hidden, state, attn_size, **kwargs):
     k = get_variable_unsafe('U_a', [input_size, attn_size], initializer=initializer)
 
     # dot product between tensors requires reshaping
-    hidden = tf.reshape(hidden, tf.pack([tf.mul(batch_size, time_steps), input_size]))
+    hidden = tf.reshape(hidden, tf.stack([tf.mul(batch_size, time_steps), input_size]))
     f = tf.matmul(hidden, k)
-    f = tf.reshape(f, tf.pack([batch_size, time_steps, attn_size]))
+    f = tf.reshape(f, tf.stack([batch_size, time_steps, attn_size]))
 
     v = get_variable_unsafe('v_a', [attn_size])
     s = f + y
@@ -200,12 +200,12 @@ def compute_energy_with_filter(hidden, state, prev_weights, attention_filters, a
     filter_shape = [attention_filter_length * 2 + 1, 1, 1, attention_filters]
     filter_ = get_variable_unsafe('filter', filter_shape)
     u = get_variable_unsafe('U', [attention_filters, attn_size])
-    prev_weights = tf.reshape(prev_weights, tf.pack([batch_size, time_steps, 1, 1]))
+    prev_weights = tf.reshape(prev_weights, tf.stack([batch_size, time_steps, 1, 1]))
     conv = tf.nn.conv2d(prev_weights, filter_, [1, 1, 1, 1], 'SAME')
-    shape = tf.pack([tf.mul(batch_size, time_steps), attention_filters])
+    shape = tf.stack([tf.mul(batch_size, time_steps), attention_filters])
     conv = tf.reshape(conv, shape)
     z = tf.matmul(conv, u)
-    z = tf.reshape(z, tf.pack([batch_size, time_steps, 1, attn_size]))
+    z = tf.reshape(z, tf.stack([batch_size, time_steps, 1, attn_size]))
 
     y = linear_unsafe(state, attn_size, True)
     y = tf.reshape(y, [-1, 1, 1, attn_size])
@@ -213,9 +213,9 @@ def compute_energy_with_filter(hidden, state, prev_weights, attention_filters, a
     k = get_variable_unsafe('W', [attn_size, attn_size])
 
     # dot product between tensors requires reshaping
-    hidden = tf.reshape(hidden, tf.pack([tf.mul(batch_size, time_steps), attn_size]))
+    hidden = tf.reshape(hidden, tf.stack([tf.mul(batch_size, time_steps), attn_size]))
     f = tf.matmul(hidden, k)
-    f = tf.reshape(f, tf.pack([batch_size, time_steps, 1, attn_size]))
+    f = tf.reshape(f, tf.stack([batch_size, time_steps, 1, attn_size]))
 
     v = get_variable_unsafe('V', [attn_size])
     s = f + y + z
@@ -229,7 +229,7 @@ def compute_energy_mixer(hidden, state, *args, **kwargs):
 
     state = tf.reshape(state, [tf.mul(batch_size, attn_size), 1])
     hidden = tf.transpose(hidden, perm=[1, 0, 2, 3])   # time_steps x batch_size x 1 x attn_size
-    hidden = tf.reshape(hidden, tf.pack([time_steps, tf.mul(batch_size, attn_size)]))
+    hidden = tf.reshape(hidden, tf.stack([time_steps, tf.mul(batch_size, attn_size)]))
     f = tf.matmul(hidden, state)
     f = tf.transpose(f, perm=[1, 0])  # switch time_steps with batch_size
     return f
@@ -251,7 +251,7 @@ def global_attention(state, prev_weights, hidden_states, encoder, encoder_input_
         weights = exp / tf.reduce_sum(exp, reduction_indices=(-1,), keep_dims=True)
 
         shape = tf.shape(weights)
-        shape = tf.pack([shape[0], shape[1], 1, 1])
+        shape = tf.stack([shape[0], shape[1], 1, 1])
 
         weighted_average = tf.reduce_sum(tf.reshape(weights, shape) * hidden_states, [1, 2])
         return weighted_average, weights
@@ -275,7 +275,7 @@ def local_attention(state, prev_weights, hidden_states, encoder, scope=None, **k
 
         batch_size = tf.shape(state)[0]
 
-        idx = tf.tile(tf.cast(tf.range(attn_length), dtype=tf.float32), tf.pack([batch_size]))
+        idx = tf.tile(tf.cast(tf.range(attn_length), dtype=tf.float32), tf.stack([batch_size]))
         idx = tf.reshape(idx, [-1, attn_length])
 
         low = pt - encoder.attention_window_size
@@ -419,7 +419,7 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
             max_sequence_length = tf.reduce_max(sequence_length)
 
         time = tf.constant(0, dtype=tf.int32, name='time')
-        zero_output = tf.zeros(tf.pack([batch_size, cell.output_size]), tf.float32)
+        zero_output = tf.zeros(tf.stack([batch_size, cell.output_size]), tf.float32)
 
         proj_outputs = tf.TensorArray(dtype=tf.float32, size=time_steps, clear_after_read=False)
         decoder_outputs = tf.TensorArray(dtype=tf.float32, size=time_steps)
@@ -432,16 +432,16 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
         attn_lengths = [tf.shape(states)[1] for states in attention_states]
 
         weights = tf.TensorArray(dtype=tf.float32, size=time_steps)
-        initial_weights = [tf.zeros(tf.pack([batch_size, length])) for length in attn_lengths]
+        initial_weights = [tf.zeros(tf.stack([batch_size, length])) for length in attn_lengths]
 
-        output = tf.zeros(tf.pack([batch_size, cell.output_size]), dtype=tf.float32)
+        output = tf.zeros(tf.stack([batch_size, cell.output_size]), dtype=tf.float32)
 
         initial_input = embed(inputs.read(0))   # first symbol is BOS   # FIXME
 
         def rollout_step(time, input_, state, path):
             context_vector, new_weights = attention_(state, prev_weights=initial_weights)
             output_ = linear_unsafe([state, input_, context_vector], decoder.cell_size, False, scope='maxout')
-            output_ = tf.reduce_max(tf.reshape(output_, tf.pack([batch_size, decoder.cell_size // 2, 2])), axis=2)
+            output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
             output_ = linear_unsafe(output_, decoder.embedding_size, False, scope='softmax0')
             output_ = linear_unsafe(output_, output_size, True, scope='softmax1')
 
@@ -493,7 +493,7 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
                 suffix_path = tf.cond(
                     time < final_time,
                     lambda: suffix_path.gather(tf.range(time, final_time)),
-                    lambda: tf.zeros(shape=tf.pack([0, batch_size]), dtype=tf.int64))
+                    lambda: tf.zeros(shape=tf.stack([0, batch_size]), dtype=tf.int64))
                 path = tf.concat(0, [prefix_path, suffix_path])
 
                 with tf.device('/cpu:0'):
@@ -508,7 +508,7 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
 
             # FIXME use `output` or `state` here?
             output_ = linear_unsafe([state, input_, context_vector], decoder.cell_size, False, scope='maxout')
-            output_ = tf.reduce_max(tf.reshape(output_, tf.pack([batch_size, decoder.cell_size // 2, 2])), axis=2)
+            output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
             output_ = linear_unsafe(output_, decoder.embedding_size, False, scope='softmax0')
             decoder_outputs = decoder_outputs.write(time, output_)
             output_ = linear_unsafe(output_, output_size, True, scope='softmax1')
@@ -566,10 +566,13 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
         decoder_outputs = decoder_outputs.pack()
         samples = samples.pack()
         rewards = rewards.pack()  # tensor of shape (time_steps x batch_size)
+        weights = weights.pack()  # batch_size, encoders, output time, input time
+
+        # import pdb; pdb.set_trace()
 
         beam_tensors = namedtuple('beam_tensors', 'state new_state output new_output')
         # TODO: return attention weights
-        return (proj_outputs, None, decoder_outputs, beam_tensors(state, new_state, output, new_output), samples,
+        return (proj_outputs, weights, decoder_outputs, beam_tensors(state, new_state, output, new_output), samples,
                 rewards)
 
 
@@ -578,11 +581,11 @@ def sequence_loss(logits, targets, weights, average_across_timesteps=False, aver
     time_steps = tf.shape(targets)[0]
     batch_size = tf.shape(targets)[1]
 
-    logits_ = tf.reshape(logits, tf.pack([time_steps * batch_size, logits.get_shape()[2].value]))
-    targets_ = tf.reshape(targets, tf.pack([time_steps * batch_size]))
+    logits_ = tf.reshape(logits, tf.stack([time_steps * batch_size, logits.get_shape()[2].value]))
+    targets_ = tf.reshape(targets, tf.stack([time_steps * batch_size]))
 
     crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(logits_, targets_)
-    crossent = tf.reshape(crossent, tf.pack([time_steps, batch_size]))
+    crossent = tf.reshape(crossent, tf.stack([time_steps, batch_size]))
 
     if reward is not None:
         crossent *= tf.stop_gradient(reward)
@@ -724,17 +727,17 @@ def reinforce_baseline(decoder_states, reward):
     batch_size = tf.shape(decoder_states)[1]
     state_size = decoder_states.get_shape()[2]
 
-    states = tf.reshape(decoder_states, shape=tf.pack([time_steps * batch_size, state_size]))
+    states = tf.reshape(decoder_states, shape=tf.stack([time_steps * batch_size, state_size]))
 
     baseline = fully_connected(tf.stop_gradient(states), num_outputs=1, activation_fn=None,
                                scope='reward_baseline',
                                weights_initializer=tf.constant_initializer(0.0),
                                biases_initializer=tf.constant_initializer(0.01))
 
-    baseline = tf.reshape(baseline, shape=tf.pack([time_steps, batch_size]))
+    baseline = tf.reshape(baseline, shape=tf.stack([time_steps, batch_size]))
 
     # reward = tf.reshape(tf.tile(reward, [time_steps]),
-    #                     shape=tf.pack([time_steps, batch_size]))
+    #                     shape=tf.stack([time_steps, batch_size]))
     return reward - baseline
 
 
@@ -760,6 +763,6 @@ def get_weights(sequence, eos_id, time_major=False, include_first_eos=True):
         weights = weights[:-1,:] if time_major else weights[:,:-1]
         shape = [tf.shape(weights)[0], tf.shape(weights)[1]]
         shape[axis] = 1
-        weights = tf.concat(axis, [tf.ones(tf.pack(shape)), weights])
+        weights = tf.concat(axis, [tf.ones(tf.stack(shape)), weights])
 
     return tf.stop_gradient(weights)
