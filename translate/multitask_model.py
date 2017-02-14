@@ -19,7 +19,8 @@ class MultiTaskModel(BaseTranslationModel):
         for task in tasks:
             self.checkpoint_dir = checkpoint_dir
             # merging both dictionaries (task parameters have a higher precedence)
-            kwargs_ = {**kwargs, **task}
+            kwargs_ = dict(**kwargs)
+            kwargs_.update(task)
             model = TranslationModel(checkpoint_dir=None, keep_best=keep_best, **kwargs_)
 
             self.models.append(model)
@@ -141,7 +142,9 @@ class MultiTaskModel(BaseTranslationModel):
                     else:
                         output = '{}.{}.{}'.format(eval_output, model_.name, model_.global_step.eval(sess))
 
-                    kwargs_ = {**kwargs, 'output': output}
+                    # kwargs_ = {**kwargs, 'output': output}
+                    kwargs_ = dict(kwargs)
+                    kwargs_['output'] = output
                     scores_ = model_.evaluate(sess, beam_size, on_dev=True, **kwargs_)
                     score_ = scores_[0]  # in case there are several dev files, only the first one counts
 
