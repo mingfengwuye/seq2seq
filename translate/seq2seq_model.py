@@ -186,7 +186,7 @@ class Seq2SeqModel(object):
                 batch_size = tf.shape(self.decoder_outputs)[1]
 
                 self.rewards = tf.reshape(tf.tile(self.reward, [time_steps]),
-                                          shape=tf.pack([time_steps, batch_size]))
+                                          shape=tf.stack([time_steps, batch_size]))
 
         if reinforce_baseline:
             reward = decoders.reinforce_baseline(self.decoder_outputs, self.rewards)

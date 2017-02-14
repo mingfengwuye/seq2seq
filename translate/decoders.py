@@ -68,9 +68,9 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, 
 
                 if embedding is None:
                     size = encoder_inputs_.get_shape()[2].value
-                    flat_inputs = tf.reshape(encoder_inputs_, [tf.mul(batch_size, time_steps), size])
+                    flat_inputs = tf.reshape(encoder_inputs_, [tf.multiply(batch_size, time_steps), size])
                 else:
-                    flat_inputs = tf.reshape(encoder_inputs_, [tf.mul(batch_size, time_steps)])
+                    flat_inputs = tf.reshape(encoder_inputs_, [tf.multiply(batch_size, time_steps)])
                     flat_inputs = tf.nn.embedding_lookup(embedding, flat_inputs)
 
                 if encoder.input_layers:
@@ -181,7 +181,7 @@ def compute_energy(hidden, state, attn_size, **kwargs):
     k = get_variable_unsafe('U_a', [input_size, attn_size], initializer=initializer)
 
     # dot product between tensors requires reshaping
-    hidden = tf.reshape(hidden, tf.stack([tf.mul(batch_size, time_steps), input_size]))
+    hidden = tf.reshape(hidden, tf.stack([tf.multiply(batch_size, time_steps), input_size]))
     f = tf.matmul(hidden, k)
     f = tf.reshape(f, tf.stack([batch_size, time_steps, attn_size]))
 
@@ -202,7 +202,7 @@ def compute_energy_with_filter(hidden, state, prev_weights, attention_filters, a
     u = get_variable_unsafe('U', [attention_filters, attn_size])
     prev_weights = tf.reshape(prev_weights, tf.stack([batch_size, time_steps, 1, 1]))
     conv = tf.nn.conv2d(prev_weights, filter_, [1, 1, 1, 1], 'SAME')
-    shape = tf.stack([tf.mul(batch_size, time_steps), attention_filters])
+    shape = tf.stack([tf.multiply(batch_size, time_steps), attention_filters])
     conv = tf.reshape(conv, shape)
     z = tf.matmul(conv, u)
     z = tf.reshape(z, tf.stack([batch_size, time_steps, 1, attn_size]))
@@ -213,7 +213,7 @@ def compute_energy_with_filter(hidden, state, prev_weights, attention_filters, a
     k = get_variable_unsafe('W', [attn_size, attn_size])
 
     # dot product between tensors requires reshaping
-    hidden = tf.reshape(hidden, tf.stack([tf.mul(batch_size, time_steps), attn_size]))
+    hidden = tf.reshape(hidden, tf.stack([tf.multiply(batch_size, time_steps), attn_size]))
     f = tf.matmul(hidden, k)
     f = tf.reshape(f, tf.stack([batch_size, time_steps, 1, attn_size]))
 
@@ -227,9 +227,9 @@ def compute_energy_mixer(hidden, state, *args, **kwargs):
     batch_size = tf.shape(hidden)[0]
     time_steps = tf.shape(hidden)[1]
 
-    state = tf.reshape(state, [tf.mul(batch_size, attn_size), 1])
+    state = tf.reshape(state, [tf.multiply(batch_size, attn_size), 1])
     hidden = tf.transpose(hidden, perm=[1, 0, 2, 3])   # time_steps x batch_size x 1 x attn_size
-    hidden = tf.reshape(hidden, tf.stack([time_steps, tf.mul(batch_size, attn_size)]))
+    hidden = tf.reshape(hidden, tf.stack([time_steps, tf.multiply(batch_size, attn_size)]))
     f = tf.matmul(hidden, state)
     f = tf.transpose(f, perm=[1, 0])  # switch time_steps with batch_size
     return f
