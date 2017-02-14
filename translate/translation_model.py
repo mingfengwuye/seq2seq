@@ -259,8 +259,7 @@ class TranslationModel(BaseTranslationModel):
             trg_tokens = [self.trg_vocab.reverse[i] if i < len(self.trg_vocab.reverse) else utils._UNK
                           for i in token_ids[-1]]
 
-            # weights = weights.squeeze()[:len(trg_tokens)].T
-            weights = weights.squeeze()
+            weights = weights.squeeze()[:len(trg_tokens),:len(token_ids[0])].T
             max_len = weights.shape[0]
 
             if self.binary_input[0]:
