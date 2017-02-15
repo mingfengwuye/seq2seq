@@ -3,7 +3,7 @@ Attention-based sequence to sequence learning
 
 ## Dependencies
 
-* [TensorFlow for Python 3](https://www.tensorflow.org/versions/r0.11/get_started/os_setup.html)
+* [TensorFlow for Python 3](https://www.tensorflow.org/get_started/os_setup.html)
 * YAML and Matplotlib modules for Python 3: `sudo apt-get install python3-yaml python3-matplotlib`
 
 
@@ -49,14 +49,11 @@ Example model:
 * **Pre-processing script:** we provide a fully-featured Python script for data pre-processing (vocabulary creation, lowercasing, tokenizing, splitting, etc.)
 * **Dynamic RNNs:** we use symbolic loops instead of statically unrolled RNNs. This means faster model creation, and that we don't need buckets
 
+## Speech translation
+* To replicate the results from [arxiv.org/abs/1612.01744](https://arxiv.org/abs/1612.01744), you should look at the branch `speech`. The default branch `baseline` implements a different model, from [arxiv.org/abs/1409.0473](https://arxiv.org/abs/1409.0473).
 
 ## Credits
 
 * This project is based on [TensorFlow's reference implementation](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/models/rnn)
 * We include some of the pre-processing scripts from [Moses](http://www.statmt.org/moses/)
 * The scripts for subword units come from [github.com/rsennrich/subword-nmt](https://github.com/rsennrich/subword-nmt)
-
-## Troubleshoots
-
-* For an obscure reason, when running _seq2seq_ with Python 3.4, TensorFlow's `rnn._dynamic_rnn_loop` throws an exception. Works fine with Python 3.5.
-
