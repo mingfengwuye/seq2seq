@@ -15,9 +15,11 @@ from collections import namedtuple, Counter
 from contextlib import contextmanager
 
 # special vocabulary symbols
-_BOS = "<S>"
-_EOS = "</S>"
-_UNK = "<UNK>"
+_BOS = '<S>'
+_EOS = '</S>'
+_UNK = '<UNK>'
+_KEEP = '<KEEP>'
+_DEL = '<DEL>'
 
 BOS_ID = 0
 EOS_ID = 1

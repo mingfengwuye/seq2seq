@@ -13,3 +13,6 @@
 # Finetune with REINFORCE
 
 # xz -dkf commoncrawl.de.xz --verbose
+
+scripts/prepare-data.py experiments/post_editing/data/raw/train src pe mt experiments/post_editing/data/ --no-tokenize \
+--dev-corpus experiments/post_editing/data/raw/dev --test-corpus experiments/post_editing/data/raw/test
