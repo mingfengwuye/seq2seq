@@ -22,6 +22,7 @@ from translate.multitask_model import MultiTaskModel
 parser = argparse.ArgumentParser()
 parser.add_argument('config', help='load a configuration file in the YAML format')
 parser.add_argument('-v', '--verbose', help='verbose mode', action='store_true')
+# use 'store_const' instead of 'store_true' so that the default value is `None` instead of `False`
 parser.add_argument('--reset', help="reset model (don't load any checkpoint)", action='store_const', const=True)
 parser.add_argument('--reset-learning-rate', help='reset learning rate', action='store_const', const=True)
 parser.add_argument('--learning-rate', type=float, help='custom learning rate (triggers `reset-learning-rate`)')
@@ -48,7 +49,7 @@ parser.add_argument('--output')
 parser.add_argument('--max-steps', type=int)
 parser.add_argument('--remove-unk', action='store_const', const=True)
 parser.add_argument('--wav-files', nargs='*')
-parser.add_argument('--pred-edits')
+parser.add_argument('--use-edits', action='store_const', const=True)
 
 """
 Benchmarks:

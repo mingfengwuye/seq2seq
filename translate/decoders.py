@@ -107,8 +107,8 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, 
             encoder_outputs.append(encoder_outputs_)
             encoder_states.append(encoder_state_)
 
-        encoder_state = tf.concat(1, encoder_states)
-        return encoder_outputs, encoder_state
+    encoder_state = tf.concat(1, encoder_states)
+    return encoder_outputs, encoder_state
 
 
 def mixer_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, window_size=5, max_input_len=200,

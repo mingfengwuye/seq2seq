@@ -59,6 +59,28 @@ class AttrDict(dict):
         self.__dict__ = self  # dark magic
 
 
+def reverse_edits(source, edits):
+    src_words = source.split()
+    target = []
+
+    i = 0
+
+    for edit in edits.split():
+        if edit == _DEL:
+            if i < len(src_words):
+                i += 1
+        elif edit == _KEEP:
+            if i < len(src_words):
+                target.append(src_words[i])
+                i += 1
+        else:
+            target.append(edit)
+
+    target += src_words[i:]
+
+    return ' '.join(target)
+
+
 def initialize_vocabulary(vocabulary_path):
     """
     Initialize vocabulary from file.

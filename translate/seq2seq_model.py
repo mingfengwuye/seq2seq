@@ -338,16 +338,16 @@ class Seq2SeqModel(object):
             ]
             
             for feed in input_feed:
-                for i in range(self.encoder_count):
-                    feed[self.encoder_input_length[i]] = encoder_input_length[i]
+                for j in range(self.encoder_count):
+                    feed[self.encoder_input_length[j]] = encoder_input_length[j]
 
             if i > 0:
                 for input_feed_, output_ in zip(input_feed, output):
                     input_feed_[self.beam_tensors.output] = output_
 
             for input_feed_, attn_states_ in zip(input_feed, attn_states):
-                for i in range(self.encoder_count):
-                    input_feed_[self.attention_states[i]] = attn_states_[i].repeat(batch_size, axis=0)
+                for j in range(self.encoder_count):
+                    input_feed_[self.attention_states[j]] = attn_states_[j].repeat(batch_size, axis=0)
 
             output_feed = namedtuple('beam_output', 'output state proba')(
                 self.beam_tensors.new_output,

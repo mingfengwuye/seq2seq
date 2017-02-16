@@ -191,7 +191,8 @@ class TranslationModel(BaseTranslationModel):
     def _decode_sentence(self, sess, sentence_tuple, beam_size=1, remove_unk=False, early_stopping=True):
         return next(self._decode_batch(sess, [sentence_tuple], beam_size, remove_unk, early_stopping))
 
-    def _decode_batch(self, sess, sentence_tuples, batch_size, beam_size=1, remove_unk=False, early_stopping=True):
+    def _decode_batch(self, sess, sentence_tuples, batch_size, beam_size=1, remove_unk=False, early_stopping=True,
+                      use_edits=False):
         beam_search = beam_size > 1 or isinstance(sess, list)
 
         if beam_search:
@@ -223,7 +224,7 @@ class TranslationModel(BaseTranslationModel):
             else:
                 batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
 
-            for trg_token_ids in batch_token_ids:
+            for src_tokens, trg_token_ids in zip(batch, batch_token_ids):
                 trg_token_ids = list(trg_token_ids)
 
                 if utils.EOS_ID in trg_token_ids:
@@ -231,6 +232,9 @@ class TranslationModel(BaseTranslationModel):
 
                 trg_tokens = [self.trg_vocab.reverse[i] if i < len(self.trg_vocab.reverse) else utils._UNK
                               for i in trg_token_ids]
+
+                if use_edits:
+                    trg_tokens = utils.reverse_edits(src_tokens[0], ' '.join(trg_tokens)).split()
 
                 if remove_unk:
                     trg_tokens = [token for token in trg_tokens if token != utils._UNK]
@@ -275,7 +279,7 @@ class TranslationModel(BaseTranslationModel):
             output_file = '{}.{}.svg'.format(output, line_id + 1) if output is not None else None
             utils.heatmap(src_tokens, trg_tokens, weights.T, wav_file=wav_file, output_file=output_file)
 
-    def decode(self, sess, beam_size, output=None, remove_unk=False, early_stopping=True, **kwargs):
+    def decode(self, sess, beam_size, output=None, remove_unk=False, early_stopping=True, use_edits=False, **kwargs):
         utils.log('starting decoding')
 
         # empty `test` means that we read from standard input, which is not possible with multiple encoders
@@ -298,7 +302,8 @@ class TranslationModel(BaseTranslationModel):
                 lines = list(lines)
 
             hypothesis_iter = self._decode_batch(sess, lines, batch_size, beam_size=beam_size,
-                                                 early_stopping=early_stopping, remove_unk=remove_unk)
+                                                 early_stopping=early_stopping, remove_unk=remove_unk,
+                                                 use_edits=use_edits)
 
             for hypothesis in hypothesis_iter:
                 output_file.write(hypothesis + '\n')
@@ -308,7 +313,7 @@ class TranslationModel(BaseTranslationModel):
                 output_file.close()
 
     def evaluate(self, sess, beam_size, score_function, on_dev=True, output=None, remove_unk=False, max_dev_size=None,
-                 script_dir='scripts', early_stopping=True, **kwargs):
+                 script_dir='scripts', early_stopping=True, use_edits=False, **kwargs):
         """
         :param score_function: name of the scoring function used to score and rank models
           (typically 'bleu_score')
@@ -350,8 +355,14 @@ class TranslationModel(BaseTranslationModel):
                 src_sentences = list(zip(*src_sentences))
 
                 hypothesis_iter = self._decode_batch(sess, src_sentences, self.batch_size, beam_size=beam_size,
-                                                     early_stopping=early_stopping, remove_unk=remove_unk)
-                for hypothesis, reference in zip(hypothesis_iter, trg_sentences):
+                                                     early_stopping=early_stopping, remove_unk=remove_unk,
+                                                     use_edits=use_edits)
+                for sources, hypothesis, reference in zip(src_sentences, hypothesis_iter, trg_sentences):
+                    if use_edits:
+                        # main_source = sources[0]
+                        # hypothesis = utils.reverse_edits(main_source, hypothesis)
+                        reference = utils.reverse_edits(sources[0], reference)
+
                     hypotheses.append(hypothesis)
                     references.append(reference.strip().replace('@@ ', ''))
 
