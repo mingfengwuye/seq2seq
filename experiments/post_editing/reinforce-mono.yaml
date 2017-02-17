@@ -17,8 +17,6 @@ log_file: experiments/post_editing/reinforce/log.txt
 batch_size: 32
 dev_prefix: dev
 
-# loss_function: 'xent'
-# optimizer: 'adam'
 
 loss_function: 'reinforce'
 optimizer: 'sgd'
@@ -26,13 +24,9 @@ learning_rate: 0.01
 reward_function: sentence_ter
 reset: True
 
-# optimizer: 'sgd'
-# sgd_after_n_epoch: 20
-# learning_rate: 0.2
 learning_rate_decay_factor: 0.9
-decay_every_n_epoch: 1
-# decay_after_n_epoch: 21
-decay_after_n_epoch: 5
+decay_every_n_epoch: 2
+decay_after_n_epoch: 10
 
 steps_per_checkpoint: 200
 steps_per_eval: 200

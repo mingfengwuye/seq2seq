@@ -436,7 +436,7 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
 
         output = tf.zeros(tf.stack([batch_size, cell.output_size]), dtype=tf.float32)
 
-        initial_input = embed(inputs.read(0))   # first symbol is BOS   # FIXME
+        initial_input = embed(inputs.read(0))   # first symbol is BOS
 
         def rollout_step(time, input_, state, path):
             context_vector, new_weights = attention_(state, prev_weights=initial_weights)
@@ -567,8 +567,6 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
         samples = samples.pack()
         rewards = rewards.pack()  # tensor of shape (time_steps x batch_size)
         weights = weights.pack()  # batch_size, encoders, output time, input time
-
-        # import pdb; pdb.set_trace()
 
         beam_tensors = namedtuple('beam_tensors', 'state new_state output new_output')
         # TODO: return attention weights

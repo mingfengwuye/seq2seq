@@ -20,12 +20,11 @@ dev_prefix: dev
 loss_function: 'xent'
 optimizer: 'adam'
 
-# optimizer: 'sgd'
-sgd_after_n_epoch: 20
+sgd_after_n_epoch: 100
 learning_rate: 0.2
 learning_rate_decay_factor: 0.9
-decay_every_n_epoch: 1
-decay_after_n_epoch: 21
+decay_every_n_epoch: 5
+decay_after_n_epoch: 105
 
 steps_per_checkpoint: 500
 steps_per_eval: 500

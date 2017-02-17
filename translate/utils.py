@@ -9,6 +9,7 @@ import struct
 import random
 import math
 import wave
+import functools
 
 from translate import pyter
 from collections import namedtuple, Counter
@@ -266,6 +267,52 @@ def corpus_ter(hypotheses, references, **kwargs):
     ref_length = sum(len(ref.split()) for ref in references)
 
     return score, 'ratio={:.3f}'.format(hyp_length / ref_length)
+
+
+def sentence_wer(hypothesis, reference, **kwargs):
+    """
+    1 - WER
+    """
+    reference = tuple(reference.split())
+    hypothesis = tuple(hypothesis.split())
+
+    return 1 - levenhstein(hypothesis, reference) / len(reference)
+
+
+def corpus_wer(hypotheses, references, **kwargs):
+    scores = [
+        levenhstein(tuple(hyp.split()), tuple(ref.split())) / len(ref.split())
+        for hyp, ref in zip(hypotheses, references)
+    ]
+
+    score = 100 * sum(scores) / len(scores)
+
+    hyp_length = sum(len(hyp.split()) for hyp in hypotheses)
+    ref_length = sum(len(ref.split()) for ref in references)
+
+    return score, 'ratio={:.3f}'.format(hyp_length / ref_length)
+
+
+def corpus_scores(hypotheses, references, **kwargs):
+    bleu_score, summary = corpus_bleu(hypotheses, references)
+    ter, _ = corpus_ter(hypotheses, references)
+    wer, _ = corpus_wer(hypotheses, references)
+
+    return bleu_score, '{} wer={:.2f} ter={:.2f}'.format(summary, wer, ter)
+
+
+@functools.lru_cache(maxsize=1024)
+def levenhstein(src, trg):
+    if len(src) == 0:
+        return len(trg)
+    elif len(trg) == 0:
+        return len(src)
+
+    return min(
+        int(src[0] != src[0]) + levenhstein(src[1:], trg[1:]),
+        1 + levenhstein(src[1:], trg),
+        1 + levenhstein(src, trg[1:])
+    )
 
 
 def read_embeddings(embedding_filenames, encoders_and_decoder, load_embeddings,
