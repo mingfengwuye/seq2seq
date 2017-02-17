@@ -34,6 +34,7 @@ baseline_steps: 0        # pre-training steps for reward baseline
 reinforce_baseline: True # train a reward baseline for reinforce
 rollouts: null
 partial_rewards: False
+reward_function: 'sentence_bleu'
 
 # model (each one of these settings can be defined specifically in `encoders` and `decoder`, or generally here)
 attention: True          # use an attention mechanism

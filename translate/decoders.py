@@ -719,7 +719,7 @@ def batch_partial_bleu(hyps, refs, eos_id):
     """
     fn = lambda pair: partial_bleu(pair[0], pair[1], eos_id)
     return tf.map_fn(fn, (hyps, refs), dtype=tf.float32,
-                     parallel_iterations=32)  # TODO: use batch_size here)
+                     parallel_iterations=32)  # TODO: use batch_size here
 
 
 def reinforce_baseline(decoder_states, reward):

@@ -174,6 +174,9 @@ def sentence_bleu(hypothesis, reference, smoothing=True, order=4, **kwargs):
     """
     log_score = 0
 
+    if len(hypothesis) == 0:
+        return 0
+
     for i in range(order):
         hyp_ngrams = Counter(zip(*[hypothesis[j:] for j in range(i + 1)]))
         ref_ngrams = Counter(zip(*[reference[j:] for j in range(i + 1)]))

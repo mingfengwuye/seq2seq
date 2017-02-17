@@ -1,5 +1,3 @@
-# Really small model on BTEC for debugging purposes
-
 dropout_rate: 0.5
 cell_size: 256
 attn_size: 256

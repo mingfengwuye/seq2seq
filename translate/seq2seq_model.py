@@ -269,6 +269,89 @@ class Seq2SeqModel(object):
 
         return namedtuple('output', 'loss baseline_loss')(res['loss'], res['baseline_loss'])
 
+    def reinforce_step_bis(self, session, data, update_model=True, update_baseline=True,
+                           use_sgd=False, reward_function=None, **kwargs):
+        # Same as `reinforce_step` except that reward is computed outside of the TensorFlow graph,
+        # which means that we need to do a forward pass and then a backward pass.
+        # This is slower, but more powerful than `reinforce_step` as any reward function can be used.
+
+        if self.dropout is not None:
+            session.run(self.dropout_off)
+
+        batch = self.get_batch(data)
+        encoder_inputs, targets, encoder_input_length = batch
+
+        batch_size = targets.shape[1]
+        target_length = [self.max_output_len] * batch_size
+
+        input_feed = {
+            self.target_length: target_length,
+            self.targets: targets,
+            self.feed_previous: 1.0,
+            self.feed_argmax: False   # sample from softmax
+        }
+
+        for i in range(self.encoder_count):
+            input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
+            input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
+
+        sampled_output, outputs, rewards_ = session.run([self.sampled_output, self.outputs, self.rewards], input_feed)
+
+        # compute rewards
+        targets_ = targets[1:].T
+        outputs_ = sampled_output.T
+
+        if reward_function is None:
+            reward_function = 'sentence_bleu'
+
+        reward_function = getattr(utils, reward_function)
+
+        time_steps = sampled_output.shape[0]
+
+        rewards = []
+        for target, output in zip(targets_, outputs_):
+            i, = np.where(output == utils.EOS_ID)  # array of indices whose value is EOS_ID
+            if len(i) > 0:
+                output = output[:i[0]]
+
+            i, = np.where(target == utils.EOS_ID)
+            if len(i) > 0:
+                target = target[:i[0]]
+
+            # reward = self.reinforce_reward(output_, target_)
+            if self.partial_rewards:
+                reward = [reward_function(output[:i + 1], target) for i in range(len(output))]
+                reward = [0] + reward
+                reward += [reward[-1]] * (time_steps - len(reward) + 1)
+                reward = np.array(reward)
+
+                reward = reward[1:] - reward[:-1]
+            else:
+                reward = reward_function(output, target)
+
+            rewards.append(reward)
+
+        if self.partial_rewards:
+            rewards = np.array(rewards).T
+        else:
+            rewards = np.stack([rewards] * time_steps)
+
+        input_feed[self.rewards] = rewards
+        input_feed[self.outputs] = outputs
+        input_feed[self.sampled_output] = sampled_output
+
+        output_feed = {'loss': self.reinforce_loss, 'baseline_loss': self.baseline_loss}
+
+        if update_model:
+            output_feed['updates'] = self.sgd_update_op if use_sgd else self.update_op
+
+        if update_baseline:
+            output_feed['baseline_updates'] = self.baseline_update_op
+
+        res = session.run(output_feed, input_feed)
+
+        return namedtuple('output', 'loss baseline_loss')(res['loss'], res['baseline_loss'])
+
     def greedy_decoding(self, session, token_ids):
         if self.dropout is not None:
             session.run(self.dropout_off)

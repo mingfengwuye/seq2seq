@@ -1,5 +1,3 @@
-# Really small model on BTEC for debugging purposes
-
 dropout_rate: 0.5
 cell_size: 256
 attn_size: 256
@@ -25,7 +23,7 @@ rollouts: 0
 partial_rewards: False
 
 optimizer: 'sgd'
-learning_rate: 0.02
+learning_rate: 0.01
 learning_rate_decay_factor: 0.9
 decay_every_n_epoch: 1
 decay_after_n_epoch: 5
