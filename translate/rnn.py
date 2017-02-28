@@ -1,6 +1,8 @@
 import tensorflow as tf
 import numpy as np
-from tensorflow.python.ops import rnn, rnn_cell
+from tensorflow.python.ops import rnn
+from tensorflow.contrib.rnn import BasicLSTMCell, RNNCell
+from tensorflow.python.util import nest
 
 
 def multi_bidirectional_rnn(cells, inputs, sequence_length=None, dtype=None, parallel_iterations=None,
@@ -58,7 +60,7 @@ def multi_bidirectional_rnn(cells, inputs, sequence_length=None, dtype=None, par
             input=inputs_bw, seq_lengths=sequence_length,
             seq_dim=time_dim, batch_dim=batch_dim
         )
-        new_inputs = tf.concat(2, [inputs_fw, inputs_bw_reversed])
+        new_inputs = tf.concat([inputs_fw, inputs_bw_reversed], 2)
 
         if residual_connections and i < len(cells) - 1:
             # the output's dimension is twice that of the initial input (because of bidir)
@@ -74,7 +76,7 @@ def multi_bidirectional_rnn(cells, inputs, sequence_length=None, dtype=None, par
         output_states_fw.append(output_state_fw)
         output_states_bw.append(output_state_bw)
 
-    return inputs, tf.concat(1, output_states_fw), tf.concat(1, output_states_bw)
+    return inputs, tf.concat(output_states_fw, 1), tf.concat(output_states_bw, 1)
 
 
 def multi_rnn(cells, inputs, sequence_length=None, dtype=None, parallel_iterations=None, swap_memory=False,
@@ -110,7 +112,7 @@ def multi_rnn(cells, inputs, sequence_length=None, dtype=None, parallel_iteratio
 
         output_states.append(output_state)
 
-    return inputs, tf.concat(1, output_states)
+    return inputs, tf.concat(output_states, 1)
 
 
 def apply_time_pooling(inputs, sequence_length, stride, pooling_avg=False):
@@ -155,7 +157,7 @@ def unsafe_decorator(fun):
     return fun_
 
 
-class MultiRNNCell(rnn_cell.RNNCell):
+class MultiRNNCell(RNNCell):
     """
     Same as rnn_cell.MultiRNNCell, except it accepts an additional `residual_connections` parameter
     """
@@ -193,11 +195,11 @@ class MultiRNNCell(rnn_cell.RNNCell):
                 else:
                     cur_inp = new_inp
                 new_states.append(new_state)
-        new_states = (tuple(new_states) if self._state_is_tuple else tf.concat(1, new_states))
+        new_states = (tuple(new_states) if self._state_is_tuple else tf.concat(new_states, 1))
         return cur_inp, new_states
 
 
-class GRUCell(rnn_cell.RNNCell):
+class GRUCell(RNNCell):
     def __init__(self, num_units, activation=tf.nn.tanh, initializer=None):
         self._num_units = num_units
         self._activation = activation
@@ -252,9 +254,8 @@ def linear(args, output_size, bias, bias_start=0.0, scope=None, initializer=None
     Raises:
       ValueError: if some of the arguments has unspecified or wrong shape.
     """
-    if args is None or (tf.nn.nest.is_sequence(args) and not args):
-        raise ValueError("`args` must be specified")
-    if not tf.nn.nest.is_sequence(args):
+
+    if not nest.is_sequence(args):
         args = [args]
 
     # calculate the total size of arguments on dimension 1
@@ -276,7 +277,7 @@ def linear(args, output_size, bias, bias_start=0.0, scope=None, initializer=None
         if len(args) == 1:
             res = tf.matmul(args[0], matrix)
         else:
-            res = tf.matmul(tf.concat(1, args), matrix)
+            res = tf.matmul(tf.concat(args, 1), matrix)
         if not bias:
             return res
         bias_term = tf.get_variable("Bias", [output_size], dtype=dtype,
@@ -331,9 +332,9 @@ def orthogonal_initializer(scale=1.0, dtype=tf.float32):
 
 
 get_variable_unsafe = unsafe_decorator(tf.get_variable)
-GRUCell_unsafe = unsafe_decorator(rnn_cell.GRUCell)
-BasicLSTMCell_unsafe = unsafe_decorator(rnn_cell.BasicLSTMCell)
-MultiRNNCell_unsafe = unsafe_decorator(rnn_cell.MultiRNNCell)
+GRUCell_unsafe = unsafe_decorator(GRUCell)
+BasicLSTMCell_unsafe = unsafe_decorator(BasicLSTMCell)
+MultiRNNCell_unsafe = unsafe_decorator(MultiRNNCell)
 linear_unsafe = unsafe_decorator(linear)
 multi_rnn_unsafe = unsafe_decorator(multi_rnn)
 multi_bidirectional_rnn_unsafe = unsafe_decorator(multi_bidirectional_rnn)

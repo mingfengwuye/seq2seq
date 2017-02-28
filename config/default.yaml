@@ -37,7 +37,6 @@ partial_rewards: False
 reward_function: 'sentence_bleu'
 
 # model (each one of these settings can be defined specifically in `encoders` and `decoder`, or generally here)
-attention: True          # use an attention mechanism
 batch_size: 80           # training batch size
 cell_size: 1000          # size of the RNN cells
 embedding_size: 620      # size of the embeddings

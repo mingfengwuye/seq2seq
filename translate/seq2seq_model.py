@@ -40,7 +40,7 @@ class Seq2SeqModel(object):
     """
 
     def __init__(self, encoders, decoder, learning_rate, global_step, max_gradient_norm, dropout_rate=0.0,
-                 freeze_variables=None, lm_weight=None, max_output_len=50, attention=True, feed_previous=0.0,
+                 freeze_variables=None, lm_weight=None, max_output_len=50, feed_previous=0.0,
                  optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
                  reinforce_baseline=True, softmax_temperature=1.0, loss_function='xent', rollouts=None,
                  partial_rewards=False, **kwargs):
@@ -112,10 +112,9 @@ class Seq2SeqModel(object):
                           encoder_input_length=self.encoder_input_length, rollouts=1)
 
         self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
-        decoder = decoders.attention_decoder if attention else decoders.decoder
 
         (self.outputs, self.attention_weights, self.decoder_outputs, self.beam_tensors,
-         self.sampled_output, self.states) = decoder(
+         self.sampled_output, self.states) = decoders.attention_decoder(
             attention_states=self.attention_states, initial_state=self.encoder_state,
             targets=self.targets, feed_previous=self.feed_previous,
             decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
