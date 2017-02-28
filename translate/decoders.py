@@ -338,7 +338,7 @@ def decoder(*args, **kwargs):
 
 def attention_decoder(targets, initial_state, attention_states, encoders, decoder, encoder_input_length,
                       decoder_input_length=None, dropout=None, feed_previous=0.0, feed_argmax=True,
-                      rollouts=None, **kwargs):
+                      **kwargs):
     """
     :param targets: tensor of shape (output_length, batch_size)
     :param initial_state: initial state of the decoder (usually the final state of the encoder),
@@ -360,7 +360,6 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
     assert decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'   # because of maxout
 
     decoder_inputs = targets[:-1,:]  # starts with BOS
-    targets = targets[1:,:]          # ends with EOS
 
     if decoder.get('embedding') is not None:
         initializer = decoder.embedding
@@ -423,11 +422,11 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
 
         proj_outputs = tf.TensorArray(dtype=tf.float32, size=time_steps, clear_after_read=False)
         decoder_outputs = tf.TensorArray(dtype=tf.float32, size=time_steps)
-        rewards = tf.TensorArray(dtype=tf.float32, size=time_steps, name='rewards')
 
         inputs = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False).unpack(
                                 tf.cast(decoder_inputs, tf.int64))
         samples = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False)
+        states = tf.TensorArray(dtype=tf.float32, size=time_steps)
 
         attn_lengths = [tf.shape(states)[1] for states in attention_states]
 
@@ -438,71 +437,8 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
 
         initial_input = embed(inputs.read(0))   # first symbol is BOS
 
-        def rollout_step(time, input_, state, path):
-            context_vector, new_weights = attention_(state, prev_weights=initial_weights)
-            output_ = linear_unsafe([state, input_, context_vector], decoder.cell_size, False, scope='maxout')
-            output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
-            output_ = linear_unsafe(output_, decoder.embedding_size, False, scope='softmax0')
-            output_ = linear_unsafe(output_, output_size, True, scope='softmax1')
-
-            sample = tf.squeeze(tf.multinomial(tf.log(tf.nn.softmax(output_)), num_samples=1), axis=1)
-            sample.set_shape([None])
-            sample = tf.stop_gradient(sample)
-            path = path.write(time, sample)
-
-            input_ = embed(sample)
-
-            x = tf.concat(1, [input_, context_vector])
-            call_cell = lambda: unsafe_decorator(cell)(x, state)
-
-            if sequence_length is not None:
-                _, new_state = rnn._rnn_step(
-                    time=time,
-                    sequence_length=sequence_length,
-                    min_sequence_length=min_sequence_length,
-                    max_sequence_length=max_sequence_length,
-                    zero_output=zero_output,
-                    state=state,
-                    call_cell=call_cell,
-                    state_size=state_size,
-                    skip_conditionals=True)
-            else:
-                _, new_state = call_cell()
-
-            return time + 1, input_, new_state, path
-
-        def rollout(time, input_, state, prefix_path, rollouts=rollouts):
-            batch_size = tf.shape(state)[0]
-            reward = tf.zeros(shape=(batch_size,), dtype=tf.float32)
-
-            if rollouts is None or rollouts <= 1:
-                return reward
-
-            prefix_path = prefix_path.gather(tf.range(0, time))
-
-            for _ in range(rollouts):
-                path = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False, name='path')
-
-                final_time, _, _, suffix_path = tf.while_loop(
-                    cond=lambda time, *_: time < time_steps,
-                    body=rollout_step,
-                    loop_vars=(time, input_, state, path),
-                    parallel_iterations=decoder.parallel_iterations,
-                    swap_memory=decoder.swap_memory)
-
-                suffix_path = tf.cond(
-                    time < final_time,
-                    lambda: suffix_path.gather(tf.range(time, final_time)),
-                    lambda: tf.zeros(shape=tf.stack([0, batch_size]), dtype=tf.int64))
-                path = tf.concat(0, [prefix_path, suffix_path])
-
-                with tf.device('/cpu:0'):
-                    reward += batch_bleu(tf.transpose(path), tf.transpose(targets), eos_id=utils.EOS_ID)
-
-            return reward / rollouts
-
-        def _time_step(time, input_, state, output, proj_outputs, decoder_outputs, samples, weights, prev_weights,
-                       rewards):
+        def _time_step(time, input_, state, output, proj_outputs, decoder_outputs, samples, states, weights,
+                       prev_weights):
             context_vector, new_weights = attention_(state, prev_weights=prev_weights)
             weights = weights.write(time, new_weights)
 
@@ -547,31 +483,28 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
             else:
                 new_output, new_state = call_cell()
 
-            # from here on, generate K paths, and compute average reward
-            reward = rollout(time + 1, input_, new_state, samples)
-            rewards = rewards.write(time, reward)
+            states = states.write(time, new_state)
 
-            return (time + 1, input_, new_state, new_output, proj_outputs, decoder_outputs, samples, weights,
-                    new_weights, rewards)
+            return (time + 1, input_, new_state, new_output, proj_outputs, decoder_outputs, samples, states, weights,
+                    new_weights)
 
-        _, _, new_state, new_output, proj_outputs, decoder_outputs, samples, weights, _, rewards = tf.while_loop(
+        _, _, new_state, new_output, proj_outputs, decoder_outputs, samples, states, weights, _ = tf.while_loop(
             cond=lambda time, *_: time < time_steps,
             body=_time_step,
-            loop_vars=(time, initial_input, state, output, proj_outputs, decoder_outputs, samples, weights,
-                       initial_weights, rewards),
+            loop_vars=(time, initial_input, state, output, proj_outputs, decoder_outputs, samples, weights, states,
+                       initial_weights),
             parallel_iterations=decoder.parallel_iterations,
             swap_memory=decoder.swap_memory)
 
         proj_outputs = proj_outputs.pack()
         decoder_outputs = decoder_outputs.pack()
         samples = samples.pack()
-        rewards = rewards.pack()  # tensor of shape (time_steps x batch_size)
         weights = weights.pack()  # batch_size, encoders, output time, input time
+        states = states.pack()
 
         beam_tensors = namedtuple('beam_tensors', 'state new_state output new_output')
-        # TODO: return attention weights
-        return (proj_outputs, weights, decoder_outputs, beam_tensors(state, new_state, output, new_output), samples,
-                rewards)
+        return (proj_outputs, weights, decoder_outputs, beam_tensors(state, new_state, output, new_output),
+                samples, states)
 
 
 def sequence_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True,
@@ -621,103 +554,6 @@ def baseline_loss(reward, weights, average_across_timesteps=False,
         cost /= tf.cast(batch_size, tf.float32)
 
     return cost
-
-
-def batch_bleu(hyps, refs, eos_id):
-    """
-    :param hyps: tensor of shape (batch_size x hyp_time_steps)
-    :param refs: tensor of shape (batch_size x ref_time_steps)
-    :return: tensor of shape (batch_size,)
-    """
-    fn = lambda pair: sentence_bleu(pair[0], pair[1], eos_id)
-    return tf.map_fn(fn, (hyps, refs), dtype=tf.float32,
-                     parallel_iterations=32)  # TODO: use batch_size here
-
-
-def sentence_bleu(hyp, ref, eos_id):
-    def truncate(s):
-        indices = tf.squeeze(tf.where(tf.equal(s, eos_id)), 1)
-        indices = tf.concat(0, [tf.cast(indices, tf.int32), tf.shape(s)])
-        index = indices[0]
-        return s[:index]
-
-    hyp = tf.cast(truncate(hyp), tf.int64)
-    ref = tf.cast(truncate(ref), tf.int64)
-
-    max_value = tf.reduce_max(tf.concat(0, [hyp, ref]))
-    tf.assert_greater_equal(max_value ** 4, 2**63 - 1)
-
-    ngrams = [
-        (lambda s: s),
-        (lambda s: s[:-1] * max_value + s[1:]),
-        (lambda s: s[:-2] * max_value**2 + s[1:-1] * max_value + s[2:]),
-        (lambda s: s[:-3] * max_value**3 + s[1:-2] * max_value**2 + s[2:-1] * max_value + s[3:]),
-    ]
-
-    score = tf.constant(0.0)
-
-    for ngram in ngrams:
-        hyp_ngrams = ngram(hyp)
-        ref_ngrams = ngram(ref)
-
-        hyp_plus_ref = tf.unique_with_counts(tf.concat(0, [hyp_ngrams, ref_ngrams])).y
-
-        hyp_ = tf.concat(0, [hyp_ngrams, hyp_plus_ref])
-        ref_ = tf.concat(0, [ref_ngrams, hyp_plus_ref])
-
-        hyp_ = tf.nn.top_k(hyp_, tf.shape(hyp_)[0]).values
-        ref_ = tf.nn.top_k(ref_, tf.shape(ref_)[0]).values
-
-        hyp_counts = tf.unique_with_counts(hyp_).count - 1
-        ref_counts = tf.unique_with_counts(ref_).count - 1
-
-        numerator = tf.cast(tf.reduce_sum(tf.minimum(hyp_counts, ref_counts)), tf.float32) + 1.0
-        denominator = tf.cast(tf.reduce_sum(hyp_counts), tf.float32) + 1.0
-
-        score += tf.log(numerator / denominator) / len(ngrams)
-
-    hyp_len = tf.cast(tf.shape(hyp)[0], tf.float32)
-    ref_len = tf.cast(tf.shape(ref)[0], tf.float32)
-
-    bp = tf.minimum(1.0, tf.exp(1.0 - ref_len / hyp_len))
-
-    return tf.stop_gradient(tf.exp(score) * bp)
-
-
-def partial_bleu(hyp, ref, eos_id):
-    # for each prefix in hyp, compute BLEU(prefix, ref)
-    # return res[1:] - res[:-1]
-    time_steps = tf.shape(hyp)[0]
-
-    time = tf.constant(0, dtype=tf.int32)
-    bleus = tf.TensorArray(dtype=tf.float32, size=time_steps)
-
-    def step(time, bleus):
-        bleu = sentence_bleu(hyp[:time + 1], ref, eos_id=eos_id)
-        bleus = bleus.write(time, bleu)
-        return time + 1, bleus
-
-    _, bleus = tf.while_loop(
-        cond=lambda t, _: t < time_steps,
-        body=step,
-        loop_vars=(time, bleus),
-        parallel_iterations=32)
-
-    bleus = bleus.pack()
-    pad = tf.zeros([1], dtype=tf.float32)
-
-    return bleus - tf.concat(0, [pad, bleus[:-1]])
-
-
-def batch_partial_bleu(hyps, refs, eos_id):
-    """
-    :param hyps: tensor of shape (batch_size x hyp_time_steps)
-    :param refs: tensor of shape (batch_size x ref_time_steps)
-    :return: tensor of shape (batch_size, time_steps)
-    """
-    fn = lambda pair: partial_bleu(pair[0], pair[1], eos_id)
-    return tf.map_fn(fn, (hyps, refs), dtype=tf.float32,
-                     parallel_iterations=32)  # TODO: use batch_size here
 
 
 def reinforce_baseline(decoder_states, reward):

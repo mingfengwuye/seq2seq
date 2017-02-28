@@ -109,13 +109,13 @@ class Seq2SeqModel(object):
         self.partial_rewards = partial_rewards
 
         parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
-                          encoder_input_length=self.encoder_input_length, rollouts=self.rollouts)
+                          encoder_input_length=self.encoder_input_length, rollouts=1)
 
         self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
         decoder = decoders.attention_decoder if attention else decoders.decoder
 
         (self.outputs, self.attention_weights, self.decoder_outputs, self.beam_tensors,
-         self.sampled_output, self.rewards) = decoder(
+         self.sampled_output, self.states) = decoder(
             attention_states=self.attention_states, initial_state=self.encoder_state,
             targets=self.targets, feed_previous=self.feed_previous,
             decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
@@ -127,7 +127,7 @@ class Seq2SeqModel(object):
 
         self.xent_loss, self.reinforce_loss, self.baseline_loss = None, None, None
         self.update_op, self.sgd_update_op, self.baseline_update_op = None, None, None
-        self.reward = None    # sentence-level reward
+        self.rewards = None
 
         if loss_function == 'xent':
             self.init_xent(optimizers, decode_only)
@@ -172,21 +172,7 @@ class Seq2SeqModel(object):
             self.update_op, self.sgd_update_op = self.get_update_op(self.xent_loss, optimizers, self.global_step)
 
     def init_reinforce(self, optimizers, reinforce_baseline=True, decode_only=False):
-        if self.rollouts is None or self.rollouts <= 1:
-            hyps = tf.transpose(self.sampled_output)
-            refs = tf.transpose(self.targets[1:,:])
-
-            with tf.device('/cpu:0'):
-                self.reward = decoders.batch_bleu(hyps, refs, eos_id=utils.EOS_ID)
-                self.rewards = decoders.batch_partial_bleu(hyps, refs, eos_id=utils.EOS_ID)
-                self.rewards = tf.transpose(self.rewards)
-
-            if not self.partial_rewards:
-                time_steps = tf.shape(self.decoder_outputs)[0]
-                batch_size = tf.shape(self.decoder_outputs)[1]
-
-                self.rewards = tf.reshape(tf.tile(self.reward, [time_steps]),
-                                          shape=tf.pack([time_steps, batch_size]))
+        self.rewards = tf.placeholder(tf.float32, [None, None], 'rewards')
 
         if reinforce_baseline:
             reward = decoders.reinforce_baseline(self.decoder_outputs, self.rewards)
@@ -236,19 +222,29 @@ class Seq2SeqModel(object):
 
         return namedtuple('output', 'loss attn_weights')(res['loss'], res.get('attn_weights'))
 
-    def reinforce_step(self, session, data, update_model=True, update_baseline=True, use_sgd=False, **kwargs):
+
+    def reinforce_step(self, session, data, update_model=True, update_baseline=True,
+                       use_sgd=False, reward_function=None, **kwargs):
         if self.dropout is not None:
             session.run(self.dropout_off)
 
         batch = self.get_batch(data)
         encoder_inputs, targets, encoder_input_length = batch
 
+        time_steps = targets.shape[0]
         batch_size = targets.shape[1]
-        target_length = [self.max_output_len] * batch_size
+
+        max_output_len = min(self.max_output_len, int(1.5 * time_steps))
+
+        if time_steps <= max_output_len:
+            targets = np.pad(targets,
+                [(0, max_output_len + 1 - time_steps), (0, 0)],
+                mode='constant', constant_values=utils.EOS_ID,)
+        target_length = [max_output_len] * batch_size
 
         input_feed = {
-            self.target_length: target_length,
             self.targets: targets,
+            self.target_length: target_length,
             self.feed_previous: 1.0,
             self.feed_argmax: False   # sample from softmax
         }
@@ -257,83 +253,76 @@ class Seq2SeqModel(object):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
 
-        output_feed = {'loss': self.reinforce_loss, 'baseline_loss': self.baseline_loss}
+        sampled_output, outputs, states = session.run([self.sampled_output, self.outputs, self.states],
+                                                       input_feed)
 
-        if update_model:
-            output_feed['updates'] = self.sgd_update_op if use_sgd else self.update_op
-
-        if update_baseline:
-            output_feed['baseline_updates'] = self.baseline_update_op
-
-        res = session.run(output_feed, input_feed)
-
-        return namedtuple('output', 'loss baseline_loss')(res['loss'], res['baseline_loss'])
-
-    def reinforce_step_bis(self, session, data, update_model=True, update_baseline=True,
-                           use_sgd=False, reward_function=None, **kwargs):
-        # Same as `reinforce_step` except that reward is computed outside of the TensorFlow graph,
-        # which means that we need to do a forward pass and then a backward pass.
-        # This is slower, but more powerful than `reinforce_step` as any reward function can be used.
-
-        if self.dropout is not None:
-            session.run(self.dropout_off)
-
-        batch = self.get_batch(data)
-        encoder_inputs, targets, encoder_input_length = batch
-
-        batch_size = targets.shape[1]
-        target_length = [self.max_output_len] * batch_size
-
-        input_feed = {
-            self.target_length: target_length,
-            self.targets: targets,
-            self.feed_previous: 1.0,
-            self.feed_argmax: False   # sample from softmax
-        }
-
-        for i in range(self.encoder_count):
-            input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
-            input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
-
-        sampled_output, outputs, rewards_ = session.run([self.sampled_output, self.outputs, self.rewards], input_feed)
-
-        # compute rewards
-        targets_ = targets[1:].T
-        outputs_ = sampled_output.T
+        time_steps = sampled_output.shape[0]
 
         if reward_function is None:
             reward_function = 'sentence_bleu'
 
         reward_function = getattr(utils, reward_function)
 
-        time_steps = sampled_output.shape[0]
+        def compute_reward(output, target, partial=False):
+            j, = np.where(output == utils.EOS_ID)  # array of indices whose value is EOS_ID
+            if len(j) > 0:
+                output = output[:j[0]]
 
-        rewards = []
-        for target, output in zip(targets_, outputs_):
-            i, = np.where(output == utils.EOS_ID)  # array of indices whose value is EOS_ID
-            if len(i) > 0:
-                output = output[:i[0]]
+            j, = np.where(target == utils.EOS_ID)
+            if len(j) > 0:
+                target = target[:j[0]]
 
-            i, = np.where(target == utils.EOS_ID)
-            if len(i) > 0:
-                target = target[:i[0]]
-
-            # reward = self.reinforce_reward(output_, target_)
-            if self.partial_rewards:
+            if partial:
                 reward = [reward_function(output[:i + 1], target) for i in range(len(output))]
                 reward = [0] + reward
                 reward += [reward[-1]] * (time_steps - len(reward) + 1)
                 reward = np.array(reward)
-
-                reward = reward[1:] - reward[:-1]
+                return reward[1:] - reward[:-1]
             else:
-                reward = reward_function(output, target)
+                return reward_function(output, target)
 
-            rewards.append(reward)
+        def compute_rewards(outputs, targets, partial=False):
+            return np.array([compute_reward(output, target, partial=partial)
+                             for output, target in zip(outputs.T, targets.T)])
 
-        if self.partial_rewards:
-            rewards = np.array(rewards).T
+        targets = targets[1:]
+
+        if self.rollouts is not None and self.rollouts > 1:
+            rewards = []
+
+            for i in range(time_steps):
+
+                if i == time_steps - 1:
+                    rewards.append(compute_rewards(sampled_output, targets))
+                    continue
+
+                reward = 0
+
+                for _ in range(self.rollouts):
+                    prefix = sampled_output[:i + 1]
+
+                    input_ = np.expand_dims(sampled_output[i], axis=0)
+                    targets_ = targets[i + 1:]
+                    targets_ = np.concatenate([input_, targets_], axis=0)
+                    target_length_ = [time_steps - i - 1] * batch_size
+
+                    input_feed_ = dict(input_feed)
+                    input_feed_[self.targets] = targets_
+                    input_feed_[self.target_length] = target_length_
+                    input_feed_[self.beam_tensors.state] = states[i]
+
+                    outputs_ = session.run(self.sampled_output, input_feed_)
+                    outputs_ = np.concatenate([prefix, outputs_], axis=0)
+
+                    reward += compute_rewards(outputs_, targets) / self.rollouts
+
+                rewards.append(reward)
+
+            rewards = np.array(rewards)
+        elif self.partial_rewards:
+            rewards = compute_rewards(sampled_output, targets, partial=True).T
         else:
+            rewards = compute_rewards(sampled_output, targets)
             rewards = np.stack([rewards] * time_steps)
 
         input_feed[self.rewards] = rewards

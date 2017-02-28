@@ -165,7 +165,7 @@ class TranslationModel(BaseTranslationModel):
 
     def train_step(self, sess, loss_function='xent', reward_function=None):
         if loss_function == 'reinforce':
-            fun = self.seq2seq_model.reinforce_step_bis
+            fun = self.seq2seq_model.reinforce_step
         else:
             fun = self.seq2seq_model.step
 
@@ -173,11 +173,11 @@ class TranslationModel(BaseTranslationModel):
                    reward_function=reward_function)
 
     def baseline_step(self, sess, reward_function=None):
-        return self.seq2seq_model.reinforce_step_bis(sess,
-                                                     next(self.batch_iterator),
-                                                     update_model=False,
-                                                     update_baseline=True,
-                                                     reward_function=reward_function).baseline_loss
+        return self.seq2seq_model.reinforce_step(sess,
+                                                 next(self.batch_iterator),
+                                                 update_model=False,
+                                                 update_baseline=True,
+                                                 reward_function=reward_function).baseline_loss
 
     def eval_step(self, sess):
         # compute perplexity on dev set
