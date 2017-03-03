@@ -7,13 +7,13 @@ embedding_size: 256
 layers: 1
 bidir: True
 use_lstm: False
-max_output_len: 50
+max_output_len: 42
 max_input_len: 42
 weight_scale: 0.1
 
 data_dir: experiments/APE16/data_plus
-model_dir: experiments/APE16/xent_multi_plus
-log_file: experiments/APE16/xent_multi_plus/log.txt
+model_dir: experiments/APE16/xent_translation_plus
+log_file: experiments/APE16/xent_translation_plus/log.txt
 batch_size: 32
 
 loss_function: 'xent'
@@ -39,6 +39,4 @@ encoders:
   - name: src
 
 decoder:
-    name: edits
-
-use_edits: True
+    name: pe

@@ -169,12 +169,12 @@ def corpus_scores(hypotheses, references, main='bleu', **kwargs):
 
 @score_function_decorator(reversed=True)
 def corpus_scores_ter(*args, **kwargs):
-    return corpus_scores(*args, **kwargs, main='ter')
+    return corpus_scores(*args, main='ter', **kwargs)
 
 
 @score_function_decorator(reversed=True)
 def corpus_scores_wer(*args, **kwargs):
-    return corpus_scores(*args, **kwargs, main='wer')
+    return corpus_scores(*args, main='wer', **kwargs)
 
 
 corpus_scores_bleu = corpus_scores
