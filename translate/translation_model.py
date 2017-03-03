@@ -41,7 +41,9 @@ class BaseTranslationModel(object):
         def full_path(filename):
             return os.path.join(self.checkpoint_dir, filename)
 
-        if any(score_ < score for score_, _ in best_scores) or not best_scores:
+        cmp_ = lambda x, y: y < x if self.reversed_scores else lambda x, y: x < y
+
+        if any(cmp_(score_, score) for score_, _ in best_scores) or not best_scores:
             # if this checkpoint is in the top, save it under a special name
 
             prefix = 'translate-{}'.format(step)
@@ -53,11 +55,11 @@ class BaseTranslationModel(object):
                     shutil.copy(full_path(filename), full_path(dest_filename))
 
                     # also copy to `best` if this checkpoint is the absolute best
-                    if all(score_ < score for score_, _ in best_scores):
+                    if all(cmp_(score_, score) for score_, _ in best_scores):
                         dest_filename = filename.replace(prefix, 'best')
                         shutil.copy(full_path(filename), full_path(dest_filename))
 
-            best_scores = sorted(best_scores + [(score, step)], reverse=True)
+            best_scores = sorted(best_scores + [(score, step)], reverse=not self.reversed_scores)
 
             for _, step_ in best_scores[self.keep_best:]:
                 # remove checkpoints that are not in the top anymore
