@@ -34,3 +34,11 @@ scripts/prepare-data.py experiments/post_editing/raw_data/APE16/train src pe mt 
 scripts/prepare-data.py experiments/post_editing/raw_data/APE17/train src pe mt edits experiments/post_editing/data_de_en/ \
 --no-tokenize --dev-size 2000 --dev-prefix train-dev --test-prefix dev \
 --test-corpus experiments/post_editing/raw_data/APE16/dev
+
+
+cat raw_data/artificial/500K.mt > data_en_de_plus/concat.mt
+cat raw_data/artificial/500K.pe > data_en_de_plus/concat.pe
+cat raw_data/artificial/500K.src > data_en_de_plus/concat.src
+cat raw_data/APE16/train.mt >> data_en_de_plus/concat.mt
+cat raw_data/APE16/train.pe >> data_en_de_plus/concat.pe
+cat raw_data/APE16/train.src >> data_en_de_plus/concat.src

@@ -147,7 +147,7 @@ class MultiTaskModel(BaseTranslationModel):
                     # kwargs_ = {**kwargs, 'output': output}
                     kwargs_ = dict(kwargs)
                     kwargs_['output'] = output
-                    scores_ = model_.evaluate(sess, beam_size, on_dev=True, **kwargs_)
+                    scores_ = model_.evaluate(sess, beam_size, on_dev=True, use_edits=use_edits, **kwargs_)
                     score_ = scores_[0]  # in case there are several dev files, only the first one counts
 
                     # if there is a main task, pick best checkpoint according to its score
