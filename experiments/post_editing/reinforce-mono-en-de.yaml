@@ -22,6 +22,7 @@ loss_function: 'reinforce'
 optimizer: 'sgd'
 learning_rate: 0.01
 reward_function: ter_reward
+score_function: corpus_scores_ter
 reset: True
 
 learning_rate_decay_factor: 0.9
