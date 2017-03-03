@@ -21,7 +21,7 @@ dev_prefix: dev
 loss_function: 'reinforce'
 optimizer: 'sgd'
 learning_rate: 0.01
-reward_function: sentence_ter
+reward_function: ter_reward
 reset: True
 
 learning_rate_decay_factor: 0.9

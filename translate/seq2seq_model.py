@@ -19,7 +19,7 @@ import numpy as np
 import tensorflow as tf
 import re
 
-from translate import utils
+from translate import utils, evaluation
 from translate import decoders
 from collections import namedtuple
 
@@ -223,7 +223,13 @@ class Seq2SeqModel(object):
 
 
     def reinforce_step(self, session, data, update_model=True, update_baseline=True,
-                       use_sgd=False, reward_function=None, use_edits=False, **kwargs):
+                       use_sgd=False, reward_function=None, use_edits=False, vocabs=None, **kwargs):
+        assert vocabs or not use_edits
+
+        if vocabs:
+            src_vocab = vocabs[0]
+            trg_vocab = vocabs[-1]
+
         if self.dropout is not None:
             session.run(self.dropout_off)
 
@@ -260,12 +266,9 @@ class Seq2SeqModel(object):
         if reward_function is None:
             reward_function = 'sentence_bleu'
 
-        reward_function = getattr(utils, reward_function)
+        reward_function = getattr(evaluation, reward_function)
 
-        def compute_reward(output, target, partial=False):
-            if use_edits:
-                pass
-
+        def compute_reward(output, target, source, partial=False):
             j, = np.where(output == utils.EOS_ID)  # array of indices whose value is EOS_ID
             if len(j) > 0:
                 output = output[:j[0]]
@@ -273,6 +276,16 @@ class Seq2SeqModel(object):
             j, = np.where(target == utils.EOS_ID)
             if len(j) > 0:
                 target = target[:j[0]]
+
+            j, = np.where(source == utils.EOS_ID)
+            if len(j) > 0:
+                source = source[:j[0]]
+
+            if use_edits:   # use source sentence and sequence of edits to reconstruct output and target sequence
+                # It makes more sense to compute the reward on the reconstructed sequences, than on the sequences
+                # of edits.
+                output = utils.reverse_edit_ids(source, output, src_vocab, trg_vocab)
+                target = utils.reverse_edit_ids(source, target, src_vocab, trg_vocab)
 
             if partial:
                 reward = [reward_function(output[:i + 1], target) for i in range(len(output))]
@@ -284,8 +297,8 @@ class Seq2SeqModel(object):
                 return reward_function(output, target)
 
         def compute_rewards(outputs, targets, partial=False):
-            return np.array([compute_reward(output, target, partial=partial)
-                             for output, target in zip(outputs.T, targets.T)])
+            return np.array([compute_reward(output, target, source, partial=partial)
+                             for output, target, source in zip(outputs.T, targets.T, encoder_inputs[0])])
 
         targets = targets[1:]
 

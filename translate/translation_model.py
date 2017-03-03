@@ -11,12 +11,17 @@ from translate.seq2seq_model import Seq2SeqModel
 
 
 class BaseTranslationModel(object):
-    def __init__(self, name, checkpoint_dir, keep_best=1):
+    def __init__(self, name, checkpoint_dir, keep_best=1, score_function='corpus_scores', **kwargs):
         self.name = name
         self.keep_best = keep_best
         self.checkpoint_dir = checkpoint_dir
         self.saver = None
         self.global_step = None
+
+        try:
+            self.reversed_scores = getattr(evaluation, score_function).reversed  # the lower the better
+        except AttributeError:
+            self.reversed_scores = False  # the higher the better
 
     def manage_best_checkpoints(self, step, score):
         score_filename = os.path.join(self.checkpoint_dir, 'scores.txt')
@@ -31,7 +36,7 @@ class BaseTranslationModel(object):
         if any(step_ >= step for _, step_ in scores):
             utils.warn('inconsistent scores.txt file')
 
-        best_scores = sorted(scores, reverse=True)[:self.keep_best]
+        best_scores = sorted(scores, reverse=not self.reversed_scores)[:self.keep_best]
 
         def full_path(filename):
             return os.path.join(self.checkpoint_dir, filename)
@@ -92,7 +97,7 @@ class BaseTranslationModel(object):
 class TranslationModel(BaseTranslationModel):
     def __init__(self, name, encoders, decoder, checkpoint_dir, learning_rate, learning_rate_decay_factor, batch_size,
                  keep_best=1, load_embeddings=None, max_input_len=None, **kwargs):
-        super(TranslationModel, self).__init__(name, checkpoint_dir, keep_best)
+        super(TranslationModel, self).__init__(name, checkpoint_dir, keep_best, **kwargs)
 
         self.batch_size = batch_size
         self.src_ext = [encoder.get('ext') or encoder.name for encoder in encoders]
@@ -163,21 +168,23 @@ class TranslationModel(BaseTranslationModel):
     def train(self, *args, **kwargs):
         raise NotImplementedError('use MultiTaskModel')
 
-    def train_step(self, sess, loss_function='xent', reward_function=None):
+    def train_step(self, sess, loss_function='xent', reward_function=None, use_edits=False):
         if loss_function == 'reinforce':
             fun = self.seq2seq_model.reinforce_step
         else:
             fun = self.seq2seq_model.step
 
         return fun(sess, next(self.batch_iterator), update_model=True, update_baseline=True, use_sgd=self.use_sgd,
-                   reward_function=reward_function)
+                   reward_function=reward_function, use_edits=use_edits, vocabs=self.vocabs)
 
-    def baseline_step(self, sess, reward_function=None):
+    def baseline_step(self, sess, reward_function=None, use_edits=False):
         return self.seq2seq_model.reinforce_step(sess,
                                                  next(self.batch_iterator),
                                                  update_model=False,
                                                  update_baseline=True,
-                                                 reward_function=reward_function).baseline_loss
+                                                 reward_function=reward_function,
+                                                 use_edits=use_edits,
+                                                 vocabs=self.vocabs).baseline_loss
 
     def eval_step(self, sess):
         # compute perplexity on dev set

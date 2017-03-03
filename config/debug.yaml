@@ -12,7 +12,6 @@ weight_scale: 0.1
 
 data_dir: data/btec
 model_dir: models/debug
-log_file: models/debug/log.txt
 batch_size: 32
 dev_prefix: dev
 
@@ -21,7 +20,7 @@ optimizer: 'adam'
 
 steps_per_checkpoint: 500
 steps_per_eval: 500
-score_function: corpus_scores_ter
+score_function: corpus_scores
 
 max_gradient_norm: 1.0
 batch_mode: 'standard'

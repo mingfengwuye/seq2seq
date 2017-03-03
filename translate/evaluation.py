@@ -51,6 +51,13 @@ def sentence_bleu(hypothesis, reference, smoothing=True, order=4, **kwargs):
     return math.exp(log_score) * bp
 
 
+def score_function_decorator(reversed=False):
+    def decorator(func):
+        func.reversed = reversed
+        return func
+    return decorator
+
+
 def corpus_bleu(hypotheses, references, smoothing=False, order=4, **kwargs):
     """
     Computes the BLEU score at the corpus-level between a list of translation hypotheses and references.
@@ -101,6 +108,7 @@ def corpus_bleu(hypotheses, references, smoothing=False, order=4, **kwargs):
     return bleu, 'penalty={:.3f} ratio={:.3f}'.format(bp, hyp_length / ref_length)
 
 
+@score_function_decorator(reversed=True)
 def corpus_ter(hypotheses, references, **kwargs):
     scores = [pyter.ter(hyp.split(), ref.split()) for hyp, ref in zip(hypotheses, references)]
     score = 100 * sum(scores) / len(scores)
@@ -111,6 +119,7 @@ def corpus_ter(hypotheses, references, **kwargs):
     return score, 'ratio={:.3f}'.format(hyp_length / ref_length)
 
 
+@score_function_decorator(reversed=True)
 def corpus_tercom(hypotheses, references, case_sensitive=True, **kwargs):
     with tempfile.NamedTemporaryFile('w') as hypothesis_file, tempfile.NamedTemporaryFile('w') as reference_file:
         for i, (hypothesis, reference) in enumerate(zip(hypotheses, references)):
@@ -129,6 +138,7 @@ def corpus_tercom(hypotheses, references, case_sensitive=True, **kwargs):
         return float(error) * 100, ''
 
 
+@score_function_decorator(reversed=True)
 def corpus_wer(hypotheses, references, **kwargs):
     scores = [
         levenhstein(tuple(hyp.split()), tuple(ref.split())) / len(ref.split())
@@ -157,9 +167,17 @@ def corpus_scores(hypotheses, references, main='bleu', **kwargs):
     return main_score, summary
 
 
-corpus_scores_ter = partial(corpus_scores, main='ter')
-corpus_scores_wer = partial(corpus_scores, main='wer')
-corpus_scores_bleu = partial(corpus_scores, main='bleu')
+@score_function_decorator(reversed=True)
+def corpus_scores_ter(*args, **kwargs):
+    return corpus_scores(*args, **kwargs, main='ter')
+
+
+@score_function_decorator(reversed=True)
+def corpus_scores_wer(*args, **kwargs):
+    return corpus_scores(*args, **kwargs, main='wer')
+
+
+corpus_scores_bleu = corpus_scores
 
 
 @functools.lru_cache(maxsize=1024)

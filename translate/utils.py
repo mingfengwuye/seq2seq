@@ -78,6 +78,13 @@ def reverse_edits(source, edits):
     return ' '.join(target)
 
 
+def reverse_edit_ids(src_ids, edit_ids, src_vocab, trg_vocab):
+    src_words = [src_vocab.reverse[src_id] for src_id in src_ids]
+    trg_words = [trg_vocab.reverse[edit_id] for edit_id in edit_ids]
+
+    return reverse_edits(' '.join(src_words), ' '.join(trg_words)).split()
+
+
 def initialize_vocabulary(vocabulary_path):
     """
     Initialize vocabulary from file.
