@@ -223,7 +223,7 @@ class Seq2SeqModel(object):
 
 
     def reinforce_step(self, session, data, update_model=True, update_baseline=True,
-                       use_sgd=False, reward_function=None, **kwargs):
+                       use_sgd=False, reward_function=None, use_edits=False, **kwargs):
         if self.dropout is not None:
             session.run(self.dropout_off)
 
@@ -263,6 +263,9 @@ class Seq2SeqModel(object):
         reward_function = getattr(utils, reward_function)
 
         def compute_reward(output, target, partial=False):
+            if use_edits:
+                pass
+
             j, = np.where(output == utils.EOS_ID)  # array of indices whose value is EOS_ID
             if len(j) > 0:
                 output = output[:j[0]]

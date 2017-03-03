@@ -6,7 +6,7 @@ import sys
 import math
 import numpy as np
 import shutil
-from translate import utils
+from translate import utils, evaluation
 from translate.seq2seq_model import Seq2SeqModel
 
 
@@ -361,8 +361,6 @@ class TranslationModel(BaseTranslationModel):
                                                      use_edits=use_edits)
                 for sources, hypothesis, reference in zip(src_sentences, hypothesis_iter, trg_sentences):
                     if use_edits:
-                        # main_source = sources[0]
-                        # hypothesis = utils.reverse_edits(main_source, hypothesis)
                         reference = utils.reverse_edits(sources[0], reference)
 
                     hypotheses.append(hypothesis)
@@ -377,7 +375,7 @@ class TranslationModel(BaseTranslationModel):
                     output_file.close()
 
             # default scoring function is utils.bleu_score
-            score, score_summary = getattr(utils, score_function)(hypotheses, references, script_dir=script_dir)
+            score, score_summary = getattr(evaluation, score_function)(hypotheses, references, script_dir=script_dir)
 
             # print the scoring information
             score_info = []

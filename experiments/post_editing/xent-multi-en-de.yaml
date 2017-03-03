@@ -11,21 +11,20 @@ max_output_len: 50
 max_input_len: 50
 weight_scale: 0.1
 
-data_dir: experiments/post_editing/data_subwords
-model_dir: experiments/post_editing/subwords
-log_file: experiments/post_editing/subwords/log.txt
+data_dir: experiments/post_editing/data_en_de
+model_dir: experiments/post_editing/xent_multi_en_de
+log_file: experiments/post_editing/xent_multi_en_de/log.txt
 batch_size: 32
 dev_prefix: dev
 
 loss_function: 'xent'
 optimizer: 'adam'
 
-# optimizer: 'sgd'
-sgd_after_n_epoch: 20
+sgd_after_n_epoch: 100
 learning_rate: 0.2
 learning_rate_decay_factor: 0.9
-decay_every_n_epoch: 1
-decay_after_n_epoch: 21
+decay_every_n_epoch: 5
+decay_after_n_epoch: 101
 
 steps_per_checkpoint: 500
 steps_per_eval: 500
@@ -41,3 +40,5 @@ encoders:
 
 decoder:
     name: edits
+
+use_edits: True

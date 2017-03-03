@@ -19,7 +19,6 @@ dev_prefix: dev
 loss_function: 'xent'
 optimizer: 'adam'
 
-# optimizer: 'sgd'
 sgd_after_n_epoch: 20
 learning_rate: 0.2
 learning_rate_decay_factor: 0.9

@@ -429,6 +429,9 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
         weights = weights.stack()  # batch_size, encoders, output time, input time
         states = states.stack()
 
+        # weights = tf.Print(weights, [weights[:,0]], summarize=20)
+        # tf.control_dependencies()
+
         beam_tensors = namedtuple('beam_tensors', 'state new_state output new_output')
         return (proj_outputs, weights, decoder_outputs, beam_tensors(state, new_state, output, new_output),
                 samples, states)
@@ -466,7 +469,12 @@ def sequence_loss(logits, targets, weights, average_across_timesteps=False, aver
 
 def baseline_loss(reward, weights, average_across_timesteps=False,
                   average_across_batch=True):
-    batch_size = tf.shape(reward)[0]
+    """
+    :param reward: tensor of shape (time_steps, batch_size)
+    :param weights: tensor of shape (time_steps, batch_size)
+    """
+    batch_size = tf.shape(reward)[1]
+
     cost = reward ** 2
     cost = tf.reduce_sum(cost * weights, axis=0)
 
@@ -484,6 +492,13 @@ def baseline_loss(reward, weights, average_across_timesteps=False,
 
 
 def reinforce_baseline(decoder_states, reward):
+    """
+    Center the reward by computing a baseline reward over decoder states.
+
+    :param decoder_states: internal states of the decoder, tensor of shape (time_steps, batch_size, state_size)
+    :param reward: reward for each time step, tensor of shape (time_steps, batch_size)
+    :return: reward - computed baseline, tensor of shape (time_steps, batch_size)
+    """
     time_steps = tf.shape(decoder_states)[0]
     batch_size = tf.shape(decoder_states)[1]
     state_size = decoder_states.get_shape()[2]
@@ -497,8 +512,6 @@ def reinforce_baseline(decoder_states, reward):
 
     baseline = tf.reshape(baseline, shape=tf.stack([time_steps, batch_size]))
 
-    # reward = tf.reshape(tf.tile(reward, [time_steps]),
-    #                     shape=tf.stack([time_steps, batch_size]))
     return reward - baseline
 
 

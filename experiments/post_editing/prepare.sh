@@ -14,5 +14,23 @@
 
 # xz -dkf commoncrawl.de.xz --verbose
 
-scripts/prepare-data.py experiments/post_editing/data/raw/train src pe mt experiments/post_editing/data/ --no-tokenize \
---dev-corpus experiments/post_editing/data/raw/dev --test-corpus experiments/post_editing/data/raw/test
+# scripts/prepare-data.py experiments/post_editing/data/raw/train src pe mt experiments/post_editing/data/ --no-tokenize \
+# --dev-corpus experiments/post_editing/data/raw/dev --test-corpus experiments/post_editing/data/raw/test
+
+
+scripts/extract-edits.py experiments/post_editing/raw_data/APE16/train.{mt,pe} > experiments/post_editing/raw_data/APE16/train.edits
+scripts/extract-edits.py experiments/post_editing/raw_data/APE16/dev.{mt,pe} > experiments/post_editing/raw_data/APE16/dev.edits
+scripts/extract-edits.py experiments/post_editing/raw_data/APE16/test.{mt,pe} > experiments/post_editing/raw_data/APE16/test.edits
+scripts/extract-edits.py experiments/post_editing/raw_data/APE17/train.{mt,pe} > experiments/post_editing/raw_data/APE17/train.edits
+scripts/extract-edits.py experiments/post_editing/raw_data/APE17/dev.{mt,pe} > experiments/post_editing/raw_data/APE17/dev.edits
+
+
+scripts/prepare-data.py experiments/post_editing/raw_data/APE16/train src pe mt edits experiments/post_editing/data_en_de/ \
+--no-tokenize \
+--dev-corpus experiments/post_editing/raw_data/APE16/dev \
+--test-corpus experiments/post_editing/raw_data/APE16/test
+
+
+scripts/prepare-data.py experiments/post_editing/raw_data/APE17/train src pe mt edits experiments/post_editing/data_de_en/ \
+--no-tokenize --dev-size 2000 --dev-prefix train-dev --test-prefix dev \
+--test-corpus experiments/post_editing/raw_data/APE16/dev

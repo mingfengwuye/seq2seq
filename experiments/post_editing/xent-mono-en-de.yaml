@@ -11,9 +11,9 @@ max_output_len: 50
 max_input_len: 50
 weight_scale: 0.1
 
-data_dir: experiments/post_editing/data
-model_dir: experiments/post_editing/baseline_mono
-log_file: experiments/post_editing/baseline_mono/log.txt
+data_dir: experiments/post_editing/data_en_de
+model_dir: experiments/post_editing/xent_mono_en_de
+log_file: experiments/post_editing/xent_mono_en_de/log.txt
 batch_size: 32
 dev_prefix: dev
 
@@ -39,3 +39,5 @@ encoders:
 
 decoder:
     name: edits
+
+use_edits: True

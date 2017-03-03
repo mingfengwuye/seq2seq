@@ -35,14 +35,13 @@ This example will create 6 files in `output/`: train.fr, train.en, test.fr,\
  `data/news-dev`. These three output corpora will be shuffled.
 """
 
-_GO = '<S>'
+_BOS = '<S>'
 _EOS = '</S>'
 _UNK = '<UNK>'
 
-_START_VOCAB = [_GO, _EOS, _UNK]
+_START_VOCAB = [_BOS, _EOS, _UNK]
 
-# PAD_ID = 0
-GO_ID = 0
+BOS_ID = 0
 EOS_ID = 1
 UNK_ID = 2
 

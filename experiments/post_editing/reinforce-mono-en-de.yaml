@@ -1,0 +1,45 @@
+
+dropout_rate: 0.5
+cell_size: 256
+attn_size: 256
+embedding_size: 128
+
+layers: 1
+bidir: True
+use_lstm: False
+max_output_len: 50
+max_input_len: 50
+weight_scale: 0.1
+
+data_dir: experiments/post_editing/data_en_de
+model_dir: experiments/post_editing/reinforce_mono_en_de
+log_file: experiments/post_editing/reinforce_mono_en_de/log.txt
+batch_size: 32
+dev_prefix: dev
+
+
+loss_function: 'reinforce'
+optimizer: 'sgd'
+learning_rate: 0.01
+reward_function: sentence_ter
+reset: True
+
+learning_rate_decay_factor: 0.9
+decay_every_n_epoch: 2
+decay_after_n_epoch: 10
+
+steps_per_checkpoint: 200
+steps_per_eval: 200
+
+max_gradient_norm: 1.0
+max_epochs: 0
+batch_mode: 'standard'
+read_ahead: 10
+
+encoders:
+  - name: mt
+
+decoder:
+    name: edits
+
+use_edits: True

@@ -1,18 +1,14 @@
 import os
 import sys
 import re
-import subprocess
-import tempfile
 import numpy as np
 import logging
 import struct
 import random
 import math
 import wave
-import functools
 
-from translate import pyter
-from collections import namedtuple, Counter
+from collections import namedtuple
 from contextlib import contextmanager
 
 # special vocabulary symbols
@@ -159,160 +155,6 @@ def get_filenames(data_dir, extensions, train_prefix, dev_prefix, vocab_prefix,
 
     filenames = namedtuple('filenames', ['train', 'dev', 'test', 'vocab', 'lm_path', 'embeddings'])
     return filenames(train, dev, test, vocab, lm_path, embeddings)
-
-
-def sentence_bleu(hypothesis, reference, smoothing=True, order=4, **kwargs):
-    """
-    Compute sentence-level BLEU score between a translation hypothesis and a reference.
-    All reward functions used for REINFORCE should follow this interface.
-
-    :param hypothesis: list of tokens or token ids
-    :param reference: list of tokens or token ids
-    :param smoothing: apply smoothing (recommended, especially for short sequences)
-    :param order: count n-grams up to this value of n.
-    :param kwargs: additional (unused) parameters
-    :return: BLEU score (float)
-    """
-    log_score = 0
-
-    if len(hypothesis) == 0:
-        return 0
-
-    for i in range(order):
-        hyp_ngrams = Counter(zip(*[hypothesis[j:] for j in range(i + 1)]))
-        ref_ngrams = Counter(zip(*[reference[j:] for j in range(i + 1)]))
-
-        numerator = sum(min(count, ref_ngrams[bigram]) for bigram, count in hyp_ngrams.items())
-        denominator = sum(hyp_ngrams.values())
-
-        if smoothing:
-            numerator += 1
-            denominator += 1
-
-        score = numerator / denominator
-
-        if score == 0:
-            log_score += float('-inf')
-        else:
-            log_score += math.log(score) / order
-
-    bp = min(1, math.exp(1 - len(reference) / len(hypothesis)))
-
-    return math.exp(log_score) * bp
-
-
-def corpus_bleu(hypotheses, references, smoothing=False, order=4, **kwargs):
-    """
-    Computes the BLEU score at the corpus-level between a list of translation hypotheses and references.
-    With the default settings, this computes the exact same score as `multi-bleu.perl`.
-
-    All corpus-based evaluation functions should follow this interface.
-
-    :param hypotheses: list of strings
-    :param references: list of strings
-    :param smoothing: apply +1 smoothing
-    :param order: count n-grams up to this value of n. `multi-bleu.perl` uses a value of 4.
-    :param kwargs: additional (unused) parameters
-    :return: score (float), and summary containing additional information (str)
-    """
-    total = np.zeros((4,))
-    correct = np.zeros((4,))
-
-    hyp_length = 0
-    ref_length = 0
-
-    for hyp, ref in zip(hypotheses, references):
-        hyp = hyp.split()
-        ref = ref.split()
-
-        hyp_length += len(hyp)
-        ref_length += len(ref)
-
-        for i in range(order):
-            hyp_ngrams = Counter(zip(*[hyp[j:] for j in range(i + 1)]))
-            ref_ngrams = Counter(zip(*[ref[j:] for j in range(i + 1)]))
-
-            total[i] += sum(hyp_ngrams.values())
-            correct[i] += sum(min(count, ref_ngrams[bigram]) for bigram, count in hyp_ngrams.items())
-
-    if smoothing:
-        total += 1
-        correct += 1
-
-    scores = correct / total
-
-    score = math.exp(
-        sum(math.log(score) if score > 0 else float('-inf') for score in scores) / order
-    )
-
-    bp = min(1, math.exp(1 - ref_length / hyp_length))
-    bleu = 100 * bp * score
-
-    return bleu, 'penalty={:.3f} ratio={:.3f}'.format(bp, hyp_length / ref_length)
-
-
-def sentence_ter(hypothesis, reference, **kwargs):
-    """
-    This is not exactly TER, but 1 - TER,
-    which is necessary for this to be a reward function (the higher the better)
-    """
-    return 1 - pyter.ter(hypothesis, reference)
-
-
-def corpus_ter(hypotheses, references, **kwargs):
-    scores = [pyter.ter(hyp.split(), ref.split()) for hyp, ref in zip(hypotheses, references)]
-    score = 100 * sum(scores) / len(scores)
-
-    hyp_length = sum(len(hyp.split()) for hyp in hypotheses)
-    ref_length = sum(len(ref.split()) for ref in references)
-
-    return score, 'ratio={:.3f}'.format(hyp_length / ref_length)
-
-
-def sentence_wer(hypothesis, reference, **kwargs):
-    """
-    1 - WER
-    """
-    reference = tuple(reference.split())
-    hypothesis = tuple(hypothesis.split())
-
-    return 1 - levenhstein(hypothesis, reference) / len(reference)
-
-
-def corpus_wer(hypotheses, references, **kwargs):
-    scores = [
-        levenhstein(tuple(hyp.split()), tuple(ref.split())) / len(ref.split())
-        for hyp, ref in zip(hypotheses, references)
-    ]
-
-    score = 100 * sum(scores) / len(scores)
-
-    hyp_length = sum(len(hyp.split()) for hyp in hypotheses)
-    ref_length = sum(len(ref.split()) for ref in references)
-
-    return score, 'ratio={:.3f}'.format(hyp_length / ref_length)
-
-
-def corpus_scores(hypotheses, references, **kwargs):
-    bleu_score, summary = corpus_bleu(hypotheses, references)
-    ter, _ = corpus_ter(hypotheses, references)
-    wer, _ = corpus_wer(hypotheses, references)
-
-    return bleu_score, '{} wer={:.2f} ter={:.2f}'.format(summary, wer, ter)
-
-
-@functools.lru_cache(maxsize=1024)
-def levenhstein(src, trg):
-    if len(src) == 0:
-        return len(trg)
-    elif len(trg) == 0:
-        return len(src)
-
-    return min(
-        int(src[0] != src[0]) + levenhstein(src[1:], trg[1:]),
-        1 + levenhstein(src[1:], trg),
-        1 + levenhstein(src, trg[1:])
-    )
 
 
 def read_embeddings(embedding_filenames, encoders_and_decoder, load_embeddings,
