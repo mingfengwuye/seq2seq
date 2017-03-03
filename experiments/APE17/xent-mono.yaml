@@ -7,24 +7,23 @@ embedding_size: 128
 layers: 1
 bidir: True
 use_lstm: False
-max_output_len: 50
-max_input_len: 50
+max_output_len: 51
+max_input_len: 45
 weight_scale: 0.1
 
-data_dir: experiments/post_editing/data_de_en
-model_dir: experiments/post_editing/xent_multi_de_en
-log_file: experiments/post_editing/xent_multi_de_en/log.txt
+data_dir: experiments/APE17/data
+model_dir: experiments/APE17/xent_mono
+log_file: experiments/APE17/xent_mono/log.txt
 batch_size: 32
-dev_prefix: dev
 
 loss_function: 'xent'
 optimizer: 'adam'
 
-sgd_after_n_epoch: 100
+sgd_after_n_epoch: 25
 learning_rate: 0.2
 learning_rate_decay_factor: 0.9
-decay_every_n_epoch: 5
-decay_after_n_epoch: 101
+decay_every_n_epoch: 3
+decay_after_n_epoch: 28
 
 steps_per_checkpoint: 500
 steps_per_eval: 500
@@ -39,7 +38,6 @@ dev_prefix: train-dev
 
 encoders:
   - name: mt
-  - name: src
 
 decoder:
     name: edits

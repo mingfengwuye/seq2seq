@@ -7,16 +7,14 @@ embedding_size: 128
 layers: 1
 bidir: True
 use_lstm: False
-max_output_len: 50
-max_input_len: 50
+max_output_len: 45
+max_input_len: 36
 weight_scale: 0.1
 
-data_dir: experiments/post_editing/data_de_en
-model_dir: experiments/post_editing/reinforce_multi_de_en
-log_file: experiments/post_editing/reinforce_multi_de_en/log.txt
+data_dir: experiments/APE16/data
+model_dir: experiments/APE16/reinforce_mono
+log_file: experiments/APE16/reinforce_mono/log.txt
 batch_size: 32
-dev_prefix: dev
-
 
 loss_function: 'reinforce'
 optimizer: 'sgd'
@@ -39,7 +37,6 @@ read_ahead: 10
 
 encoders:
   - name: mt
-  - name: src
 
 decoder:
     name: edits

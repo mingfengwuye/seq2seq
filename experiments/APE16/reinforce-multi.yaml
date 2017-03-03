@@ -7,16 +7,14 @@ embedding_size: 128
 layers: 1
 bidir: True
 use_lstm: False
-max_output_len: 50
-max_input_len: 50
+max_output_len: 45
+max_input_len: 36
 weight_scale: 0.1
 
-data_dir: experiments/post_editing/data_en_de
-model_dir: experiments/post_editing/reinforce_multi_en_de
-log_file: experiments/post_editing/reinforce_multi_en_de/log.txt
+data_dir: experiments/APE16/data
+model_dir: experiments/APE16/reinforce_multi
+log_file: experiments/APE16/reinforce_multi/log.txt
 batch_size: 32
-dev_prefix: dev
-
 
 loss_function: 'reinforce'
 optimizer: 'sgd'
