@@ -6,15 +6,15 @@ embedding_size: 128
 
 layers: 1
 bidir: True
-use_lstm: False
+use_lstm: True
 max_output_len: 45
 max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/data
-model_dir: experiments/APE16/reinforce_mono
-log_file: experiments/APE16/reinforce_mono/log.txt
-checkpoints: [experiments/APE16/xent_mono_finetuning/checkpoints/best]
+model_dir: experiments/APE16/reinforce_mono_sgd_2
+log_file: experiments/APE16/reinforce_mono_sgd_2/log.txt
+checkpoints: [experiments/APE16/xent_mono_sgd/checkpoints/best]
 batch_size: 32
 
 loss_function: 'reinforce'
@@ -24,10 +24,15 @@ reward_function: ter_reward
 score_function: corpus_scores_ter
 reset: True
 
-baseline_steps: 2000
-reinforce_baseline: True
-rollouts: 0
-partial_rewards: False
+# baseline_steps: 2000        # 1
+# reinforce_baseline: True    # 1
+# rollouts: 0                 # 1
+# partial_rewards: False      # 1
+
+baseline_steps: 0           # 2
+reinforce_baseline: False   # 2
+rollouts: 0                 # 2
+partial_rewards: False      # 2
 
 learning_rate_decay_factor: 0.9
 decay_every_n_epoch: 2

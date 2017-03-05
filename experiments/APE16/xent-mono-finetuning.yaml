@@ -12,29 +12,23 @@ max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/data
-model_dir: experiments/APE16/reinforce_mono
-log_file: experiments/APE16/reinforce_mono/log.txt
-checkpoints: [experiments/APE16/xent_mono_finetuning/checkpoints/best]
+model_dir: experiments/APE16/xent_mono_finetuning
+log_file: experiments/APE16/xent_mono_finetuning/log.txt
+checkpoints: [experiments/APE16/xent_mono/checkpoints/best]
 batch_size: 32
 
-loss_function: 'reinforce'
+loss_function: 'xent'
+
 optimizer: 'sgd'
-learning_rate: 0.01
-reward_function: ter_reward
-score_function: corpus_scores_ter
+learning_rate: 0.1
 reset: True
-
-baseline_steps: 2000
-reinforce_baseline: True
-rollouts: 0
-partial_rewards: False
-
 learning_rate_decay_factor: 0.9
 decay_every_n_epoch: 2
-decay_after_n_epoch: 10
+decay_after_n_epoch: 4
 
-steps_per_checkpoint: 200
-steps_per_eval: 200
+steps_per_checkpoint: 500
+steps_per_eval: 500
+score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
 max_epochs: 50

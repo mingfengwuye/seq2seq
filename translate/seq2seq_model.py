@@ -376,6 +376,9 @@ class Seq2SeqModel(object):
         return np.argmax(outputs, axis=2).T
 
     def beam_search_decoding(self, session, token_ids, beam_size, ngrams=None, early_stopping=True):
+        # TODO: implement Post-Editing Penalty (PEP)
+        # penalty of -1 for each new word in the output w.r.t. the input
+
         if not isinstance(session, list):
             session = [session]
 

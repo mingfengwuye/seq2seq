@@ -37,3 +37,28 @@ scripts/prepare-data.py experiments/APE16/raw_data/train src pe mt edits experim
 scripts/prepare-data.py experiments/APE16/data_plus/concat src pe mt edits experiments/APE16/data_plus --no-tokenize \
 --dev-corpus experiments/APE16/raw_data/dev \
 --test-corpus experiments/APE16/raw_data/test --shuffle
+
+main_dir=experiments/APE16
+rm -rf ${main_dir}/data_trans
+mkdir -p ${main_dir}/data_trans
+
+cat ${main_dir}/raw_data/{4M,500K,train}.mt > ${main_dir}/data_trans/pretrain-raw.mt
+cat ${main_dir}/raw_data/{4M,500K,train}.src > ${main_dir}/data_trans/pretrain-raw.src
+cat ${main_dir}/raw_data/{4M,500K,train}.pe > ${main_dir}/data_trans/pretrain-raw.pe
+
+scripts/prepare-data.py ${main_dir}/data_trans/pretrain-raw src mt pe ${main_dir}/data_trans --subwords --vocab-size 40000 --no-tokenize --output trash
+
+scripts/prepare-data.py ${main_dir}/raw_data/4M src mt pe ${main_dir}/data_trans --mode prepare --output pretrain --no-tokenize --bpe-path ${main_dir}/data_trans/bpe --subwords --shuffle --seed 1234
+
+cp ${main_dir}/raw_data/500K.mt ${main_dir}/data_trans/train-raw.mt
+cp ${main_dir}/raw_data/500K.src ${main_dir}/data_trans/train-raw.src
+cp ${main_dir}/raw_data/500K.pe ${main_dir}/data_trans/train-raw.pe
+
+for i in {1..20}; do
+    cat ${main_dir}/raw_data/train.mt >> ${main_dir}/data_trans/train-raw.mt
+    cat ${main_dir}/raw_data/train.src >> ${main_dir}/data_trans/train-raw.src
+    cat ${main_dir}/raw_data/train.pe >> ${main_dir}/data_trans/train-raw.pe
+done
+
+scripts/prepare-data.py ${main_dir}/data_trans/train-raw src mt pe ${main_dir}/data_trans --mode prepare --no-tokenize --bpe-path ${main_dir}/data_trans/bpe --subwords \
+--dev-corpus ${main_dir}/raw_data/dev --dev-corpus ${main_dir}/raw_data/test --shuffle --seed 1234

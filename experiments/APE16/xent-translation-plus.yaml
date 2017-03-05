@@ -1,3 +1,7 @@
+# 40000 subword units
+# beam size of 12
+# pre-training with 4m.*
+# finetuning with 500k.* + 20x train.*
 
 dropout_rate: 0.5
 cell_size: 512
