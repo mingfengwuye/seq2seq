@@ -19,7 +19,7 @@ parser.add_argument('--case-insensitive', '-i', action='store_true')
 if __name__ == '__main__':
     args = parser.parse_args()
 
-    if not any([args.all, args.wer, args.tercom, args.bleu, args.pyter]):
+    if not any([args.all, args.wer, args.ter, args.bleu, args.pyter]):
         args.all = True
 
     if args.all:
@@ -38,7 +38,7 @@ if __name__ == '__main__':
             scores['bleu'], _ = corpus_bleu(hypotheses, references)
         if args.wer:
             scores['wer'], _ = corpus_wer(hypotheses, references)
-        if args.tercom:
+        if args.ter:
             scores['ter'], _ = corpus_tercom(hypotheses, references)
         if args.pyter:
             scores['pyter'], _ = corpus_ter(hypotheses, references)

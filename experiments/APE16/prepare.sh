@@ -76,6 +76,9 @@ for i in {1..20}; do   # oversample training data
     cat ${main_dir}/raw_data/train.pe >> ${data_dir}/raw.pe
 done
 
+# TODO: escape special characters
+# TODO: use same subword units for MT and PE
+
 ${mosesdecoder}/scripts/recaser/truecase.perl --model ${data_dir}/truecaser.mt < ${data_dir}/raw.mt > ${data_dir}/train.true.mt 2>/dev/null
 ${mosesdecoder}/scripts/recaser/truecase.perl --model ${data_dir}/truecaser.src < ${data_dir}/raw.src > ${data_dir}/train.true.src 2>/dev/null
 ${mosesdecoder}/scripts/recaser/truecase.perl --model ${data_dir}/truecaser.pe < ${data_dir}/raw.pe > ${data_dir}/train.true.pe 2>/dev/null
