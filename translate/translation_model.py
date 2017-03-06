@@ -76,8 +76,13 @@ class BaseTranslationModel(object):
             for score_, step_ in scores:
                 f.write('{:.2f} {}\n'.format(score_, step_))
 
-    def initialize(self, sess, checkpoints=None, reset=False, reset_learning_rate=False, **kwargs):
-        self.saver = tf.train.Saver(max_to_keep=3, keep_checkpoint_every_n_hours=5, sharded=False)
+    def initialize(self, sess, checkpoints=None, reset=False, reset_learning_rate=False,
+                   max_to_keep=3, keep_every_n_hours=5, **kwargs):
+        if keep_every_n_hours <= 0 or keep_every_n_hours is None:
+            keep_every_n_hours = float('inf')
+
+        self.saver = tf.train.Saver(max_to_keep=max_to_keep, keep_checkpoint_every_n_hours=keep_every_n_hours,
+                                    sharded=False)
 
         sess.run(tf.global_variables_initializer())
         blacklist = ['dropout_keep_prob']

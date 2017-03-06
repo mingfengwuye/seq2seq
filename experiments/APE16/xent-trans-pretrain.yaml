@@ -1,5 +1,5 @@
 
-dropout_rate: 0.5
+dropout_rate: 0.0
 cell_size: 1024
 attn_size: 1024
 embedding_size: 512
@@ -25,14 +25,18 @@ score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
 batch_mode: 'standard'
-read_ahead: 10
+shuffle_data: True
+read_ahead: 20
 
 train_prefix: pretrain
 max_steps: 300000
+keep_best: 4
+max_to_keep: 4
+keep_every_n_hours: 0
 
 encoders:
   - name: mt
-  - name: src
+#  - name: src
 
 decoder:
     name: pe
