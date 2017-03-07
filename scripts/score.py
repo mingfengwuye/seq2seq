@@ -23,7 +23,7 @@ if __name__ == '__main__':
         args.all = True
 
     if args.all:
-        args.wer = args.tercom = args.bleu = True
+        args.wer = args.ter = args.bleu = True
 
     with open(args.source) as src_file, open(args.target) as trg_file:
         if args.case_insensitive:

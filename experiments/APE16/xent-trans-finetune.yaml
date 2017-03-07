@@ -1,5 +1,5 @@
 
-dropout_rate: 0.5
+dropout_rate: 0.0
 cell_size: 1024
 attn_size: 1024
 embedding_size: 512
@@ -14,6 +14,7 @@ weight_scale: 0.1
 data_dir: experiments/APE16/data_trans
 model_dir: experiments/APE16/xent_trans_finetune
 log_file: experiments/APE16/xent_trans_finetune/log.txt
+checkpoints: [experiments/APE16/xent_trans_pretrain/checkpoints/best]
 batch_size: 80
 
 loss_function: 'xent'
@@ -25,14 +26,20 @@ score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
 batch_mode: 'standard'
-read_ahead: 10
+shuffle_data: True
+read_ahead: 20
 
 train_prefix: train
 max_steps: 100000
+keep_best: 4
+max_to_keep: 4
+keep_every_n_hours: 0
 
 encoders:
   - name: mt
-  - name: src
+#  - name: src
 
 decoder:
     name: pe
+
+reset: True
