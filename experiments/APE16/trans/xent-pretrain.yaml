@@ -12,6 +12,7 @@ max_input_len: 50
 weight_scale: 0.1
 
 data_dir: experiments/APE16/trans/data_bis
+model_dir: experiments/APE16/trans/xent_pretrain
 log_file: experiments/APE16/trans/xent_pretrain/log.txt
 batch_size: 80
 
