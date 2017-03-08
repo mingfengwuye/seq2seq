@@ -6,7 +6,7 @@ import numpy as np
 import re
 import os
 
-from collections import Counter
+from collections import Counter, OrderedDict
 from functools import partial
 from translate import pyter
 
@@ -159,7 +159,7 @@ def corpus_scores(hypotheses, references, main='bleu', **kwargs):
     ter, _ = corpus_tercom(hypotheses, references)
     wer, _ = corpus_wer(hypotheses, references)
 
-    scores = {'bleu': bleu_score, 'ter': ter, 'wer': wer}
+    scores = OrderedDict([('bleu', bleu_score), ('ter', ter), ('wer', wer)])
     main_score = scores[main]
     summary = ' '.join([summary] + ['{}={:.2f}'.format(k, v)
                                     for k, v in scores.items() if k != main])

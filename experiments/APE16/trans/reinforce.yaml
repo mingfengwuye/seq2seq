@@ -1,0 +1,56 @@
+
+dropout_rate: 0.0
+cell_size: 1024
+attn_size: 1024
+embedding_size: 512
+
+layers: 1
+bidir: True
+use_lstm: False
+max_output_len: 50
+max_input_len: 50
+weight_scale: 0.1
+
+data_dir: experiments/APE16/trans/data_bis
+model_dir: experiments/APE16/trans/reinforce
+log_file: experiments/APE16/trans/reinforce/log.txt
+checkpoints: [experiments/APE16/trans/xent_finetune/checkpoints/best]
+batch_size: 80
+
+loss_function: 'reinforce'
+reward_function: ter_reward
+score_function: corpus_scores_ter
+
+baseline_steps: 1000
+reinforce_baseline: True
+rollouts: 0
+partial_rewards: False
+
+optimizer: 'sgd'
+learning_rate: 0.01
+learning_rate_decay_factor: 0.9
+decay_every_n_epoch: 1
+decay_after_n_epoch: 1
+
+steps_per_checkpoint: 500
+steps_per_eval: 500
+
+max_gradient_norm: 1.0
+batch_mode: 'standard'
+shuffle_data: True
+read_ahead: 20
+
+train_prefix: train    # TODO: finetune on PE data
+max_steps: 100000
+keep_best: 4
+max_to_keep: 4
+keep_every_n_hours: 0
+
+encoders:
+  - name: mt
+#  - name: src
+
+decoder:
+    name: pe
+
+reset: True

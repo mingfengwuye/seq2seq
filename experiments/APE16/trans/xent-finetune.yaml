@@ -1,5 +1,5 @@
 
-dropout_rate: 0.0
+dropout_rate: 0.5
 cell_size: 1024
 attn_size: 1024
 embedding_size: 512
@@ -11,14 +11,14 @@ max_output_len: 50
 max_input_len: 50
 weight_scale: 0.1
 
-data_dir: experiments/APE16/data_trans
-model_dir: experiments/APE16/xent_trans_finetune
-log_file: experiments/APE16/xent_trans_finetune/log.txt
-checkpoints: [experiments/APE16/xent_trans_pretrain/checkpoints/best]
+data_dir: experiments/APE16/trans/data_bis
+model_dir: experiments/APE16/trans/xent_finetune
+log_file: experiments/APE16/trans/xent_finetune/log.txt
+checkpoints: [experiments/APE16/trans/xent_pretrain/checkpoints/best]
 batch_size: 80
 
 loss_function: 'xent'
-optimizer: 'adam'   # TODO: use SGD
+optimizer: 'adam'   # TODO: finetune with SGD
 
 steps_per_checkpoint: 500
 steps_per_eval: 500
@@ -36,10 +36,12 @@ max_to_keep: 4
 keep_every_n_hours: 0
 
 encoders:
-  - name: mt
+  - name: de
+    ext: mt
 #  - name: src
 
 decoder:
-    name: pe
+    name: de
+    ext: pe
 
 reset: True

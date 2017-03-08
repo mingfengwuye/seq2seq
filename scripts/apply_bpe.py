@@ -1,5 +1,4 @@
-#!/usr/bin/python2
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python3
 # Author: Rico Sennrich
 
 """Use operations learned with learn_bpe.py to encode a new text.
@@ -11,26 +10,58 @@ Rico Sennrich, Barry Haddow and Alexandra Birch (2016). Neural Machine Translati
 Proceedings of the 54th Annual Meeting of the Association for Computational Linguistics (ACL 2016). Berlin, Germany.
 """
 
-from __future__ import unicode_literals, division
-
 import sys
 import codecs
 import argparse
+import functools
 from collections import defaultdict
 
-# hack for python2/3 compatibility
-from io import open
-argparse.open = open
-
-# python 2/3 compatibility
-if sys.version_info < (3, 0):
-  sys.stderr = codecs.getwriter('UTF-8')(sys.stderr)
-  sys.stdout = codecs.getwriter('UTF-8')(sys.stdout)
-  sys.stdin = codecs.getreader('UTF-8')(sys.stdin)
-
 class BPE(object):
+    def encode(self, orig):
+        """Encode word based on list of BPE merge operations, which are applied consecutively
+        """
+        word = tuple(orig) + ('</w>',)
+        pairs = get_pairs(word)
+
+        while True:
+            bigram = min(pairs, key=lambda pair: self.bpe_codes.get(pair, float('inf')))
+            if bigram not in self.bpe_codes:
+                break
+            first, second = bigram
+            new_word = []
+            i = 0
+            while i < len(word):
+                try:
+                    j = word.index(first, i)
+                    new_word.extend(word[i:j])
+                    i = j
+                except:
+                    new_word.extend(word[i:])
+                    break
+
+                if word[i] == first and i < len(word) - 1 and word[i + 1] == second:
+                    new_word.append(first + second)
+                    i += 2
+                else:
+                    new_word.append(word[i])
+                    i += 1
+            new_word = tuple(new_word)
+            word = new_word
+            if len(word) == 1:
+                break
+            else:
+                pairs = get_pairs(word)
+
+        # don't print end-of-word symbols
+        if word[-1] == '</w>':
+            word = word[:-1]
+        elif word[-1].endswith('</w>'):
+            word = word[:-1] + (word[-1].replace('</w>', ''),)
+
+        return word
 
     def __init__(self, codes, separator='@@'):
+        self.encode = functools.lru_cache(maxsize=65536)(self.encode)
         self.bpe_codes = [tuple(item.split()) for item in codes]
         # some hacking to deal with duplicates (only consider first instance)
         self.bpe_codes = dict([(code,i) for (i,code) in reversed(list(enumerate(self.bpe_codes)))])
@@ -42,13 +73,14 @@ class BPE(object):
 
         output = []
         for word in sentence.split():
-            new_word = encode(word, self.bpe_codes)
+            new_word = self.encode(word)
 
             for item in new_word[:-1]:
                 output.append(item + self.separator)
             output.append(new_word[-1])
 
         return ' '.join(output)
+
 
 def create_parser():
     parser = argparse.ArgumentParser(
@@ -84,54 +116,6 @@ def get_pairs(word):
         pairs.add((prev_char, char))
         prev_char = char
     return pairs
-
-def encode(orig, bpe_codes, cache={}):
-    """Encode word based on list of BPE merge operations, which are applied consecutively
-    """
-
-    if orig in cache:
-        return cache[orig]
-
-    word = tuple(orig) + ('</w>',)
-    pairs = get_pairs(word)
-
-    while True:
-        bigram = min(pairs, key = lambda pair: bpe_codes.get(pair, float('inf')))
-        if bigram not in bpe_codes:
-            break
-        first, second = bigram
-        new_word = []
-        i = 0
-        while i < len(word):
-            try:
-                j = word.index(first, i)
-                new_word.extend(word[i:j])
-                i = j
-            except:
-                new_word.extend(word[i:])
-                break
-
-            if word[i] == first and i < len(word)-1 and word[i+1] == second:
-                new_word.append(first+second)
-                i += 2
-            else:
-                new_word.append(word[i])
-                i += 1
-        new_word = tuple(new_word)
-        word = new_word
-        if len(word) == 1:
-            break
-        else:
-            pairs = get_pairs(word)
-
-    # don't print end-of-word symbols
-    if word[-1] == '</w>':
-        word = word[:-1]
-    elif word[-1].endswith('</w>'):
-        word = word[:-1] + (word[-1].replace('</w>',''),)
-
-    cache[orig] = word
-    return word
 
 
 if __name__ == '__main__':
