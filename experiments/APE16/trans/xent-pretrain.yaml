@@ -1,5 +1,5 @@
 
-dropout_rate: 0.5
+dropout_rate: 0.0
 cell_size: 1024
 attn_size: 1024
 embedding_size: 512
@@ -12,12 +12,11 @@ max_input_len: 50
 weight_scale: 0.1
 
 data_dir: experiments/APE16/trans/data_bis
-model_dir: experiments/APE16/trans/xent_pretrain
 log_file: experiments/APE16/trans/xent_pretrain/log.txt
 batch_size: 80
 
 loss_function: 'xent'
-optimizer: 'adam'
+optimizer: 'adadelta'
 
 steps_per_checkpoint: 1000
 steps_per_eval: 1000
@@ -35,11 +34,9 @@ max_to_keep: 4
 keep_every_n_hours: 0
 
 encoders:
-  - name: de
-    ext: mt
+  - name: mt
 #  - name: src
 
 decoder:
-    name: de
-    ext: pe
+    name: pe
 

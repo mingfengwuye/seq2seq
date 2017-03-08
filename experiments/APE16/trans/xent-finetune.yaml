@@ -1,5 +1,5 @@
 
-dropout_rate: 0.5
+dropout_rate: 0.0
 cell_size: 1024
 attn_size: 1024
 embedding_size: 512
@@ -18,7 +18,7 @@ checkpoints: [experiments/APE16/trans/xent_pretrain/checkpoints/best]
 batch_size: 80
 
 loss_function: 'xent'
-optimizer: 'adam'   # TODO: finetune with SGD
+optimizer: 'adadelta'
 
 steps_per_checkpoint: 500
 steps_per_eval: 500
@@ -36,12 +36,10 @@ max_to_keep: 4
 keep_every_n_hours: 0
 
 encoders:
-  - name: de
-    ext: mt
+  - name: mt
 #  - name: src
 
 decoder:
-    name: de
-    ext: pe
+    name: pe
 
 reset: True
