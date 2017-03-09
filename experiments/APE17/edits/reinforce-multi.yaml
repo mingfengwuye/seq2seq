@@ -11,10 +11,10 @@ max_output_len: 51
 max_input_len: 45
 weight_scale: 0.1
 
-data_dir: experiments/APE17/data
-model_dir: experiments/APE17/reinforce_multi
-log_file: experiments/APE17/reinforce_multi/log.txt
-checkpoints: [experiments/APE17/xent_multi/checkpoints/best]
+data_dir: experiments/APE17/edits/data
+model_dir: experiments/APE17/edits/reinforce_multi
+log_file: experiments/APE17/edits/reinforce_multi/log.txt
+checkpoints: [experiments/APE17/edits/xent_multi/checkpoints/best]
 batch_size: 32
 
 loss_function: 'reinforce'

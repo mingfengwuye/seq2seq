@@ -11,9 +11,9 @@ max_output_len: 45
 max_input_len: 36
 weight_scale: 0.1
 
-data_dir: experiments/APE16/data
-model_dir: experiments/APE16/xent_multi
-log_file: experiments/APE16/xent_multi/log.txt
+data_dir: experiments/APE16/edits/data
+model_dir: experiments/APE16/edits/xent_multi
+log_file: experiments/APE16/edits/xent_multi/log.txt
 
 batch_size: 32
 
