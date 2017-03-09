@@ -247,3 +247,47 @@ def wer_reward(hypothesis, reference, **kwargs):
 
 def bleu_reward(hypothesis, reference, **kwargs):
     return sentence_bleu(hypothesis, reference)
+
+
+def tercom_statistics(hypotheses, references, case_sensitive=True, **kwargs):
+    with tempfile.NamedTemporaryFile('w') as hypothesis_file, tempfile.NamedTemporaryFile('w') as reference_file:
+        for i, (hypothesis, reference) in enumerate(zip(hypotheses, references)):
+            hypothesis_file.write('{} ({})\n'.format(hypothesis, i))
+            reference_file.write('{} ({})\n'.format(reference, i))
+        hypothesis_file.flush()
+        reference_file.flush()
+
+        filename = tempfile.mktemp()
+
+        cmd = ['java', '-jar', 'scripts/tercom.jar', '-h', hypothesis_file.name, '-r', reference_file.name,
+               '-o', 'sum', '-n', filename]
+        if case_sensitive:
+            cmd.append('-s')
+
+        output = open('/dev/null', 'w')
+        subprocess.call(cmd, stdout=output, stderr=output)
+
+    with open(filename + '.sum') as f:
+        fields = ['DEL', 'INS', 'SUB', 'SHIFT', 'WORD_SHIFT', 'ERRORS', 'REF_WORDS']
+
+        stats = []
+        for line in f:
+            values = line.strip().split('|')
+            if len(values) != 9:
+                continue
+            try:
+                # values = np.array([float(x) for x in values[1:]])
+                values = dict(zip(fields, map(float, values[1:])))
+            except ValueError:
+                continue
+
+            stats.append(values)
+
+        assert len(stats) == len(hypotheses) + 1
+
+        total = stats[-1]
+        stats = stats[:-1]
+        total = {k: v / len(stats) for k, v in total.items()}
+
+    os.remove(filename + '.sum')
+    return total, stats

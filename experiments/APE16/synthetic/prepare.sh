@@ -22,8 +22,7 @@ mkdir -p ${data_dir}
 # 3. train subwords
 
 cat ${raw_data}/train.src > ${data_dir}/raw.src
-cat ${raw_data}/train.mt > ${data_dir}/raw.de
-cat ${raw_data}/train.pe >> ${data_dir}/raw.de
+cat ${raw_data}/train.{mt,pe} > ${data_dir}/raw.de
 
 ${mosesdecoder}/scripts/recaser/train-truecaser.perl --model ${data_dir}/truecaser.src --corpus ${data_dir}/raw.src
 ${mosesdecoder}/scripts/recaser/train-truecaser.perl --model ${data_dir}/truecaser.de --corpus ${data_dir}/raw.de
