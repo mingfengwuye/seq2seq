@@ -41,4 +41,4 @@ decoder:
     name: edits
 
 use_edits: True
-dev-prefix: train-dev
+dev_prefix: train-dev
