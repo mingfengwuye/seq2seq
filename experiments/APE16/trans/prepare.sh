@@ -10,13 +10,13 @@ mkdir -p ${data_dir}
 # cat ${raw_data}/{4M,500K,train}.src > ${data_dir}/raw.src
 # cat ${raw_data}/{4M,500K,train}.pe > ${data_dir}/raw.pe
 
-cat ${raw_data}/train.src > ${data_dir}/raw.src
-cat ${raw_data}/train.mt > ${data_dir}/raw.de
-cat ${raw_data}/train.pe >> ${data_dir}/raw.de
+# cat ${raw_data}/train.src > ${data_dir}/raw.src
+# cat ${raw_data}/train.mt > ${data_dir}/raw.de
+# cat ${raw_data}/train.pe >> ${data_dir}/raw.de
 
-# cat ${raw_data}/{500K,train}.src > ${data_dir}/raw.src
-# cat ${raw_data}/{500K,train}.mt > ${data_dir}/raw.de
-# cat ${raw_data}/{500K,train}.pe >> ${data_dir}/raw.de
+cat ${raw_data}/{500K,train}.src > ${data_dir}/raw.src
+cat ${raw_data}/{500K,train}.mt > ${data_dir}/raw.de
+cat ${raw_data}/{500K,train}.pe >> ${data_dir}/raw.de
 
 scripts/train-truecaser.perl --model ${data_dir}/truecaser.src --corpus ${data_dir}/raw.src
 scripts/train-truecaser.perl --model ${data_dir}/truecaser.de --corpus ${data_dir}/raw.de

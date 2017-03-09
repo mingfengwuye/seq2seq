@@ -51,8 +51,8 @@ for label, log_file in zip(labels, args.log_files):
                 perplexity = float(m.group(1))
                 train_perplexities.append((current_step, perplexity))
 
-            m = re.search(r'score=(\d+\.\d+)', line)
-            m = m or re.search(r'BLEU = (\d+\.\d+)', line)
+            m = re.search(r'bleu=(\d+\.\d+)', line)
+            m = m or re.search(r'score=(\d+\.\d+)', line)
             if m:
                 bleu_score = float(m.group(1))
                 bleu_scores.append((current_step, bleu_score))

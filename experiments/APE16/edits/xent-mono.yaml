@@ -6,7 +6,7 @@ embedding_size: 128
 
 layers: 1
 bidir: True
-use_lstm: False
+use_lstm: True
 max_output_len: 45   # 99% coverage
 max_input_len: 36
 weight_scale: 0.1
@@ -14,16 +14,15 @@ weight_scale: 0.1
 data_dir: experiments/APE16/data
 model_dir: experiments/APE16/xent_mono
 log_file: experiments/APE16/xent_mono/log.txt
+
 batch_size: 32
 
 loss_function: 'xent'
-optimizer: 'adam'
-
-sgd_after_n_epoch: 40
+optimizer: 'sgd'
 learning_rate: 0.2
 learning_rate_decay_factor: 0.9
 decay_every_n_epoch: 5
-decay_after_n_epoch: 45
+decay_after_n_epoch: 10
 
 steps_per_checkpoint: 500
 steps_per_eval: 500
@@ -36,6 +35,7 @@ read_ahead: 10
 
 encoders:
   - name: mt
+
 
 decoder:
     name: edits

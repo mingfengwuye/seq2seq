@@ -11,7 +11,7 @@ max_output_len: 50
 max_input_len: 50
 weight_scale: 0.1
 
-data_dir: experiments/APE16/trans/data_bis
+data_dir: experiments/APE16/trans/data
 model_dir: experiments/APE16/trans/xent_finetune
 log_file: experiments/APE16/trans/xent_finetune/log.txt
 checkpoints: [experiments/APE16/trans/xent_pretrain/checkpoints/best]
@@ -25,21 +25,18 @@ steps_per_eval: 500
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
+max_steps: 100000
 batch_mode: 'standard'
 shuffle_data: True
 read_ahead: 20
-
-train_prefix: train
-max_steps: 100000
 keep_best: 4
 max_to_keep: 4
 keep_every_n_hours: 0
 
 encoders:
   - name: mt
-#  - name: src
 
 decoder:
     name: pe
 
-reset: True
+train_prefix: train

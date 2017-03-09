@@ -6,40 +6,39 @@ embedding_size: 128
 
 layers: 1
 bidir: True
-use_lstm: False
-max_output_len: 51
+use_lstm: True
+max_output_len: 51   # 99% coverage
 max_input_len: 45
 weight_scale: 0.1
 
-data_dir: experiments/APE17/edits/data
-model_dir: experiments/APE17/edits/xent_mono
-log_file: experiments/APE17/edits/xent_mono/log.txt
+data_dir: experiments/APE17/data
+model_dir: experiments/APE17/xent_mono
+log_file: experiments/APE17/xent_mono/log.txt
+
 batch_size: 32
 
 loss_function: 'xent'
-optimizer: 'adam'
-
-sgd_after_n_epoch: 25
+optimizer: 'sgd'
 learning_rate: 0.2
 learning_rate_decay_factor: 0.9
-decay_every_n_epoch: 3
-decay_after_n_epoch: 28
+decay_every_n_epoch: 5
+decay_after_n_epoch: 10
 
 steps_per_checkpoint: 500
 steps_per_eval: 500
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
-max_epochs: 0
+max_epochs: 80
 batch_mode: 'standard'
 read_ahead: 10
 
-dev_prefix: train-dev
-
 encoders:
   - name: mt
+
 
 decoder:
     name: edits
 
 use_edits: True
+dev-prefix: train-dev

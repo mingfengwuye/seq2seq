@@ -12,9 +12,9 @@ max_input_len: 45
 weight_scale: 0.1
 
 data_dir: experiments/APE17/data
-model_dir: experiments/APE17/reinforce_multi
-log_file: experiments/APE17/reinforce_multi/log.txt
-checkpoints: [experiments/APE17/xent_multi/checkpoints/best]
+model_dir: experiments/APE17/reinforce_mono
+log_file: experiments/APE17/reinforce_mono/log.txt
+checkpoints: [experiments/APE17/xent_mono/checkpoints/best]
 batch_size: 32
 
 loss_function: 'reinforce'
@@ -35,7 +35,7 @@ read_ahead: 10
 
 encoders:
   - name: mt
-  - name: src
+
 
 decoder:
     name: edits
