@@ -17,6 +17,8 @@ _EOS = '</S>'
 _UNK = '<UNK>'
 _KEEP = '<KEEP>'
 _DEL = '<DEL>'
+_INS = '<INS>'
+_SUB = '<SUB>'
 
 BOS_ID = 0
 EOS_ID = 1
@@ -76,6 +78,10 @@ def reverse_edits(source, edits):
     target += src_words[i:]
 
     return ' '.join(target)
+
+
+def apply_oracle(hypothesis, reference):
+    pass
 
 
 def reverse_edit_ids(src_ids, edit_ids, src_vocab, trg_vocab):

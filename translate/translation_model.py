@@ -378,6 +378,7 @@ class TranslationModel(BaseTranslationModel):
                     if use_edits:
                         reference = utils.reverse_edits(sources[0], reference)
 
+
                     hypotheses.append(hypothesis)
                     references.append(reference.strip().replace('@@ ', ''))
 
