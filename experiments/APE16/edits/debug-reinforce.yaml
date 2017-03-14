@@ -1,49 +1,51 @@
 
-dropout_rate: 0.5
-cell_size: 256
-attn_size: 256
+dropout_rate: 0.0
+cell_size: 128
+attn_size: 128
 embedding_size: 128
 
 layers: 1
 bidir: True
 use_lstm: True
-max_output_len: 45
+max_output_len: 45   # 99% coverage
 max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data
-model_dir: experiments/APE16/edits/reinforce_multi
-checkpoints: [experiments/APE16/edits/xent_multi/checkpoints/best]
+model_dir: experiments/APE16/edits/debug_reinforce
+checkpoints: [experiments/APE16/edits/best_so_far/checkpoints/best]
+
 batch_size: 32
 
 loss_function: 'reinforce'
 optimizer: 'sgd'
 learning_rate: 0.01
-learning_rate_decay_factor: 0.9
-decay_every_n_epoch: 2
-decay_after_n_epoch: 10
+learning_rate_decay_factor: 0.95
+decay_every_n_epoch: 1
+decay_after_n_epoch: 5
 
-steps_per_checkpoint: 200
-steps_per_eval: 200
+steps_per_checkpoint: 100
+steps_per_eval: 100
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
-max_epochs: 50
+max_epochs: 80
 batch_mode: 'standard'
 read_ahead: 10
 
 encoders:
   - name: mt
-  - name: src
+
 
 decoder:
     name: edits
 
 use_edits: True
+attention_window_size: 2
 
 reset: True
 baseline_steps: 2000
-reinforce_baseline: True
+reinforce_baseline: False
 rollouts: 0
 partial_rewards: False
 reward_function: ter_reward

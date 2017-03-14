@@ -12,7 +12,6 @@ optimizer: 'adam'
 
 data_dir: experiments/news/data
 model_dir: experiments/news/baseline
-log_file: experiments/news/baseline/log.txt
 
 encoders:
   - name: fr

@@ -11,9 +11,8 @@ max_output_len: 50
 max_input_len: 50
 weight_scale: 0.01
 
-data_dir: experiments/APE16/trans/data_bis
+data_dir: experiments/APE16/trans/data
 model_dir: experiments/APE16/trans/xent_pretrain
-log_file: experiments/APE16/trans/xent_pretrain/log.txt
 
 batch_size: 80
 
@@ -22,13 +21,14 @@ optimizer: 'adadelta'
 
 steps_per_checkpoint: 1000
 steps_per_eval: 1000
+beam_size: 12
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
 max_steps: 300000
 batch_mode: 'standard'
 shuffle_data: True
-read_ahead: 20
+read_ahead: 12
 keep_best: 4
 max_to_keep: 4
 keep_every_n_hours: 0

@@ -12,7 +12,6 @@ weight_scale: 0.1
 
 data_dir: data/btec
 model_dir: models/btec_xent
-log_file: models/btec_xent/log.txt
 batch_size: 32
 dev_prefix: dev
 

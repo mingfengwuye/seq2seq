@@ -19,7 +19,6 @@ max_gradient_norm: 1.0
 
 data_dir: experiments/WMT14/data
 model_dir: experiments/WMT14/reinforce
-log_file: experiments/WMT14/reinforce/log.txt
 
 encoders:
   - name: en

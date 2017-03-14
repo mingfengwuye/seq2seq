@@ -13,7 +13,6 @@ weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data_subwords
 model_dir: experiments/APE16/edits/xent_subwords
-log_file: experiments/APE16/edits/xent_subwords/log.txt
 
 batch_size: 32
 

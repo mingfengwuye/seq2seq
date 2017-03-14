@@ -13,7 +13,6 @@ weight_scale: 0.1
 
 data_dir: experiments/APE17/edits/data
 model_dir: experiments/APE17/edits/reinforce_mono
-log_file: experiments/APE17/edits/reinforce_mono/log.txt
 checkpoints: [experiments/APE17/edits/xent_mono/checkpoints/best]
 batch_size: 32
 

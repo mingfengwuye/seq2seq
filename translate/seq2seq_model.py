@@ -43,7 +43,7 @@ class Seq2SeqModel(object):
                  freeze_variables=None, lm_weight=None, max_output_len=50, feed_previous=0.0,
                  optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
                  reinforce_baseline=True, softmax_temperature=1.0, loss_function='xent', rollouts=None,
-                 partial_rewards=False, **kwargs):
+                 partial_rewards=False, use_edits=False, **kwargs):
         self.lm_weight = lm_weight
         self.encoders = encoders
         self.decoder = decoder
@@ -109,7 +109,7 @@ class Seq2SeqModel(object):
         self.partial_rewards = partial_rewards
 
         parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
-                          encoder_input_length=self.encoder_input_length, rollouts=1)
+                          encoder_input_length=self.encoder_input_length, rollouts=1, use_edits=use_edits)
 
         self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
 

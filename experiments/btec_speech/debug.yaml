@@ -5,7 +5,6 @@ use_lstm: False
 
 data_dir: experiments/btec_speech/data
 model_dir: experiments/btec_speech/debug
-log_file: experiments/btec_speech/debug/log.txt
 
 max_output_len: 18
 max_input_len: 400

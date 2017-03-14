@@ -111,7 +111,8 @@ def main(args=None):
 
     logging_level = logging.DEBUG if args.verbose else logging.INFO
     # always log to stdout in decoding and eval modes (to avoid overwriting precious train logs)
-    logger = utils.create_logger(config.log_file if args.train else None)
+    log_path = os.path.join(config.model_dir, config.log_file)
+    logger = utils.create_logger(log_path if args.train else None)
     logger.setLevel(logging_level)
 
     utils.log(' '.join(sys.argv))  # print command line
@@ -127,7 +128,7 @@ def main(args=None):
         'cell_size', 'layers', 'vocab_size', 'embedding_size', 'attention_filters', 'attention_filter_length',
         'use_lstm', 'time_pooling', 'attention_window_size', 'dynamic', 'binary', 'character_level', 'bidir',
         'load_embeddings', 'pooling_avg', 'swap_memory', 'parallel_iterations', 'input_layers',
-        'residual_connections', 'attn_size'
+        'residual_connections', 'attn_size', 'edit_window_size'
     ]
     # TODO: independent model dir for each task
     task_parameters = [

@@ -14,7 +14,6 @@ num_samples: 0
 
 data_dir: experiments/btec_text/data
 model_dir: experiments/btec_text/baseline
-log_file: experiments/btec_text/baseline/log.txt
 
 encoders:
   - name: fr

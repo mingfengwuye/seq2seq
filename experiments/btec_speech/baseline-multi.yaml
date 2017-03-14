@@ -5,7 +5,6 @@ use_lstm: True
 
 data_dir: experiments/btec_speech/data
 model_dir: experiments/btec_speech/baseline_multi
-log_file: experiments/btec_speech/baseline_multi/log.txt
 
 max_output_len: 25
 max_input_len: 600

@@ -12,7 +12,6 @@ weight_scale: 0.1
 
 data_dir: data/btec
 model_dir: models/btec_reinforce
-log_file: models/btec_reinforce/log.txt
 batch_size: 32
 dev_prefix: dev
 

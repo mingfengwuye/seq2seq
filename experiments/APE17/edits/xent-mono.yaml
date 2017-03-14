@@ -13,7 +13,6 @@ weight_scale: 0.1
 
 data_dir: experiments/APE17/edits/data
 model_dir: experiments/APE17/edits/xent_mono
-log_file: experiments/APE17/edits/xent_mono/log.txt
 
 batch_size: 32
 

@@ -45,6 +45,7 @@ attn_size: 1000          # size of the attention layer
 layers: 1                # number of RNN layers per encoder and decoder
 bidir: True              # use bidirectional encoders
 attention_window_size: 0 # if positive, use a local attention mechanism with this window size
+edit_window_size: null
 attention_filters: 0     # number of convolution filters to use in the attention mechanism
 attention_filter_length: 0  # length of the convolution filters
 vocab_size: 0            # number of symbols of each encoder and decoder (0: size of vocab files)
@@ -89,7 +90,7 @@ no_gpu: False            # don't use any GPU
 allow_growth: True       # allow GPU memory allocation to change during runtime
 mem_fraction: 1.0        # maximum fraction of GPU memory to use
 freeze_variables: []     # list of variables to freeze during training
-log_file: null           # log to this file instead of standard output
+log_file: log.txt        # log to this file instead of standard output
 parallel_iterations: 16  # parameter of Tensorflow's while_loop
 swap_memory: True        # parameter of Tensorflow's while_loop
 max_to_keep: 3           # keep that many latest checkpoints

@@ -12,6 +12,7 @@ from collections import namedtuple
 from contextlib import contextmanager
 
 # special vocabulary symbols
+
 _BOS = '<S>'
 _EOS = '</S>'
 _UNK = '<UNK>'
@@ -19,10 +20,17 @@ _KEEP = '<KEEP>'
 _DEL = '<DEL>'
 _INS = '<INS>'
 _SUB = '<SUB>'
+_NONE = '<NONE>'
+
+_START_VOCAB = [_BOS, _EOS, _UNK, _KEEP, _DEL, _INS, _SUB, _NONE]
 
 BOS_ID = 0
 EOS_ID = 1
 UNK_ID = 2
+KEEP_ID = 3
+SUB_ID = 4
+INS_ID = 5
+DEL_ID = 6
 
 
 @contextmanager
@@ -72,6 +80,10 @@ def reverse_edits(source, edits):
             if i < len(src_words):
                 target.append(src_words[i])
                 i += 1
+        elif edit == _SUB:
+            if i < len(src_words):
+                target.append(edit)
+                i += 1
         else:
             target.append(edit)
 
@@ -80,8 +92,41 @@ def reverse_edits(source, edits):
     return ' '.join(target)
 
 
-def apply_oracle(hypothesis, reference):
-    pass
+def apply_oracle(hypothesis, oracle, strict=False):
+    words = hypothesis.split()
+
+    ins_words = []
+    sub_words = []
+    both = []
+
+    for word in oracle.split():
+        if word in (_KEEP, _DEL, _NONE):
+            continue
+        if word.startswith(_INS):
+            ins_words.append(word[:-len(_INS) - 1])
+        elif word.startswith(_SUB):
+            sub_words.append(word[:-len(_SUB) - 1])
+        else:
+            both.append(word)
+
+    res = []
+    for word in words:
+        if word == _INS and len(ins_words) > 0:
+            word = ins_words.pop(0)
+        elif word == _SUB and len(sub_words) > 0:
+            word = sub_words.pop(0)
+        elif word == _INS or word == _SUB:
+            if len(both) > 0:
+                word = both.pop(0)
+            elif strict:
+                raise Exception
+
+        res.append(word)
+
+    if strict and (ins_words or sub_words or both):
+        raise Exception
+
+    return ' '.join(res)
 
 
 def reverse_edit_ids(src_ids, edit_ids, src_vocab, trg_vocab):
@@ -447,8 +492,11 @@ def create_logger(log_file=None):
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
         handler = logging.FileHandler(log_file)
-    else:
-        handler = logging.StreamHandler()
+        handler.setFormatter(formatter)
+        logger = logging.getLogger(__name__)
+        logger.addHandler(handler)
+
+    handler = logging.StreamHandler()
     handler.setFormatter(formatter)
     logger = logging.getLogger(__name__)
     logger.addHandler(handler)

@@ -25,7 +25,6 @@ max_output_len: 25
 
 data_dir: experiments/IWSLT14/data
 model_dir: experiments/IWSLT14/baseline
-log_file: experiments/IWSLT14/baseline/log.txt
 max_dev_size: 2000
 
 encoders:

@@ -110,7 +110,10 @@ class TranslationModel(BaseTranslationModel):
         self.batch_size = batch_size
         self.src_ext = [encoder.get('ext') or encoder.name for encoder in encoders]
         self.trg_ext = decoder.get('ext') or decoder.name
+        self.oracle_ext = decoder.get('oracle_ext')
+
         self.extensions = self.src_ext + [self.trg_ext]
+
         self.max_input_len = max_input_len
 
         encoders_and_decoder = encoders + [decoder]
@@ -145,16 +148,18 @@ class TranslationModel(BaseTranslationModel):
         self.train_size = None
         self.use_sgd = False
 
-    def read_data(self, max_train_size, max_dev_size, read_ahead=10, batch_mode='standard', shuffle=True, **kwargs):
+    def read_data(self, max_train_size, max_dev_size, read_ahead=10, batch_mode='standard', shuffle=True,
+                  **kwargs):
         utils.debug('reading training data')
-        train_set = utils.read_dataset(self.filenames.train, self.extensions, self.vocabs, max_size=max_train_size,
-                                       binary_input=self.binary_input, character_level=self.character_level,
-                                       max_seq_len=self.max_input_len)
+        train_set = utils.read_dataset(self.filenames.train, self.extensions, self.vocabs,
+                                       max_size=max_train_size, binary_input=self.binary_input,
+                                       character_level=self.character_level, max_seq_len=self.max_input_len)
         self.train_size = len(train_set)
         self.batch_iterator = utils.read_ahead_batch_iterator(train_set, self.batch_size, read_ahead=read_ahead,
                                                               mode=batch_mode, shuffle=shuffle)
 
         utils.debug('reading development data')
+
         dev_sets = [
             utils.read_dataset(dev, self.extensions, self.vocabs, max_size=max_dev_size,
                                binary_input=self.binary_input, character_level=self.character_level)
@@ -169,8 +174,7 @@ class TranslationModel(BaseTranslationModel):
             utils.initialize_vocabulary(vocab_path) if not binary else None
             for ext, vocab_path, binary in zip(self.extensions, self.filenames.vocab, self.binary_input)
         ]
-        self.src_vocab = self.vocabs[:-1]
-        self.trg_vocab = self.vocabs[-1]
+        *self.src_vocab, self.trg_vocab = self.vocabs
         self.ngrams = self.filenames.lm_path and utils.read_ngrams(self.filenames.lm_path, self.trg_vocab.vocab)
 
     def train(self, *args, **kwargs):
@@ -283,6 +287,8 @@ class TranslationModel(BaseTranslationModel):
             weights = weights.squeeze()[:len(trg_tokens),:len(token_ids[0])].T
             max_len = weights.shape[0]
 
+            # import ipdb; ipdb.set_trace()
+
             if self.binary_input[0]:
                 src_tokens = None
             else:
@@ -354,10 +360,18 @@ class TranslationModel(BaseTranslationModel):
 
         scores = []
 
+        if self.oracle_ext is not None:
+            vocab_filename = self.filenames.vocab[-1][:-len(self.trg_ext)] + self.oracle_ext
+            self.oracle_vocab = utils.initialize_vocabulary(vocab_filename)
+
         for filenames_, output_ in zip(filenames, output):  # evaluation on multiple corpora
             lines = list(utils.read_lines(filenames_, self.extensions, self.binary_input))
             if on_dev and max_dev_size:
                 lines = lines[:max_dev_size]
+
+            if self.oracle_ext is not None:
+                filename = filenames_[-1][:-len(self.trg_ext)] + self.oracle_ext
+                oracle_lines = list(utils.read_lines([filename], [self.oracle_ext], [False]))
 
             hypotheses = []
             references = []
@@ -374,10 +388,14 @@ class TranslationModel(BaseTranslationModel):
                 hypothesis_iter = self._decode_batch(sess, src_sentences, self.batch_size, beam_size=beam_size,
                                                      early_stopping=early_stopping, remove_unk=remove_unk,
                                                      use_edits=use_edits)
-                for sources, hypothesis, reference in zip(src_sentences, hypothesis_iter, trg_sentences):
+                for i, (sources, hypothesis, reference) in enumerate(zip(src_sentences, hypothesis_iter,
+                                                                         trg_sentences)):
                     if use_edits:
                         reference = utils.reverse_edits(sources[0], reference)
 
+                    if self.oracle_ext is not None:
+                        hypothesis = utils.apply_oracle(hypothesis, oracle_lines[i][0])
+                        reference = utils.apply_oracle(reference, oracle_lines[i][0], strict=True)
 
                     hypotheses.append(hypothesis)
                     references.append(reference.strip().replace('@@ ', ''))

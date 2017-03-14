@@ -19,7 +19,6 @@ max_gradient_norm: 1.0
 
 data_dir: experiments/WMT14/data_subwords
 model_dir: experiments/WMT14/subwords
-log_file: experiments/WMT14/subwords/log.txt
 
 encoders:
   - name: en

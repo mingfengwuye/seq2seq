@@ -38,12 +38,13 @@ This example will create 6 files in `output/`: train.fr, train.en, test.fr,\
 _BOS = '<S>'
 _EOS = '</S>'
 _UNK = '<UNK>'
+_KEEP = '<KEEP>'
+_DEL = '<DEL>'
+_INS = '<INS>'
+_SUB = '<SUB>'
+_NONE = '<NONE>'
 
-_START_VOCAB = [_BOS, _EOS, _UNK]
-
-BOS_ID = 0
-EOS_ID = 1
-UNK_ID = 2
+_START_VOCAB = [_BOS, _EOS, _UNK, _KEEP, _DEL, _INS, _SUB, _NONE]
 
 temporary_files = []
 
@@ -95,6 +96,7 @@ def create_vocabulary(filename, output_filename, size, character_level=False, mi
         if min_count > 1:
             vocab = {w: c for (w, c) in vocab.items() if c >= min_count}
 
+        vocab = {w: c for (w, c) in vocab.items() if w not in _START_VOCAB}
         vocab_list = _START_VOCAB + sorted(vocab, key=vocab.get, reverse=True)
         if 0 < size < len(vocab_list):
             vocab_list = vocab_list[:size]
