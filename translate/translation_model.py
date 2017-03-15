@@ -214,7 +214,8 @@ class TranslationModel(BaseTranslationModel):
 
     def _decode_batch(self, sess, sentence_tuples, batch_size, beam_size=1, remove_unk=False, early_stopping=True,
                       use_edits=False):
-        beam_search = beam_size > 1 or isinstance(sess, list)
+        # beam_search = beam_size > 1 or isinstance(sess, list)
+        beam_search = True   # FIXME
 
         if beam_search:
             batch_size = 1

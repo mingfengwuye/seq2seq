@@ -182,7 +182,7 @@ def compute_energy_edits(hidden, state, attn_size, edit_window_size=3, pt=None, 
 
 
 def global_attention(state, prev_weights, hidden_states, encoder, encoder_input_length, pt=None, scope=None,
-                     use_edits=False, edit_window_size=None, **kwargs):
+                     use_edits=False, **kwargs):
     with tf.variable_scope(scope or 'attention'):
         # TODO: choose energy function inside config
         if use_edits and encoder.edit_window_size is not None and encoder.edit_window_size >= 0:
@@ -208,8 +208,8 @@ def global_attention(state, prev_weights, hidden_states, encoder, encoder_input_
         return weighted_average, weights
 
 
-def local_attention(state, prev_weights, hidden_states, encoder, pt=None, scope=None, use_edits=False,
-                    **kwargs):
+def local_attention(state, prev_weights, hidden_states, encoder, encoder_input_length, pt=None, scope=None,
+                    use_edits=False, **kwargs):
     """
     Local attention of Luong et al. (http://arxiv.org/abs/1508.04025)
     """
@@ -217,15 +217,15 @@ def local_attention(state, prev_weights, hidden_states, encoder, pt=None, scope=
     state_size = state.get_shape()[1].value
 
     with tf.variable_scope(scope or 'attention'):
-        S = tf.cast(attn_length, dtype=tf.float32)  # source length
-
         wp = get_variable_unsafe('Wp', [state_size, state_size])
         vp = get_variable_unsafe('vp', [state_size, 1])
+
+        encoder_input_length = tf.cast(tf.expand_dims(encoder_input_length, axis=1), tf.float32)
 
         pt_ = pt
         if pt is None:
             pt = tf.nn.sigmoid(tf.matmul(tf.nn.tanh(tf.matmul(state, wp)), vp))
-            pt = tf.floor(S * pt)  # aligned position in the source sentence
+            pt = tf.floor(encoder_input_length * pt)
 
         pt = tf.reshape(pt, [-1, 1])
 
@@ -239,7 +239,7 @@ def local_attention(state, prev_weights, hidden_states, encoder, pt=None, scope=
 
         mlow = tf.to_float(idx < low)
         mhigh = tf.to_float(idx > high)
-        m = mlow + mhigh
+        m = mlow + mhigh + tf.to_float(idx >= encoder_input_length)
         mask = tf.to_float(tf.equal(m, 0.0))
 
         if use_edits and encoder.edit_window_size is not None and encoder.edit_window_size >= 0:
@@ -267,6 +267,7 @@ def local_attention(state, prev_weights, hidden_states, encoder, pt=None, scope=
         weights *= tf.exp(div)  # result of the truncated normal distribution
 
         weighted_average = tf.reduce_sum(tf.expand_dims(weights, axis=2) * hidden_states, axis=1)
+
         return weighted_average, weights
 
 
@@ -350,8 +351,6 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
             else:
                 return input_
 
-        # hidden_states = [tf.expand_dims(states, 2) for states in attention_states]
-        # import ipdb; ipdb.set_trace()
         attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
                                        encoder_input_length=encoder_input_length, use_edits=use_edits)
         # FIXME: use_edits only for 1st encoder

@@ -43,3 +43,5 @@ done
 
 scripts/prepare-data.py ${data_dir}/concat src pe mt edits ${data_dir} --no-tokenize --shuffle --output train-concat \
 --vocab-prefix vocab-concat --vocab-size 30000
+
+# TODO: truecase data
