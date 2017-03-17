@@ -115,12 +115,10 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, 
 def compute_energy(hidden, state, attn_size, **kwargs):
     input_size = hidden.get_shape()[2].value
 
-    # initializer = tf.random_normal_initializer(stddev=0.001)   # same as Bahdanau et al.
-    initializer = None
-    y = linear_unsafe(state, attn_size, True, scope='W_a', initializer=initializer)
+    y = linear_unsafe(state, attn_size, True, scope='W_a')
     y = tf.expand_dims(y, axis=1)
 
-    k = get_variable_unsafe('U_a', [input_size, attn_size], initializer=initializer)
+    k = get_variable_unsafe('U_a', [input_size, attn_size])
     f = tf.einsum('ijk,kl->ijl', hidden, k)
 
     v = get_variable_unsafe('v_a', [attn_size])
@@ -129,8 +127,7 @@ def compute_energy(hidden, state, attn_size, **kwargs):
     return tf.reduce_sum(v * tf.tanh(s), [2])
 
 
-def compute_energy_with_filter(hidden, state, prev_weights, attention_filters, attention_filter_length,
-                               **kwargs):
+def compute_energy_with_filter(hidden, state, prev_weights, attention_filters, attention_filter_length, **kwargs):
     batch_size = tf.shape(hidden)[0]
     time_steps = tf.shape(hidden)[1]
     attn_size = hidden.get_shape()[2].value  # FIXME attn_size parameter
@@ -159,12 +156,10 @@ def compute_energy_edits(hidden, state, attn_size, edit_window_size=3, pos=None,
     batch_size = tf.shape(hidden)[0]
     time_steps = tf.shape(hidden)[1]
 
-    # initializer = tf.random_normal_initializer(stddev=0.001)   # same as Bahdanau et al.
-    initializer = None
-    y = linear_unsafe(state, attn_size, True, scope='W_a', initializer=initializer)
+    y = linear_unsafe(state, attn_size, bias=True, scope='W_a')
     y = tf.expand_dims(y, axis=1)
 
-    k = get_variable_unsafe('U_a', [input_size, attn_size], initializer=initializer)
+    k = get_variable_unsafe('U_a', [input_size, attn_size])
     f = tf.einsum('ijk,kl->ijl', hidden, k)
 
     i = tf.reshape(tf.tile(tf.range(time_steps), [batch_size]), tf.stack([batch_size, time_steps]))
@@ -172,7 +167,7 @@ def compute_energy_edits(hidden, state, attn_size, edit_window_size=3, pos=None,
 
     i = tf.maximum(tf.minimum(i, edit_window_size), -edit_window_size) + edit_window_size
 
-    pos_embedding = get_variable_unsafe('pos_embedding', [edit_window_size * 2 + 1, attn_size], initializer=None)
+    pos_embedding = get_variable_unsafe('pos_embedding', [edit_window_size * 2 + 1, attn_size])
     z = tf.nn.embedding_lookup(pos_embedding, i)
 
     v = get_variable_unsafe('v_a', [attn_size])
@@ -182,10 +177,9 @@ def compute_energy_edits(hidden, state, attn_size, edit_window_size=3, pos=None,
 
 
 def global_attention(state, prev_weights, hidden_states, encoder, encoder_input_length, pos=None, scope=None,
-                     use_edits=False, **kwargs):
+                     **kwargs):
     with tf.variable_scope(scope or 'attention'):
-        # TODO: choose energy function inside config
-        if use_edits and encoder.edit_window_size is not None and encoder.edit_window_size >= 0:
+        if encoder.edit_window_size is not None and encoder.edit_window_size >= 0:
             compute_energy_ = compute_energy_edits
         elif encoder.attention_filters > 0:
             compute_energy_ = compute_energy_with_filter
@@ -209,7 +203,7 @@ def global_attention(state, prev_weights, hidden_states, encoder, encoder_input_
 
 
 def local_attention(state, prev_weights, hidden_states, encoder, encoder_input_length, pos=None, scope=None,
-                    use_edits=False, **kwargs):
+                    **kwargs):
     """
     Local attention of Luong et al. (http://arxiv.org/abs/1508.04025)
     """
@@ -242,7 +236,7 @@ def local_attention(state, prev_weights, hidden_states, encoder, encoder_input_l
         m = mlow + mhigh + tf.to_float(idx >= encoder_input_length)
         mask = tf.to_float(tf.equal(m, 0.0))
 
-        if use_edits and encoder.edit_window_size is not None and encoder.edit_window_size >= 0:
+        if encoder.edit_window_size is not None and encoder.edit_window_size >= 0:
             compute_energy_ = compute_energy_edits
         elif encoder.attention_filters > 0:
             compute_energy_ = compute_energy_with_filter
@@ -399,9 +393,7 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
 
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
         attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
-                                       encoder_input_length=encoder_input_length, use_edits=use_edits)
-        # FIXME: use_edits only for 1st encoder
-
+                                       encoder_input_length=encoder_input_length)
         input_shape = tf.shape(decoder_inputs)
         time_steps = input_shape[0]
         batch_size = input_shape[1]

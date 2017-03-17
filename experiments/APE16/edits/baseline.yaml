@@ -36,7 +36,6 @@ read_ahead: 10
 encoders:
   - name: mt
     attention_window_size: 2
-#    edit_window_size: 5
 
 decoder:
     name: edits

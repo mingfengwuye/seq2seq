@@ -12,8 +12,8 @@ max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data
-model_dir: experiments/APE16/edits/debug_reinforce
-checkpoints: [experiments/APE16/edits/best_so_far/checkpoints/best]
+model_dir: experiments/APE16/edits/baseline_reinforce
+checkpoints: [experiments/APE16/edits/baseline/checkpoints/best]
 
 batch_size: 32
 
@@ -35,13 +35,12 @@ read_ahead: 10
 
 encoders:
   - name: mt
-
+    attention_window_size: 2
 
 decoder:
     name: edits
 
 use_edits: True
-attention_window_size: 2
 
 reset: True
 baseline_steps: 2000

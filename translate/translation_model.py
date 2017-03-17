@@ -258,17 +258,18 @@ class TranslationModel(BaseTranslationModel):
                               for i in trg_token_ids]
 
                 # utils.debug(' '.join(trg_tokens))
+                if remove_unk:
+                    trg_tokens = [token for token in trg_tokens if token != utils._UNK]
+
+                raw = ' '.join(trg_tokens)
 
                 if use_edits:
                     trg_tokens = utils.reverse_edits(src_tokens[0], ' '.join(trg_tokens)).split()
 
-                if remove_unk:
-                    trg_tokens = [token for token in trg_tokens if token != utils._UNK]
-
                 if self.character_level[-1]:
-                    yield ''.join(trg_tokens)
+                    yield ''.join(trg_tokens), raw
                 else:
-                    yield ' '.join(trg_tokens).replace('@@ ', '')  # merge subword units
+                    yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
 
     def align(self, sess, output=None, wav_files=None, **kwargs):
         if len(self.src_ext) != 1:
@@ -291,8 +292,6 @@ class TranslationModel(BaseTranslationModel):
 
             weights = weights.squeeze()[:len(trg_tokens),:len(token_ids[0])].T
             max_len = weights.shape[0]
-
-            # import ipdb; ipdb.set_trace()
 
             if self.binary_input[0]:
                 src_tokens = None
