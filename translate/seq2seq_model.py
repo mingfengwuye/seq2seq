@@ -18,6 +18,7 @@
 import numpy as np
 import tensorflow as tf
 import re
+import itertools
 
 from translate import utils, evaluation
 from translate import decoders
@@ -43,7 +44,7 @@ class Seq2SeqModel(object):
                  freeze_variables=None, lm_weight=None, max_output_len=50, feed_previous=0.0,
                  optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
                  reinforce_baseline=True, softmax_temperature=1.0, loss_function='xent', rollouts=None,
-                 partial_rewards=False, use_edits=False, **kwargs):
+                 partial_rewards=False, use_edits=False, sub_op=False, **kwargs):
         self.lm_weight = lm_weight
         self.encoders = encoders
         self.decoder = decoder
@@ -109,7 +110,8 @@ class Seq2SeqModel(object):
         self.partial_rewards = partial_rewards
 
         parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
-                          encoder_input_length=self.encoder_input_length, rollouts=1, use_edits=use_edits)
+                          encoder_input_length=self.encoder_input_length, rollouts=1,
+                          use_edits=use_edits, sub_op=sub_op)
 
         self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
 
@@ -204,6 +206,9 @@ class Seq2SeqModel(object):
 
         batch = self.get_batch(data)
         encoder_inputs, targets, encoder_input_length = batch
+
+        # TODO: feed oracle as target
+        # TODO: same for greedy decoding
 
         input_feed = {self.targets: targets}
 
@@ -375,10 +380,8 @@ class Seq2SeqModel(object):
 
         return np.argmax(outputs, axis=2).T
 
-    def beam_search_decoding(self, session, token_ids, beam_size, ngrams=None, early_stopping=True):
-        # TODO: implement Post-Editing Penalty (PEP)
-        # penalty of -1 for each new word in the output w.r.t. the input
-
+    def beam_search_decoding(self, session, token_ids, beam_size, ngrams=None, early_stopping=True,
+                             use_edits=False):
         if not isinstance(session, list):
             session = [session]
 
@@ -400,6 +403,8 @@ class Seq2SeqModel(object):
         state, attn_states = list(zip(*[(res_[0], res_[1:]) for res_ in res]))
 
         targets = targets[0]  # BOS symbol
+
+        edit_pos = [np.zeros([1], dtype=np.int32) for _ in session]
 
         finished_hypotheses = []
         finished_scores = []
@@ -423,8 +428,9 @@ class Seq2SeqModel(object):
                 {self.beam_tensors.state: state_,
                  self.targets: targets,
                  self.target_length: [1] * batch_size,
+                 self.beam_tensors.edit_pos: edit_pos_
                 }
-                for state_ in state
+                for state_, edit_pos_ in zip(state, edit_pos)
             ]
             
             for feed in input_feed:
@@ -439,19 +445,20 @@ class Seq2SeqModel(object):
                 for j in range(self.encoder_count):
                     input_feed_[self.attention_states[j]] = attn_states_[j].repeat(batch_size, axis=0)
 
-            output_feed = namedtuple('beam_output', 'output state proba')(
+            output_feed = namedtuple('beam_output', 'output state proba edit_pos')(
                 self.beam_tensors.new_output,
                 self.beam_tensors.new_state,
-                self.beam_output
+                self.beam_output,
+                self.beam_tensors.new_edit_pos
             )
 
             res = [session_.run(output_feed, input_feed_) for session_, input_feed_ in zip(session, input_feed)]
 
             res_transpose = list(
-                zip(*[(res_.output, res_.state, res_.proba) for res_ in res])
+                zip(*[(res_.output, res_.state, res_.proba, res_.edit_pos) for res_ in res])
             )
 
-            output, state, proba = res_transpose
+            output, state, proba, edit_pos = res_transpose
             # hypotheses, list of tokens ids of shape (beam_size, previous_len)
             # proba, shape=(beam_size, trg_vocab_size)
             # state, shape=(beam_size, cell.state_size)
@@ -499,6 +506,7 @@ class Seq2SeqModel(object):
             new_hypotheses = []
             new_scores = []
             new_state = [[] for _ in session]
+            new_edit_pos = [[] for _ in session]
             new_output = [[] for _ in session]
             new_input = []
             new_beam_size = beam_size
@@ -521,6 +529,7 @@ class Seq2SeqModel(object):
                     for session_id, state_, in enumerate(state):
                         new_state[session_id].append(state_[hyp_id])
                         new_output[session_id].append(output[session_id][hyp_id])
+                        new_edit_pos[session_id].append(edit_pos[session_id][hyp_id])
 
                     new_scores.append(score)
                     new_input.append(token_id)
@@ -531,6 +540,7 @@ class Seq2SeqModel(object):
             beam_size = new_beam_size
             hypotheses = new_hypotheses
             state = [np.array(new_state_) for new_state_ in new_state]
+            edit_pos = [np.array(new_edit_pos_) for new_edit_pos_ in new_edit_pos]
             output = [np.array(new_output_) for new_output_ in new_output]
             scores = np.array(new_scores)
             targets = np.array(new_input, dtype=np.int32)
@@ -538,11 +548,36 @@ class Seq2SeqModel(object):
             if beam_size <= 0:
                 break
 
+        import ipdb; ipdb.set_trace()
         hypotheses += finished_hypotheses
         scores = np.concatenate([scores, finished_scores])
 
+        import ipdb; ipdb.set_trace()
+
+        hypotheses = [
+            list(itertools.takewhile(lambda x: x != utils.EOS_ID, hyp))
+            for hyp in hypotheses
+        ]  # FIXME: counting EOS score
+
+        if use_edits:  # TODO: reverse edits
+            hypothesis_len = [len(hyp) - hyp.count(utils.DEL_ID) for hyp in hypotheses]
+            # TODO: penalty if hypothesis is broken
+            # TODO: PEP (post-editing penalty) = -1 for each new word w.r.t the input
+
+            n = len(encoder_inputs[0][0])
+
+            penalty = np.array([
+                abs(n - hyp.count(utils.DEL_ID) - hyp.count(utils.KEEP_ID) - hyp.count(utils.SUB_ID))
+                for hyp in hypotheses
+            ])
+
+            # import ipdb; ipdb.set_trace()
+            # scores += penalty
+        else:
+            hypothesis_len = map(len, hypotheses)
+
         if self.len_normalization > 0:  # normalize score by length (to encourage longer sentences)
-            scores /= [len(hypothesis) ** self.len_normalization for hypothesis in hypotheses]
+            scores /= [len_ ** self.len_normalization for len_ in hypothesis_len]
 
         # sort best-list by score
         sorted_idx = np.argsort(scores)

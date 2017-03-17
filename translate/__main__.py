@@ -128,7 +128,7 @@ def main(args=None):
         'cell_size', 'layers', 'vocab_size', 'embedding_size', 'attention_filters', 'attention_filter_length',
         'use_lstm', 'time_pooling', 'attention_window_size', 'dynamic', 'binary', 'character_level', 'bidir',
         'load_embeddings', 'pooling_avg', 'swap_memory', 'parallel_iterations', 'input_layers',
-        'residual_connections', 'attn_size', 'edit_window_size'
+        'residual_connections', 'attn_size', 'edit_window_size', 'op_embedding_size'
     ]
     # TODO: independent model dir for each task
     task_parameters = [

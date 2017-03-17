@@ -104,7 +104,7 @@ class BaseTranslationModel(object):
 
 class TranslationModel(BaseTranslationModel):
     def __init__(self, name, encoders, decoder, checkpoint_dir, learning_rate, learning_rate_decay_factor, batch_size,
-                 keep_best=1, load_embeddings=None, max_input_len=None, **kwargs):
+                 keep_best=1, load_embeddings=None, max_input_len=None, max_output_len=None, **kwargs):
         super(TranslationModel, self).__init__(name, checkpoint_dir, keep_best, **kwargs)
 
         self.batch_size = batch_size
@@ -115,6 +115,7 @@ class TranslationModel(BaseTranslationModel):
         self.extensions = self.src_ext + [self.trg_ext]
 
         self.max_input_len = max_input_len
+        self.max_output_len = max_output_len
 
         encoders_and_decoder = encoders + [decoder]
         self.binary_input = [encoder_or_decoder.binary for encoder_or_decoder in encoders_and_decoder]
@@ -141,7 +142,7 @@ class TranslationModel(BaseTranslationModel):
         # main model
         utils.debug('creating model {}'.format(name))
         self.seq2seq_model = Seq2SeqModel(encoders, decoder, self.learning_rate, self.global_step,
-                                          max_input_len=max_input_len, **kwargs)
+                                          max_input_len=max_input_len, max_output_len=max_output_len, **kwargs)
 
         self.batch_iterator = None
         self.dev_batches = None
@@ -151,9 +152,11 @@ class TranslationModel(BaseTranslationModel):
     def read_data(self, max_train_size, max_dev_size, read_ahead=10, batch_mode='standard', shuffle=True,
                   **kwargs):
         utils.debug('reading training data')
+        max_len = [self.max_input_len for _ in self.src_ext] + [self.max_output_len]
+
         train_set = utils.read_dataset(self.filenames.train, self.extensions, self.vocabs,
                                        max_size=max_train_size, binary_input=self.binary_input,
-                                       character_level=self.character_level, max_seq_len=self.max_input_len)
+                                       character_level=self.character_level, max_seq_len=max_len)
         self.train_size = len(train_set)
         self.batch_iterator = utils.read_ahead_batch_iterator(train_set, self.batch_size, read_ahead=read_ahead,
                                                               mode=batch_mode, shuffle=shuffle)
@@ -214,8 +217,7 @@ class TranslationModel(BaseTranslationModel):
 
     def _decode_batch(self, sess, sentence_tuples, batch_size, beam_size=1, remove_unk=False, early_stopping=True,
                       use_edits=False):
-        # beam_search = beam_size > 1 or isinstance(sess, list)
-        beam_search = True   # FIXME
+        beam_search = beam_size > 1 or isinstance(sess, list)
 
         if beam_search:
             batch_size = 1
@@ -240,7 +242,8 @@ class TranslationModel(BaseTranslationModel):
             if beam_search:
                 hypotheses, _ = self.seq2seq_model.beam_search_decoding(sess, token_ids[0], beam_size,
                                                                         ngrams=self.ngrams,
-                                                                        early_stopping=early_stopping)
+                                                                        early_stopping=early_stopping,
+                                                                        use_edits=use_edits)
                 batch_token_ids = [hypotheses[0]]  # first hypothesis is the highest scoring one
 
             else:
@@ -248,12 +251,13 @@ class TranslationModel(BaseTranslationModel):
 
             for src_tokens, trg_token_ids in zip(batch, batch_token_ids):
                 trg_token_ids = list(trg_token_ids)
-
                 if utils.EOS_ID in trg_token_ids:
                     trg_token_ids = trg_token_ids[:trg_token_ids.index(utils.EOS_ID)]
 
                 trg_tokens = [self.trg_vocab.reverse[i] if i < len(self.trg_vocab.reverse) else utils._UNK
                               for i in trg_token_ids]
+
+                # utils.debug(' '.join(trg_tokens))
 
                 if use_edits:
                     trg_tokens = utils.reverse_edits(src_tokens[0], ' '.join(trg_tokens)).split()

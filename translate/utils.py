@@ -73,22 +73,24 @@ def reverse_edits(source, edits):
     i = 0
 
     for edit in edits.split():
-        if edit == _DEL:
-            if i < len(src_words):
-                i += 1
-        elif edit == _KEEP:
-            if i < len(src_words):
+        if edit in (_DEL, _KEEP, _SUB) or edit.startswith(_SUB + '_'):
+            if i >= len(src_words):
+                continue
+
+            if edit == _KEEP:
                 target.append(src_words[i])
-                i += 1
-        elif edit == _SUB:
-            if i < len(src_words):
+            elif edit == _SUB:
                 target.append(edit)
-                i += 1
+            elif edit.startswith(_SUB + '_'):
+                target.append(edit[len(_SUB + '_'):])
+
+            i += 1
+        elif edit.startswith(_INS + '_'):
+            target.append(edit[len(_INS + '_'):])
         else:
             target.append(edit)
 
     target += src_words[i:]
-
     return ' '.join(target)
 
 
@@ -294,7 +296,7 @@ def read_dataset(paths, extensions, vocabs, max_size=None, binary_input=None,
         if not all(inputs):  # skip empty inputs
             continue
         # skip lines that are too long
-        if max_seq_len and any(len(inputs_) > max_seq_len for inputs_ in inputs):
+        if max_seq_len and any(len(inputs_) > max_len for inputs_, max_len in zip(inputs, max_seq_len)):
             continue
 
         data_set.append(inputs)  # TODO: filter too long

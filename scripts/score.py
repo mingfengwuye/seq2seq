@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import sys
 from translate.evaluation import corpus_bleu, corpus_ter, corpus_tercom, corpus_wer
 from collections import OrderedDict
 
@@ -12,6 +13,7 @@ parser.add_argument('--pyter', action='store_true')
 parser.add_argument('--ter', action='store_true')
 parser.add_argument('--wer', action='store_true')
 parser.add_argument('--all', '-a', action='store_true')
+parser.add_argument('--max-size', type=int)
 
 parser.add_argument('--case-insensitive', '-i', action='store_true')
 
@@ -32,6 +34,16 @@ if __name__ == '__main__':
         else:
             hypotheses = [line.strip() for line in src_file]
             references = [line.strip() for line in trg_file]
+
+        if args.max_size is not None:
+            hypotheses = hypotheses[:args.max_size]
+            references = references[:args.max_size]
+
+        if len(hypotheses) != len(references):
+            sys.stderr.write('warning: source and target don\'t have the same length\n')
+            size = min(len(hypotheses), len(references))
+            hypotheses = hypotheses[:size]
+            references = references[:size]
 
         scores = OrderedDict()
         if args.bleu:
