@@ -83,6 +83,7 @@ len_normalization: 1.0   # length normalization coefficient used in beam-search 
 softmax_temperature: 1.0 # temperature to use when decoding with beam-search (temperature of 1.0 is regular softmax)
 early_stopping: True     # reduce beam-size each time a finished hypothesis is encountered (affects decoding speed)
 use_edits: False         # output is a sequence of edits, apply those edits before decoding/evaluating
+raw_output: False
 
 # general
 gpu_id: 0                # index of the GPU to use

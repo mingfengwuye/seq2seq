@@ -41,5 +41,6 @@ decoder:
     name: edits
 
 use_edits: True
+raw_output: False
 dev_prefix: [dev, train]
 max_dev_size: 2000

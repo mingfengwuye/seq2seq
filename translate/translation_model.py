@@ -257,11 +257,11 @@ class TranslationModel(BaseTranslationModel):
                 trg_tokens = [self.trg_vocab.reverse[i] if i < len(self.trg_vocab.reverse) else utils._UNK
                               for i in trg_token_ids]
 
+                raw = ' '.join(trg_tokens)
+
                 # utils.debug(' '.join(trg_tokens))
                 if remove_unk:
                     trg_tokens = [token for token in trg_tokens if token != utils._UNK]
-
-                raw = ' '.join(trg_tokens)
 
                 if use_edits:
                     trg_tokens = utils.reverse_edits(src_tokens[0], ' '.join(trg_tokens)).split()
@@ -306,7 +306,8 @@ class TranslationModel(BaseTranslationModel):
             output_file = '{}.{}.svg'.format(output, line_id + 1) if output is not None else None
             utils.heatmap(src_tokens, trg_tokens, weights.T, wav_file=wav_file, output_file=output_file)
 
-    def decode(self, sess, beam_size, output=None, remove_unk=False, early_stopping=True, use_edits=False, **kwargs):
+    def decode(self, sess, beam_size, output=None, remove_unk=False, early_stopping=True, use_edits=False,
+               raw_output=False, **kwargs):
         utils.log('starting decoding')
 
         # empty `test` means that we read from standard input, which is not possible with multiple encoders
@@ -332,7 +333,10 @@ class TranslationModel(BaseTranslationModel):
                                                  early_stopping=early_stopping, remove_unk=remove_unk,
                                                  use_edits=use_edits)
 
-            for hypothesis in hypothesis_iter:
+            for hypothesis, raw in hypothesis_iter:
+                if raw_output:
+                    hypothesis = raw
+
                 output_file.write(hypothesis + '\n')
                 output_file.flush()
         finally:
@@ -340,7 +344,7 @@ class TranslationModel(BaseTranslationModel):
                 output_file.close()
 
     def evaluate(self, sess, beam_size, score_function, on_dev=True, output=None, remove_unk=False, max_dev_size=None,
-                 script_dir='scripts', early_stopping=True, use_edits=False, **kwargs):
+                 script_dir='scripts', early_stopping=True, use_edits=False, raw_output=False, **kwargs):
         """
         :param score_function: name of the scoring function used to score and rank models
           (typically 'bleu_score')
@@ -394,6 +398,7 @@ class TranslationModel(BaseTranslationModel):
                                                      use_edits=use_edits)
                 for i, (sources, hypothesis, reference) in enumerate(zip(src_sentences, hypothesis_iter,
                                                                          trg_sentences)):
+                    hypothesis, raw = hypothesis
                     if use_edits:
                         reference = utils.reverse_edits(sources[0], reference)
 
@@ -405,6 +410,9 @@ class TranslationModel(BaseTranslationModel):
                     references.append(reference.strip().replace('@@ ', ''))
 
                     if output_file is not None:
+                        if raw_output:
+                            hypothesis = raw
+
                         output_file.write(hypothesis + '\n')
                         output_file.flush()
 

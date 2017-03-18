@@ -90,7 +90,7 @@ def reverse_edits(source, edits):
         else:
             target.append(edit)
 
-    target += src_words[i:]
+    target += src_words[i:]   # TODO: try other strategies
     return ' '.join(target)
 
 

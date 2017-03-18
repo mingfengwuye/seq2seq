@@ -48,6 +48,7 @@ parser.add_argument('--len-normalization', type=float)
 parser.add_argument('--output')
 parser.add_argument('--max-steps', type=int)
 parser.add_argument('--remove-unk', action='store_const', const=True)
+parser.add_argument('--raw-output', action='store_const', const=True)
 parser.add_argument('--wav-files', nargs='*')
 parser.add_argument('--use-edits', action='store_const', const=True)
 
