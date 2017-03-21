@@ -605,7 +605,6 @@ class Seq2SeqModel(object):
         scores = scores[sorted_idx].tolist()
         return hypotheses, scores
 
-
     def greedy_step_by_step_decoding(self, session, token_ids):
         if self.dropout is not None:
             session.run(self.dropout_off)
@@ -639,14 +638,18 @@ class Seq2SeqModel(object):
             targets = np.argmax(output, axis=1)
 
             if self.oracle:
+                # replace insertions by corresponding word
                 new_targets = []
                 for j, (target, insertions_) in enumerate(zip(targets, insertions)):
                     if target == utils.INS_ID:
                         try:
-                            # new_targets.append(insertions_.pop(0))
-                            new_targets.append(target)
+                            new_targets.append(insertions_.pop(0))
                         except IndexError:
-                            new_targets.append(target)   # replace by previous target
+                            # new_targets.append(target)   # replace by previous target
+                            if len(hypotheses) > 0:
+                                new_targets.append(hypotheses[-1][j])
+                            else:
+                                new_targets.append(utils.BOS_ID)
                     else:
                         new_targets.append(target)
                 targets = np.array(new_targets)
@@ -669,28 +672,27 @@ class Seq2SeqModel(object):
             data, output = session.run(output_feed, input_feed)
 
         hypotheses = np.array(hypotheses).T
-        return hypotheses
+        hypotheses_ = []
+        for hypothesis in hypotheses:
+            hypothesis = list(hypothesis)
+            if utils.EOS_ID in hypothesis:
+                hypothesis = hypothesis[:hypothesis.index(utils.EOS_ID)]
+            hypothesis = [i for i in hypothesis if i != utils.BOS_ID]
+            hypotheses_.append(hypothesis)
 
+        return hypotheses_
 
     def beam_search_decoding(self, session, token_ids, beam_size, use_edits=False, early_stopping=True,
                              *args, **kwargs):
         if self.dropout is not None:
             session.run(self.dropout_off)
 
-        assert not self.oracle or beam_size == 1  # FIXME
-
-        if self.oracle:
-            early_stopping = False
-            data = [token_ids]  # FIXME
-        else:
-            data = [token_ids + [[]]]
+        assert not self.oracle  # FIXME
+        data = [token_ids + [[]]]
 
         batch = self.get_batch(data, decoding=False)
-        encoder_inputs, references, encoder_input_length = batch
+        encoder_inputs, _, encoder_input_length = batch
         input_feed = {}
-
-        reference = references.T[0]
-        insertions = [i for i in reference if i > len(utils._START_VOCAB)]
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
@@ -750,18 +752,6 @@ class Seq2SeqModel(object):
             hypotheses = new_hypotheses
             scores = np.array(new_scores)
             targets = np.array(new_target, dtype=np.int32)
-
-            if self.oracle:
-                new_targets = []
-                for target in targets:
-                    if target == utils.INS_ID:
-                        try:
-                            new_targets.append(insertions.pop(0))
-                        except IndexError:
-                            pass
-                    else:
-                        new_targets.append(target)
-
             data = np.array(new_data)
 
             batch_size = data.shape[0]

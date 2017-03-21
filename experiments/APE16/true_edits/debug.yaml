@@ -24,8 +24,8 @@ learning_rate_decay_factor: 0.95
 decay_every_n_epoch: 1
 decay_after_n_epoch: 3
 
-steps_per_checkpoint: 10
-steps_per_eval: 10
+steps_per_checkpoint: 200
+steps_per_eval: 200
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
