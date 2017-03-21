@@ -7,6 +7,7 @@ import struct
 import random
 import math
 import wave
+import shutil
 
 from collections import namedtuple
 from contextlib import contextmanager
@@ -31,6 +32,11 @@ KEEP_ID = 3
 SUB_ID = 4
 INS_ID = 5
 DEL_ID = 6
+
+
+class FinishedTrainingException(Exception):
+    def __init__(self):
+        debug('finished training')
 
 
 @contextmanager
@@ -182,7 +188,7 @@ def sentence_to_token_ids(sentence, vocabulary, character_level=False):
 
 
 def get_filenames(data_dir, extensions, train_prefix, dev_prefix, vocab_prefix,
-                  embedding_prefix, lm_file=None, **kwargs):
+                  embedding_prefix, dest_vocab_path=None, lm_file=None, **kwargs):
     """
     Get a bunch of file prefixes and extensions, and output the list of filenames to be used
     by the model.
@@ -199,13 +205,25 @@ def get_filenames(data_dir, extensions, train_prefix, dev_prefix, vocab_prefix,
     """
     train_path = os.path.join(data_dir, train_prefix)
     dev_path = [os.path.join(data_dir, prefix) for prefix in dev_prefix]
-    vocab_path = os.path.join(data_dir, vocab_prefix)
     embedding_path = os.path.join(data_dir, embedding_prefix)
     lm_path = lm_file
 
     train = ['{}.{}'.format(train_path, ext) for ext in extensions]
     dev = [['{}.{}'.format(path, ext) for ext in extensions] for path in dev_path]
+
+    vocab_path = os.path.join(data_dir, vocab_prefix)
     vocab = ['{}.{}'.format(vocab_path, ext) for ext in extensions]
+
+    if dest_vocab_path is not None:
+        vocab_dest = ['{}.{}'.format(dest_vocab_path, ext) for ext in extensions]
+        os.makedirs(os.path.dirname(dest_vocab_path), exist_ok=True)
+
+        for src, dest in zip(vocab, vocab_dest):
+            if not os.path.exists(dest):
+                debug('copying vocab to {}'.format(dest))
+                shutil.copy(src, dest)
+        vocab = vocab_dest
+
     embeddings = ['{}.{}'.format(embedding_path, ext) for ext in extensions]
 
     test = kwargs.get('decode')  # empty list means we decode from standard input
@@ -490,9 +508,7 @@ def create_logger(log_file=None):
     """
     formatter = logging.Formatter(fmt='%(asctime)s %(message)s', datefmt='%m/%d %H:%M:%S')
     if log_file is not None:
-        log_dir = os.path.dirname(log_file)
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
         handler = logging.FileHandler(log_file)
         handler.setFormatter(formatter)
         logger = logging.getLogger(__name__)

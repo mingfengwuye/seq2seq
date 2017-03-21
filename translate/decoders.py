@@ -109,7 +109,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, 
             encoder_states.append(encoder_state_)
 
     encoder_state = tf.concat(encoder_states, 1)
-    return encoder_outputs, encoder_state
+    return tf.stack(encoder_outputs), encoder_state
 
 
 def compute_energy(hidden, state, attn_size, **kwargs):
@@ -233,8 +233,17 @@ def local_attention(state, prev_weights, hidden_states, encoder, encoder_input_l
 
         mlow = tf.to_float(idx < low)
         mhigh = tf.to_float(idx > high)
-        m = mlow + mhigh + tf.to_float(idx >= encoder_input_length)
+        # m = mlow + mhigh + tf.to_float(idx >= encoder_input_length)    # degrades performance
+
+        # a = tf.to_float(idx >= encoder_input_length)
+        # m = tf.Print(m, [idx[5]], message='idx', summarize=100)
+        # m = tf.Print(m, [encoder_input_length[5]], message='length', summarize=100)
+        # m = tf.Print(m, [a[5]], message='a', summarize=100)
+        # m = tf.Print(m, [tf.reduce_sum(hidden_states[5], axis=1)], message='states', summarize=10000)
+
+        m = mlow + mhigh
         mask = tf.to_float(tf.equal(m, 0.0))
+        # mask_bis = tf.to_float(tf.equal(mlow + mhigh, 0.0))
 
         if encoder.edit_window_size is not None and encoder.edit_window_size >= 0:
             compute_energy_ = compute_energy_edits
@@ -249,15 +258,27 @@ def local_attention(state, prev_weights, hidden_states, encoder, encoder_input_l
             edit_window_size=encoder.edit_window_size
         )
 
+        # import ipdb; ipdb.set_trace()
+        # e = tf.Print(e, [e[5]], message='e', summarize=100)
         weights = softmax(e, mask=mask)
+        # weights_bis = softmax(e, mask=mask_bis)
+        # weights = tf.Print(weights, [mask[5]], message='mask', summarize=100)
+        # weights = tf.Print(weights, [mask[5]], message='mask_bis', summarize=100)
+        # mask = tf.to_float(tf.not_equal(tf.reduce_sum(hidden_states, axis=2), 0.0))[5]
+        # weights = tf.Print(weights, [mask], message='true_mask', summarize=100)
+        # weights = tf.Print(weights, [weights[5] * mask], message='weights', summarize=100)
+        # weights = tf.Print(weights, [weights_bis[5] * mask], message='weights_bis', summarize=100)
+
+        # import ipdb; ipdb.set_trace()
 
         sigma = encoder.attention_window_size / 2
         numerator = -tf.pow((idx - pos), tf.convert_to_tensor(2, dtype=tf.float32))
-        div = tf.truediv(numerator, 2 * sigma ** 2)
+        # div = tf.truediv(numerator, 2 * sigma ** 2)
+        div = tf.truediv(numerator, sigma ** 2)
 
         weights *= tf.exp(div)  # result of the truncated normal distribution
         # normalize to keep a probability distribution
-        weights /= (tf.reduce_sum(weights, axis=1, keep_dims=True) + 10e-12)
+        # weights /= (tf.reduce_sum(weights, axis=1, keep_dims=True) + 10e-12)
 
         weighted_average = tf.reduce_sum(tf.expand_dims(weights, axis=2) * hidden_states, axis=1)
 
@@ -281,6 +302,8 @@ def multi_attention(state, prev_weights, hidden_states, encoders, encoder_input_
     Same as `attention` except that prev_weights, hidden_states and encoders
     are lists whose length is the number of encoders.
     """
+    hidden_states = tf.unstack(hidden_states)
+
     attns, weights = list(zip(*[
         attention(state, weights, hidden, encoder, encoder_input_length=input_length,
                   scope='attention_{}'.format(encoder.name), **kwargs)
@@ -339,6 +362,7 @@ def get_embedding_function(decoder, encoders):
             embedding_shape = None
         else:
             initializer = None
+            # embedding_shape = [decoder.oracle_vocab_size or decoder.vocab_size, decoder.embedding_size]
             embedding_shape = [decoder.vocab_size, decoder.embedding_size]
 
         with tf.device('/cpu:0'):
@@ -353,7 +377,7 @@ def get_embedding_function(decoder, encoders):
         return embed
 
 
-def attention_decoder(targets, initial_state, attention_states, encoders, decoder, encoder_input_length,
+def attention_decoder_old(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
                       decoder_input_length=None, dropout=None, feed_previous=0.0, feed_argmax=True, use_edits=False,
                       **kwargs):
     """
@@ -376,8 +400,6 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
     # TODO: dropout instead of keep probability
     assert decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'   # because of maxout
 
-    decoder_inputs = targets[:-1,:]  # starts with BOS
-
     embed = get_embedding_function(decoder, encoders)
 
     if decoder.use_lstm:
@@ -397,7 +419,12 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
         input_shape = tf.shape(decoder_inputs)
         time_steps = input_shape[0]
         batch_size = input_shape[1]
-        output_size = decoder.vocab_size
+
+        if decoder.oracle:
+            output_size = len(utils._START_VOCAB)
+        else:
+            output_size = decoder.vocab_size
+
         state_size = cell.state_size
 
         if initial_state is not None:
@@ -479,6 +506,7 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
             i = tf.to_int32(i)
             edit_pos += i
 
+            # sample = tf.Print(sample, [time, time_steps])
             samples = samples.write(time, sample)
 
             input_ = embed(sample)
@@ -527,6 +555,198 @@ def attention_decoder(targets, initial_state, attention_states, encoders, decode
         return (proj_outputs, weights, decoder_outputs, beam_tensors(state, new_state, output, new_output,
                                                                      edit_pos, new_edit_pos),
                 samples, states)
+
+
+def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
+                      decoder_input_length=None, feed_previous=0.0, dropout=None, use_edits=False, **kwargs):
+    assert decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'   # because of maxout
+
+    embed = get_embedding_function(decoder, encoders)
+
+    if decoder.use_lstm:
+        cell = BasicLSTMCell(decoder.cell_size, state_is_tuple=False)
+    else:
+        cell = GRUCell(decoder.cell_size, initializer=orthogonal_initializer())
+
+    if dropout is not None:
+        cell = DropoutWrapper(cell, input_keep_prob=dropout)
+
+    if decoder.layers > 1:
+        cell = MultiRNNCell([cell] * decoder.layers, residual_connections=decoder.residual_connections)
+
+    with tf.variable_scope('decoder_{}'.format(decoder.name)):
+        attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
+                                       encoder_input_length=encoder_input_length, prev_weights=[None])
+        input_shape = tf.shape(decoder_inputs)
+        time_steps = input_shape[0]
+        batch_size = input_shape[1]
+
+        if decoder.oracle:
+            output_size = len(utils._START_VOCAB)
+        else:
+            output_size = decoder.vocab_size
+
+        state_size = cell.state_size
+
+        state = tf.nn.tanh(linear_unsafe(initial_state, state_size, True, scope='initial_state_projection'))
+
+        sequence_length = tf.to_int32(decoder_input_length)
+        min_sequence_length = tf.reduce_min(sequence_length)
+        max_sequence_length = tf.reduce_max(sequence_length)
+
+        time = tf.constant(0, dtype=tf.int32, name='time')
+        zero_output = tf.zeros(tf.stack([batch_size, cell.output_size]), tf.float32)
+
+        outputs = tf.TensorArray(dtype=tf.float32, size=time_steps, clear_after_read=False)
+
+        inputs = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False).unstack(
+                                tf.cast(decoder_inputs, tf.int64))
+
+        initial_input = embed(inputs.read(0))   # first symbol is BOS
+
+        edit_pos = tf.zeros([batch_size], tf.int32)
+
+        def get_output(input_, state, pos=None):
+            context_vector, _ = attention_(state, pos=pos)
+            output_ = linear_unsafe([state, input_, context_vector], decoder.cell_size, False, scope='maxout')
+            output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
+            output_ = linear_unsafe(output_, decoder.embedding_size, False, scope='softmax0')
+            proj_output = linear_unsafe(output_, output_size, True, scope='softmax1')
+            return context_vector, proj_output
+
+        pos = None
+        if use_edits:
+            pos = tf.cast(edit_pos, tf.float32)
+
+        context_vector, output = get_output(initial_input, state, pos=pos)
+        outputs = outputs.write(time, output)
+        time += 1
+
+        def _time_step(time, state, output, outputs, context_vector, edit_pos):
+            argmax = lambda: tf.argmax(output, axis=1)
+            target = lambda: inputs.read(time)
+            sample = tf.cond(tf.random_uniform([]) >= feed_previous, target, argmax)
+            sample.set_shape([None])
+            sample = tf.stop_gradient(sample)
+            input_ = embed(sample)
+
+            is_keep = tf.equal(sample, utils.KEEP_ID)
+            is_sub = tf.equal(sample, utils.SUB_ID)
+            is_del = tf.equal(sample, utils.DEL_ID)
+
+            i = tf.logical_or(is_keep, is_sub)
+            i = tf.logical_or(i, is_del)
+            i = tf.to_int32(i)
+            edit_pos += i
+
+            x = tf.concat([input_, context_vector], 1)
+            call_cell = lambda: unsafe_decorator(cell)(x, state)
+            _, state = rnn._rnn_step(
+                time=time,
+                sequence_length=sequence_length,
+                min_sequence_length=min_sequence_length,
+                max_sequence_length=max_sequence_length,
+                zero_output=zero_output,
+                state=state,
+                call_cell=call_cell,
+                state_size=state_size,
+                skip_conditionals=True)
+
+            pos = None
+            if use_edits:
+                pos = tf.cast(edit_pos, tf.float32)
+
+            context_vector, output = get_output(input_, state, pos=pos)
+            outputs = outputs.write(time, output)
+            return time + 1, state, output, outputs, context_vector, edit_pos
+
+        new_time, new_state, new_output, outputs, new_context_vector, new_edit_pos = tf.while_loop(
+            cond=lambda time, *_: time < time_steps,
+            body=_time_step,
+            loop_vars=(time, state, output, outputs, context_vector, edit_pos),
+            parallel_iterations=decoder.parallel_iterations,
+            swap_memory=decoder.swap_memory)
+
+        outputs = outputs.stack()
+        return outputs
+
+
+def beam_attention_decoder(initial_state, attention_states, encoders, decoder, encoder_input_length,
+                           use_edits=False, **kwargs):
+    assert decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'   # because of maxout
+
+    embed = get_embedding_function(decoder, encoders)
+    if decoder.use_lstm:
+        cell = BasicLSTMCell(decoder.cell_size, state_is_tuple=False)
+    else:
+        cell = GRUCell(decoder.cell_size, initializer=orthogonal_initializer())
+    if decoder.layers > 1:
+        cell = MultiRNNCell([cell] * decoder.layers, residual_connections=decoder.residual_connections)
+
+    with tf.variable_scope('decoder_{}'.format(decoder.name)):
+        attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
+                                       encoder_input_length=encoder_input_length, prev_weights=[None])
+        if decoder.oracle:
+            output_size = len(utils._START_VOCAB)
+        else:
+            output_size = decoder.vocab_size
+
+        state_size = cell.state_size
+        initial_state = tf.nn.tanh(linear_unsafe(initial_state, state_size, True, scope='initial_state_projection'))
+
+        def get_output(input_, state, pos=None):
+            context_vector, _ = attention_(state, pos=pos)
+            output_ = linear_unsafe([state, input_, context_vector], decoder.cell_size, False, scope='maxout')
+            output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
+            output_ = linear_unsafe(output_, decoder.embedding_size, False, scope='softmax0')
+            proj_output = linear_unsafe(output_, output_size, True, scope='softmax1')
+            return context_vector, proj_output
+
+        batch_size = tf.shape(initial_state)[0]
+
+        initial_edit_pos = tf.zeros([batch_size, 1], tf.float32)
+        initial_input = embed(tf.ones(shape=[batch_size], dtype=tf.int32) * utils.BOS_ID)
+
+        initial_context_vector, initial_output = get_output(initial_input, initial_state, pos=initial_edit_pos)
+
+        state_size = initial_state.get_shape()[1]
+        context_size = initial_context_vector.get_shape()[1]
+
+        data = tf.placeholder(tf.float32, shape=[None, state_size + context_size + 1])
+
+        state, context_vector, edit_pos = tf.split(data, [state_size.value, context_size.value, 1], axis=1)
+        initial_data = tf.concat([initial_state, initial_context_vector, initial_edit_pos], axis=1)
+        decoder_input = tf.placeholder(tf.int64, shape=[None])
+
+        if use_edits:
+            is_keep = tf.equal(decoder_input, utils.KEEP_ID)
+            is_sub = tf.equal(decoder_input, utils.SUB_ID)
+            is_del = tf.equal(decoder_input, utils.DEL_ID)
+
+            i = tf.logical_or(is_keep, is_sub)
+            i = tf.logical_or(i, is_del)
+            i = tf.to_float(i)
+            new_edit_pos = edit_pos + tf.expand_dims(i, axis=1)
+        else:
+            new_edit_pos = edit_pos
+
+        embedded_input = embed(decoder_input)
+        x = tf.concat([embedded_input, context_vector], axis=1)
+        call_cell = lambda: unsafe_decorator(cell)(x, state)
+        _, new_state = call_cell()
+        new_context_vector, new_output = get_output(embedded_input, new_state, pos=new_edit_pos)
+        new_data = tf.concat([new_state, new_context_vector, new_edit_pos], axis=1)
+
+        beam_tensors = utils.AttrDict(
+            initial_output=tf.nn.softmax(initial_output),
+            output=tf.nn.softmax(new_output),
+            decoder_input=decoder_input,
+            initial_data=initial_data,
+            data=data,
+            new_data=new_data,
+        )
+
+        return beam_tensors
 
 
 def sequence_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True,

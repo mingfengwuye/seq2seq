@@ -1,12 +1,13 @@
 import time
 import math
+import os
 import numpy as np
 from translate import utils
 from translate.translation_model import TranslationModel, BaseTranslationModel
 
 
 class MultiTaskModel(BaseTranslationModel):
-    def __init__(self, name, tasks, checkpoint_dir, keep_best=1, main_task=None, **kwargs):
+    def __init__(self, name, tasks, checkpoint_dir, model_dir, keep_best=1, main_task=None, **kwargs):
         """
         Proxy for several translation models that are trained jointly
         This class presents the same interface as TranslationModel
@@ -16,12 +17,18 @@ class MultiTaskModel(BaseTranslationModel):
         self.models = []
         self.ratios = []
 
+        assert len(set(task.name for task in tasks)) == len(tasks), 'error: task names should be unique'
+        assert not any(task.name is None for task in tasks), 'error: undefined task name'
+
         for task in tasks:
             self.checkpoint_dir = checkpoint_dir
             # merging both dictionaries (task parameters have a higher precedence)
             kwargs_ = dict(**kwargs)
             kwargs_.update(task)
-            model = TranslationModel(checkpoint_dir=None, keep_best=keep_best, **kwargs_)
+
+            dest_vocab_path = os.path.join(model_dir, 'data', '{}.vocab'.format(task.name))
+            model = TranslationModel(checkpoint_dir=None, keep_best=keep_best, dest_vocab_path=dest_vocab_path,
+                                     **kwargs_)
 
             self.models.append(model)
             self.ratios.append(task.ratio if task.ratio is not None else 1)
@@ -132,17 +139,18 @@ class MultiTaskModel(BaseTranslationModel):
                 score = 0
 
                 for ratio, model_ in zip(self.ratios, self.models):
+                    step = model_.global_step.eval(sess)
+
                     if eval_output is None:
                         output = None
-                    elif len(model_.filenames.dev) > 1:
-                        # if there are several dev files, we define several output files
-                        # TODO: put dev_prefix into the name of the output file (also in the logging output)
-                        output = [
-                            '{}.{}.{}.{}'.format(eval_output, i + 1, model_.name, model_.global_step.eval(sess))
-                            for i in range(len(model_.filenames.dev))
-                        ]
                     else:
-                        output = '{}.{}.{}'.format(eval_output, model_.name, model_.global_step.eval(sess))
+                        os.makedirs(eval_output, exist_ok=True)
+
+                        # if there are several dev files, we define several output files
+                        output = [
+                            os.path.join(eval_output, '{}.{}.{}'.format(model_.name, prefix, step))
+                            for prefix in model_.dev_prefix
+                        ]
 
                     # kwargs_ = {**kwargs, 'output': output}
                     kwargs_ = dict(kwargs)
@@ -160,9 +168,7 @@ class MultiTaskModel(BaseTranslationModel):
                 self.manage_best_checkpoints(self.global_step, score)
 
             if 0 < max_steps <= self.global_step or 0 < max_epochs <= epoch:
-                utils.log('finished training')
-                # TODO: save models
-                return
+                raise utils.FinishedTrainingException
 
     def decode(self, *args, **kwargs):
         if self.main_task is not None:

@@ -12,7 +12,7 @@ max_output_len: 45   # 99% coverage
 max_input_len: 36
 weight_scale: 0.1
 
-data_dir: experiments/APE16/true_edits/data
+data_dir: experiments/APE16/true_edits/data_new
 model_dir: experiments/APE16/true_edits/debug
 
 batch_size: 32
@@ -24,8 +24,8 @@ learning_rate_decay_factor: 0.95
 decay_every_n_epoch: 1
 decay_after_n_epoch: 3
 
-steps_per_checkpoint: 200
-steps_per_eval: 200
+steps_per_checkpoint: 10
+steps_per_eval: 10
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
@@ -39,13 +39,8 @@ encoders:
 
 decoder:
     name: edits
-    ext: edits.ops
-    oracle_ext: edits.words
-    embedding_size: 256
+    oracle: True
+    # oracle_ext: edits.words
 
 use_edits: True
-dev_prefix: [dev, train]
-max_dev_size: 2000
-len_normalization: 1.0
-early_stopping: True
-beam_size: 0
+raw_output: True

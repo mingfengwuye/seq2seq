@@ -77,7 +77,7 @@ class BaseTranslationModel(object):
                 f.write('{:.2f} {}\n'.format(score_, step_))
 
     def initialize(self, sess, checkpoints=None, reset=False, reset_learning_rate=False,
-                   max_to_keep=3, keep_every_n_hours=5, **kwargs):
+                   max_to_keep=1, keep_every_n_hours=0, **kwargs):
         if keep_every_n_hours <= 0 or keep_every_n_hours is None:
             keep_every_n_hours = float('inf')
 
@@ -104,13 +104,15 @@ class BaseTranslationModel(object):
 
 class TranslationModel(BaseTranslationModel):
     def __init__(self, name, encoders, decoder, checkpoint_dir, learning_rate, learning_rate_decay_factor, batch_size,
-                 keep_best=1, load_embeddings=None, max_input_len=None, max_output_len=None, **kwargs):
+                 keep_best=1, load_embeddings=None, max_input_len=None, max_output_len=None, dev_prefix=None, **kwargs):
         super(TranslationModel, self).__init__(name, checkpoint_dir, keep_best, **kwargs)
 
         self.batch_size = batch_size
         self.src_ext = [encoder.get('ext') or encoder.name for encoder in encoders]
         self.trg_ext = decoder.get('ext') or decoder.name
-        self.oracle_ext = decoder.get('oracle_ext')
+        self.oracle = decoder.oracle
+        # self.oracle_ext = decoder.get('oracle_ext')
+        self.dev_prefix = dev_prefix
 
         self.extensions = self.src_ext + [self.trg_ext]
 
@@ -127,7 +129,7 @@ class TranslationModel(BaseTranslationModel):
         with tf.device('/cpu:0'):
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
-        self.filenames = utils.get_filenames(extensions=self.extensions, **kwargs)
+        self.filenames = utils.get_filenames(extensions=self.extensions, dev_prefix=dev_prefix, **kwargs)
         # TODO: check that filenames exist
         utils.debug('reading vocabularies')
         self._read_vocab()
@@ -135,6 +137,10 @@ class TranslationModel(BaseTranslationModel):
         for encoder_or_decoder, vocab in zip(encoders + [decoder], self.vocabs):
             if encoder_or_decoder.vocab_size <= 0 and vocab is not None:
                 encoder_or_decoder.vocab_size = len(vocab.reverse)
+
+        # decoder.oracle_vocab_size = None
+        # if self.oracle_vocab is not None:
+        #     decoder.oracle_vocab_size = len(self.oracle_vocab)
 
         # this adds an `embedding' attribute to each encoder and decoder
         utils.read_embeddings(self.filenames.embeddings, encoders + [decoder], load_embeddings, self.vocabs)
@@ -180,6 +186,12 @@ class TranslationModel(BaseTranslationModel):
         *self.src_vocab, self.trg_vocab = self.vocabs
         self.ngrams = self.filenames.lm_path and utils.read_ngrams(self.filenames.lm_path, self.trg_vocab.vocab)
 
+        # if self.oracle_ext is not None:
+        #     vocab_filename = self.filenames.vocab[-1][:-len(self.trg_ext)] + self.oracle_ext
+        #     self.oracle_vocab = utils.initialize_vocabulary(vocab_filename)
+        # else:
+        #     self.oracle_vocab = None
+
     def train(self, *args, **kwargs):
         raise NotImplementedError('use MultiTaskModel')
 
@@ -203,14 +215,14 @@ class TranslationModel(BaseTranslationModel):
 
     def eval_step(self, sess):
         # compute perplexity on dev set
-        for dev_batches in self.dev_batches:
+        for prefix, dev_batches in zip(self.dev_prefix, self.dev_batches):
             eval_loss = sum(
                 self.seq2seq_model.step(sess, batch, update_model=False, update_baseline=False).loss * len(batch)
                 for batch in dev_batches
             )
             eval_loss /= sum(map(len, dev_batches))
 
-            utils.log("  eval: loss {:.2f}".format(eval_loss))
+            utils.log("  {} eval: loss {:.2f}".format(prefix, eval_loss))
 
     def _decode_sentence(self, sess, sentence_tuple, beam_size=1, remove_unk=False, early_stopping=True):
         return next(self._decode_batch(sess, [sentence_tuple], beam_size, remove_unk, early_stopping))
@@ -246,6 +258,8 @@ class TranslationModel(BaseTranslationModel):
                                                                         use_edits=use_edits)
                 batch_token_ids = [hypotheses[0]]  # first hypothesis is the highest scoring one
 
+            elif self.oracle:
+                batch_token_ids = self.seq2seq_model.greedy_step_by_step_decoding(sess, token_ids)
             else:
                 batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
 
@@ -368,18 +382,14 @@ class TranslationModel(BaseTranslationModel):
 
         scores = []
 
-        if self.oracle_ext is not None:
-            vocab_filename = self.filenames.vocab[-1][:-len(self.trg_ext)] + self.oracle_ext
-            self.oracle_vocab = utils.initialize_vocabulary(vocab_filename)
-
-        for filenames_, output_ in zip(filenames, output):  # evaluation on multiple corpora
+        for filenames_, output_, prefix in zip(filenames, output, self.dev_prefix):  # evaluation on multiple corpora
             lines = list(utils.read_lines(filenames_, self.extensions, self.binary_input))
             if on_dev and max_dev_size:
                 lines = lines[:max_dev_size]
 
-            if self.oracle_ext is not None:
-                filename = filenames_[-1][:-len(self.trg_ext)] + self.oracle_ext
-                oracle_lines = list(utils.read_lines([filename], [self.oracle_ext], [False]))
+            # if self.oracle_ext is not None:
+            #     filename = filenames_[-1][:-len(self.trg_ext)] + self.oracle_ext
+            #     oracle_lines = list(utils.read_lines([filename], [self.oracle_ext], [False]))
 
             hypotheses = []
             references = []
@@ -393,7 +403,9 @@ class TranslationModel(BaseTranslationModel):
                 *src_sentences, trg_sentences = zip(*lines)
                 src_sentences = list(zip(*src_sentences))
 
-                hypothesis_iter = self._decode_batch(sess, src_sentences, self.batch_size, beam_size=beam_size,
+                src_sentences_ = lines if self.oracle else src_sentences
+
+                hypothesis_iter = self._decode_batch(sess, src_sentences_, self.batch_size, beam_size=beam_size,
                                                      early_stopping=early_stopping, remove_unk=remove_unk,
                                                      use_edits=use_edits)
                 for i, (sources, hypothesis, reference) in enumerate(zip(src_sentences, hypothesis_iter,
@@ -402,9 +414,9 @@ class TranslationModel(BaseTranslationModel):
                     if use_edits:
                         reference = utils.reverse_edits(sources[0], reference)
 
-                    if self.oracle_ext is not None:
-                        hypothesis = utils.apply_oracle(hypothesis, oracle_lines[i][0])
-                        reference = utils.apply_oracle(reference, oracle_lines[i][0], strict=True)
+                    # if self.oracle_ext is not None:
+                    #     hypothesis = utils.apply_oracle(hypothesis, oracle_lines[i][0])
+                    #     reference = utils.apply_oracle(reference, oracle_lines[i][0], strict=True)
 
                     hypotheses.append(hypothesis)
                     references.append(reference.strip().replace('@@ ', ''))
@@ -423,10 +435,12 @@ class TranslationModel(BaseTranslationModel):
             # default scoring function is utils.bleu_score
             score, score_summary = getattr(evaluation, score_function)(hypotheses, references, script_dir=script_dir)
 
-            # print the scoring information
+            # print scoring information
             score_info = []
             if self.name is not None:
                 score_info.append(self.name)
+
+            score_info.append(prefix)
             score_info.append('score={:.2f}'.format(score))
             if score_summary:
                 score_info.append(score_summary)
@@ -475,10 +489,7 @@ def save_checkpoint(sess, saver, checkpoint_dir, step=None, name=None):
     """ `checkpoint_dir` should be unique to this model """
     var_file = os.path.join(checkpoint_dir, 'vars.pkl')
     name = name or 'translate'
-
-    if not os.path.exists(checkpoint_dir):
-        utils.log("creating directory {}".format(checkpoint_dir))
-        os.makedirs(checkpoint_dir)
+    os.makedirs(checkpoint_dir, exist_ok=True)
 
     with open(var_file, 'wb') as f:
         var_names = [var.name for var in tf.global_variables()]

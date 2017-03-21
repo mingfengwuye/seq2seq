@@ -48,6 +48,7 @@ class Seq2SeqModel(object):
         self.lm_weight = lm_weight
         self.encoders = encoders
         self.decoder = decoder
+        self.oracle = decoder.oracle
 
         self.learning_rate = learning_rate
         self.global_step = global_step
@@ -98,6 +99,13 @@ class Seq2SeqModel(object):
 
         # starts with BOS, and ends with EOS  (time x batch_size)
         self.targets = tf.placeholder(tf.int32, shape=[None, None], name='target_{}'.format(self.decoder.name))
+
+        if self.oracle:
+            self.decoder_inputs = tf.placeholder(tf.int32, shape=[None, None], name='decoder_inputs_{}'.format(
+                self.decoder.name))
+        else:
+            self.decoder_inputs = self.targets[:-1,:]
+
         self.target_weights = decoders.get_weights(self.targets[1:,:], utils.EOS_ID, time_major=True,
                                                    include_first_eos=True)
         self.target_length = tf.reduce_sum(self.target_weights, axis=0)
@@ -115,10 +123,22 @@ class Seq2SeqModel(object):
 
         self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
 
-        (self.outputs, self.attention_weights, self.decoder_outputs, self.beam_tensors,
-         self.sampled_output, self.states) = decoders.attention_decoder(
+        # (self.outputs, self.attention_weights, self.decoder_outputs, self.beam_tensors,
+        #  self.sampled_output, self.states) = decoders.attention_decoder(
+        #     attention_states=self.attention_states, initial_state=self.encoder_state,
+        #     feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
+        #     decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
+        # )
+
+        self.outputs = decoders.attention_decoder(
             attention_states=self.attention_states, initial_state=self.encoder_state,
-            targets=self.targets, feed_previous=self.feed_previous,
+            feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
+            decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
+        )
+
+        self.beam_tensors = decoders.beam_attention_decoder(
+            attention_states=self.attention_states, initial_state=self.encoder_state,
+            feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
             decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
         )
 
@@ -207,10 +227,14 @@ class Seq2SeqModel(object):
         batch = self.get_batch(data)
         encoder_inputs, targets, encoder_input_length = batch
 
+        input_feed = {self.targets: targets}
+
         # TODO: feed oracle as target
         # TODO: same for greedy decoding
-
-        input_feed = {self.targets: targets}
+        if self.oracle:
+            decoder_inputs = targets[:-1,:]
+            decoder_inputs[decoder_inputs >= len(utils._START_VOCAB)] = utils.INS_ID   # no SUB op for now
+            input_feed[self.decoder_inputs] = decoder_inputs
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
@@ -223,7 +247,6 @@ class Seq2SeqModel(object):
             output_feed['attn_weights'] = self.attention_weights
 
         res = session.run(output_feed, input_feed)
-
         return namedtuple('output', 'loss attn_weights')(res['loss'], res.get('attn_weights'))
 
 
@@ -369,6 +392,7 @@ class Seq2SeqModel(object):
 
         batch = self.get_batch(token_ids, decoding=True)
         encoder_inputs, targets, encoder_input_length = batch
+        # utils.debug(encoder_inputs[0][5])
 
         input_feed = {self.targets: targets, self.feed_previous: 1.0}
 
@@ -380,7 +404,7 @@ class Seq2SeqModel(object):
 
         return np.argmax(outputs, axis=2).T
 
-    def beam_search_decoding(self, session, token_ids, beam_size, ngrams=None, early_stopping=True,
+    def beam_search_decoding_old(self, session, token_ids, beam_size, ngrams=None, early_stopping=True,
                              use_edits=False):
         if not isinstance(session, list):
             session = [session]
@@ -548,11 +572,8 @@ class Seq2SeqModel(object):
             if beam_size <= 0:
                 break
 
-        import ipdb; ipdb.set_trace()
-        hypotheses += finished_hypotheses
-        scores = np.concatenate([scores, finished_scores])
-
-        import ipdb; ipdb.set_trace()
+        # hypotheses += finished_hypotheses
+        # scores = np.concatenate([scores, finished_scores])
 
         hypotheses = [
             list(itertools.takewhile(lambda x: x != utils.EOS_ID, hyp))
@@ -571,7 +592,6 @@ class Seq2SeqModel(object):
                 for hyp in hypotheses
             ])
 
-            # import ipdb; ipdb.set_trace()
             # scores += penalty
         else:
             hypothesis_len = map(len, hypotheses)
@@ -583,6 +603,199 @@ class Seq2SeqModel(object):
         sorted_idx = np.argsort(scores)
         hypotheses = np.array(hypotheses)[sorted_idx].tolist()
         scores = scores[sorted_idx].tolist()
+        return hypotheses, scores
+
+
+    def greedy_step_by_step_decoding(self, session, token_ids):
+        if self.dropout is not None:
+            session.run(self.dropout_off)
+
+        if self.oracle:
+            data = token_ids
+        else:
+            data = token_ids + [[]]
+
+        batch = self.get_batch(data, decoding=False)
+        encoder_inputs, references, encoder_input_length = batch
+
+        insertions = [
+            [i for i in reference if i >= len(utils._START_VOCAB)]
+            for reference in references.T
+        ]
+
+        input_feed = {}
+        for i in range(self.encoder_count):
+            input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
+            input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
+
+        output_feed = [self.encoder_state, self.attention_states, self.beam_tensors.initial_data,
+                       self.beam_tensors.initial_output]
+
+        initial_state, attn_states, data, output = session.run(output_feed, input_feed)
+
+        hypotheses = []
+
+        for i in range(self.max_output_len):
+            targets = np.argmax(output, axis=1)
+
+            if self.oracle:
+                new_targets = []
+                for j, (target, insertions_) in enumerate(zip(targets, insertions)):
+                    if target == utils.INS_ID:
+                        try:
+                            # new_targets.append(insertions_.pop(0))
+                            new_targets.append(target)
+                        except IndexError:
+                            new_targets.append(target)   # replace by previous target
+                    else:
+                        new_targets.append(target)
+                targets = np.array(new_targets)
+
+            hypotheses.append(targets)   # TODO: early stopping if all hypotheses are finished
+
+            input_feed = {
+                self.beam_tensors.data: data,
+                self.beam_tensors.decoder_input: targets,
+                self.attention_states: attn_states,
+                self.encoder_state: initial_state
+            }
+
+            for j in range(self.encoder_count):
+                input_feed[self.encoder_input_length[j]] = encoder_input_length[j]
+
+            output_feed = [self.beam_tensors.new_data,
+                           self.beam_tensors.output]
+
+            data, output = session.run(output_feed, input_feed)
+
+        hypotheses = np.array(hypotheses).T
+        return hypotheses
+
+
+    def beam_search_decoding(self, session, token_ids, beam_size, use_edits=False, early_stopping=True,
+                             *args, **kwargs):
+        if self.dropout is not None:
+            session.run(self.dropout_off)
+
+        assert not self.oracle or beam_size == 1  # FIXME
+
+        if self.oracle:
+            early_stopping = False
+            data = [token_ids]  # FIXME
+        else:
+            data = [token_ids + [[]]]
+
+        batch = self.get_batch(data, decoding=False)
+        encoder_inputs, references, encoder_input_length = batch
+        input_feed = {}
+
+        reference = references.T[0]
+        insertions = [i for i in reference if i > len(utils._START_VOCAB)]
+
+        for i in range(self.encoder_count):
+            input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
+            input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
+
+        output_feed = [self.encoder_state, self.attention_states, self.beam_tensors.initial_data,
+                       self.beam_tensors.initial_output]
+
+        initial_state, attn_states, data, output = session.run(output_feed, input_feed)
+
+        hypotheses = [[] * beam_size]
+        scores = np.zeros([1], dtype=np.float32)
+
+        finished_hypotheses = []
+        finished_scores = []
+
+        for i in range(self.max_output_len):
+            if beam_size <= 0:
+                break
+
+            output = np.maximum(output, 1e-12)   # avoid division by zero
+            scores_ = scores[:, None] - np.log(output)
+            scores_ = scores_.flatten()
+            flat_ids = np.argsort(scores_)
+            token_ids_ = flat_ids % self.trg_vocab_size
+            hyp_ids = flat_ids // self.trg_vocab_size
+
+            new_hypotheses = []
+            new_scores = []
+            new_data = []
+            new_target = []
+            new_beam_size = beam_size
+
+            for flat_id, hyp_id, token_id in zip(flat_ids, hyp_ids, token_ids_):
+                hypothesis = hypotheses[hyp_id] + [token_id]
+                score = scores_[flat_id]
+
+                if token_id == utils.EOS_ID:
+                    # hypothesis is finished, it is thus unnecessary to keep expanding it
+                    finished_hypotheses.append(hypothesis)
+                    finished_scores.append(score)
+
+                    # early stop: number of possible hypotheses is reduced by one
+                    if early_stopping:
+                        new_beam_size -= 1
+                else:
+                    new_hypotheses.append(hypothesis)
+                    new_scores.append(score)
+                    new_data.append(data[hyp_id])
+                    new_target.append(token_id)
+
+                if len(new_hypotheses) == beam_size:
+                    break
+
+            beam_size = new_beam_size
+
+            hypotheses = new_hypotheses
+            scores = np.array(new_scores)
+            targets = np.array(new_target, dtype=np.int32)
+
+            if self.oracle:
+                new_targets = []
+                for target in targets:
+                    if target == utils.INS_ID:
+                        try:
+                            new_targets.append(insertions.pop(0))
+                        except IndexError:
+                            pass
+                    else:
+                        new_targets.append(target)
+
+            data = np.array(new_data)
+
+            batch_size = data.shape[0]
+            input_feed = {
+                self.beam_tensors.data: data,
+                self.beam_tensors.decoder_input: targets,
+                self.attention_states: attn_states.repeat(batch_size, axis=1),
+                self.encoder_state: initial_state.repeat(batch_size, axis=0)
+            }
+
+            for j in range(self.encoder_count):
+                input_feed[self.encoder_input_length[j]] = encoder_input_length[j]
+
+            output_feed = [self.beam_tensors.new_data,
+                           self.beam_tensors.output]
+
+            data, output = session.run(output_feed, input_feed)
+
+        hypotheses += finished_hypotheses
+        scores = np.concatenate([scores, finished_scores])
+
+        if use_edits:
+            hypothesis_len = [len(hyp) - hyp.count(utils.DEL_ID) for hyp in hypotheses]
+        else:
+            hypothesis_len = map(len, hypotheses)
+
+        if self.len_normalization > 0:  # normalize score by length (to encourage longer sentences)
+            scores /= [len_ ** self.len_normalization for len_ in hypothesis_len]
+
+        # sort best-list by score
+        sorted_idx = np.argsort(scores)
+        hypotheses = np.array(hypotheses)[sorted_idx].tolist()
+        scores = scores[sorted_idx].tolist()
+
         return hypotheses, scores
 
     def get_batch(self, data, decoding=False):

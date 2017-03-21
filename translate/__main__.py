@@ -74,7 +74,6 @@ TODO:
 - pre-load data on GPU for small datasets
 - load training data as a stream for large datasets
 - possibility to run model on several GPUs
-- copy vocab and config to model dir
 """
 
 
@@ -110,11 +109,21 @@ def main(args=None):
         utils.log('deleting previous model')
         shutil.rmtree(config.model_dir, ignore_errors=True)
 
+    os.makedirs(config.model_dir, exist_ok=True)
+
+    # copy config file to model dir
+    config_path = os.path.join(config.model_dir, 'config.yaml')
+    if not os.path.exists(config_path):
+        shutil.copy(args.config, config_path)
+
     logging_level = logging.DEBUG if args.verbose else logging.INFO
     # always log to stdout in decoding and eval modes (to avoid overwriting precious train logs)
     log_path = os.path.join(config.model_dir, config.log_file)
     logger = utils.create_logger(log_path if args.train else None)
     logger.setLevel(logging_level)
+
+    utils.log('label: {}'.format(config.label))
+    utils.log('description:\n  {}'.format('\n  '.join(config.description.strip().split('\n'))))
 
     utils.log(' '.join(sys.argv))  # print command line
     try:  # print git hash
@@ -129,7 +138,7 @@ def main(args=None):
         'cell_size', 'layers', 'vocab_size', 'embedding_size', 'attention_filters', 'attention_filter_length',
         'use_lstm', 'time_pooling', 'attention_window_size', 'dynamic', 'binary', 'character_level', 'bidir',
         'load_embeddings', 'pooling_avg', 'swap_memory', 'parallel_iterations', 'input_layers',
-        'residual_connections', 'attn_size', 'edit_window_size', 'op_embedding_size'
+        'residual_connections', 'attn_size', 'edit_window_size', 'op_embedding_size', 'oracle'
     ]
     # TODO: independent model dir for each task
     task_parameters = [
@@ -167,12 +176,12 @@ def main(args=None):
                     encoder_or_decoder[parameter] = config.get(parameter)
 
     # log parameters
-    utils.log('program arguments')
+    utils.debug('program arguments')
     for k, v in sorted(config.items(), key=itemgetter(0)):
         if k == 'tasks':
-            utils.log('  {:<20}\n{}'.format(k, pformat(v)))
+            utils.debug('  {:<20}\n{}'.format(k, pformat(v)))
         elif k not in model_parameters and k not in task_parameters:
-            utils.log('  {:<20} {}'.format(k, pformat(v)))
+            utils.debug('  {:<20} {}'.format(k, pformat(v)))
 
     device = None
     if config.no_gpu:
@@ -242,7 +251,7 @@ def main(args=None):
             eval_output = os.path.join(config.model_dir, 'eval')
             try:
                 model.train(sess, eval_output=eval_output, **config)
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, utils.FinishedTrainingException):
                 utils.log('exiting...')
                 model.save(sess)
                 sys.exit()
