@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import re
 from translate.evaluation import corpus_bleu, corpus_ter, corpus_tercom, corpus_wer
 from collections import OrderedDict
 
@@ -47,7 +48,11 @@ if __name__ == '__main__':
 
         scores = OrderedDict()
         if args.bleu:
-            scores['bleu'], _ = corpus_bleu(hypotheses, references)
+            scores['bleu'], summary = corpus_bleu(hypotheses, references)
+            try:
+                scores['penalty'], scores['ratio'] = map(float, re.findall('\w+=(\d+.\d+)', summary))
+            except ValueError:
+                pass
         if args.wer:
             scores['wer'], _ = corpus_wer(hypotheses, references)
         if args.ter:

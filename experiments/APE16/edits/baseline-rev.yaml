@@ -41,5 +41,5 @@ decoder:
     name: edits
 
 use_edits: True
-raw_output: True
+# raw_output: True
 train_prefix: train.concat

@@ -31,9 +31,6 @@ read_ahead: 10
 
 encoders:
   - name: fr
-    attention_window_size: 2
 
 decoder:
     name: en
-
-# max_dev_size: 100

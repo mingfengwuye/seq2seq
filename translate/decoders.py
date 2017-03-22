@@ -234,6 +234,7 @@ def local_attention(state, prev_weights, hidden_states, encoder, encoder_input_l
         mlow = tf.to_float(idx < low)
         mhigh = tf.to_float(idx > high)
         m = mlow + mhigh + tf.to_float(idx >= encoder_input_length)    # degrades performance
+        # m = tf.to_float(idx >= encoder_input_length)
         # m = mlow + mhigh
 
         # a = tf.to_float(idx >= encoder_input_length)
@@ -272,6 +273,7 @@ def local_attention(state, prev_weights, hidden_states, encoder, encoder_input_l
         # import ipdb; ipdb.set_trace()
 
         sigma = encoder.attention_window_size / 2
+        # sigma = 1.0
         numerator = -tf.pow((idx - pos), tf.convert_to_tensor(2, dtype=tf.float32))
         # div = tf.truediv(numerator, 2 * sigma ** 2)
         div = tf.truediv(numerator, sigma ** 2)

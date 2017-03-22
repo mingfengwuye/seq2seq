@@ -13,6 +13,7 @@ import subprocess
 import tensorflow as tf
 import yaml
 import shutil
+import tarfile
 
 from pprint import pformat
 from operator import itemgetter
@@ -51,6 +52,7 @@ parser.add_argument('--remove-unk', action='store_const', const=True)
 parser.add_argument('--raw-output', action='store_const', const=True)
 parser.add_argument('--wav-files', nargs='*')
 parser.add_argument('--use-edits', action='store_const', const=True)
+
 
 """
 Benchmarks:
@@ -111,10 +113,23 @@ def main(args=None):
 
     os.makedirs(config.model_dir, exist_ok=True)
 
-    # copy config file to model dir
+    # copy config file to model directory
     config_path = os.path.join(config.model_dir, 'config.yaml')
     if not os.path.exists(config_path):
         shutil.copy(args.config, config_path)
+
+    # also copy default config
+    config_path = os.path.join(config.model_dir, 'default.yaml')
+    if not os.path.exists(config_path):
+        shutil.copy(args.config, config_path)
+
+    # copy source code to model directory
+    tar_path =  os.path.join(config.model_dir, 'code.tar.gz')
+    if not os.path.exists(tar_path):
+        with tarfile.open(tar_path, "w:gz") as tar:
+            for filename in os.listdir('translate'):
+                if filename.endswith('.py'):
+                    tar.add(os.path.join('translate', filename), arcname=filename)
 
     logging_level = logging.DEBUG if args.verbose else logging.INFO
     # always log to stdout in decoding and eval modes (to avoid overwriting precious train logs)
@@ -206,16 +221,18 @@ def main(args=None):
         decode_only = args.decode is not None or args.eval or args.align  # exempt from creating gradient ops
         model = MultiTaskModel(name='main', checkpoint_dir=checkpoint_dir, decode_only=decode_only, **config)
 
+    # count parameters
     utils.log('model parameters ({})'.format(len(tf.global_variables())))
     parameter_count = 0
     for var in tf.global_variables():
         utils.log('  {} {}'.format(var.name, var.get_shape()))
 
-        v = 1
-        for d in var.get_shape():
-            v *= d.value
-        parameter_count += v
-    utils.log('number of parameters: {}'.format(parameter_count))
+        if 'Adam' not in var.name and 'Adadelta' not in var.name:
+            v = 1
+            for d in var.get_shape():
+                v *= d.value
+            parameter_count += v
+    utils.log('number of parameters: {:.2f}M'.format(parameter_count / 1e6))
 
     tf_config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
     tf_config.gpu_options.allow_growth = config.allow_growth
