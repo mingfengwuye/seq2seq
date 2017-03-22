@@ -130,7 +130,8 @@ class Seq2SeqModel(object):
         #     decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
         # )
 
-        self.outputs = decoders.attention_decoder(
+        (self.outputs, self.attention_weights, self.decoder_outputs, self.sampled_output,
+         self.states) = decoders.attention_decoder(
             attention_states=self.attention_states, initial_state=self.encoder_state,
             feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
             decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
@@ -238,9 +239,6 @@ class Seq2SeqModel(object):
             targets[targets == utils.UNK_ID] = utils.INS_ID
 
         input_feed[self.targets] = targets
-
-        # if not update_model:
-        #     import ipdb; ipdb.set_trace()
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
@@ -394,9 +392,12 @@ class Seq2SeqModel(object):
         if self.dropout is not None:
             session.run(self.dropout_off)
 
-        token_ids = [token_ids_ + [[]] for token_ids_ in token_ids]
+        data = [
+            ids + [[]] if len(ids) == self.encoder_count else ids
+            for ids in token_ids
+        ]
 
-        batch = self.get_batch(token_ids, decoding=True)
+        batch = self.get_batch(data, decoding=True)
         encoder_inputs, targets, encoder_input_length = batch
         # utils.debug(encoder_inputs[0][5])
 
@@ -612,6 +613,8 @@ class Seq2SeqModel(object):
         return hypotheses, scores
 
     def greedy_step_by_step_decoding(self, session, token_ids):
+        oracle = self.oracle
+
         if self.dropout is not None:
             session.run(self.dropout_off)
 
@@ -620,7 +623,7 @@ class Seq2SeqModel(object):
             for ids in token_ids
         ]
 
-        if self.oracle:
+        if oracle:
             encoder_inputs, references, encoder_input_length =  self.get_batch(data, decoding=False)
             insertions = [[i for i in reference if i >= len(utils._START_VOCAB)]
                           for reference in references.T]
@@ -643,11 +646,11 @@ class Seq2SeqModel(object):
         for i in range(self.max_output_len):
             targets = np.argmax(output, axis=1)
 
-            if self.oracle:
+            if oracle:
                 # replace insertions by corresponding word
                 new_targets = []
                 for j, (target, insertions_) in enumerate(zip(targets, insertions)):
-                    if target == utils.INS_ID:
+                    if target == utils.INS_ID or target >= len(utils._START_VOCAB):
                         try:
                             new_targets.append(insertions_.pop(0))
                         except IndexError:
@@ -676,11 +679,11 @@ class Seq2SeqModel(object):
             input_feed = {
                 self.beam_tensors.data: data,
                 self.beam_tensors.decoder_input: targets,
-                self.attention_states: attn_states,
                 self.encoder_state: initial_state
             }
 
             for j in range(self.encoder_count):
+                input_feed[self.attention_states[j]] = attn_states[j]
                 input_feed[self.encoder_input_length[j]] = encoder_input_length[j]
 
             output_feed = [self.beam_tensors.new_data,
@@ -770,11 +773,11 @@ class Seq2SeqModel(object):
             input_feed = {
                 self.beam_tensors.data: data,
                 self.beam_tensors.decoder_input: targets,
-                self.attention_states: attn_states.repeat(batch_size, axis=1),
                 self.encoder_state: initial_state.repeat(batch_size, axis=0)
             }
 
             for j in range(self.encoder_count):
+                input_feed[self.attention_states[j]] = attn_states[j].repeat(batch_size, axis=0)
                 input_feed[self.encoder_input_length[j]] = encoder_input_length[j]
 
             output_feed = [self.beam_tensors.new_data,

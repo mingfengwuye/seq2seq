@@ -109,7 +109,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, 
             encoder_states.append(encoder_state_)
 
     encoder_state = tf.concat(encoder_states, 1)
-    return tf.stack(encoder_outputs), encoder_state
+    return encoder_outputs, encoder_state
 
 
 def compute_energy(hidden, state, attn_size, **kwargs):
@@ -297,17 +297,18 @@ def attention(state, prev_weights, hidden_states, encoder, **kwargs):
     return attention_(state, prev_weights, hidden_states, encoder, **kwargs)
 
 
-def multi_attention(state, prev_weights, hidden_states, encoders, encoder_input_length, **kwargs):
+def multi_attention(state, prev_weights, hidden_states, encoders, encoder_input_length, pos, **kwargs):
     """
     Same as `attention` except that prev_weights, hidden_states and encoders
     are lists whose length is the number of encoders.
     """
-    hidden_states = tf.unstack(hidden_states)
+    # hidden_states = tf.unstack(hidden_states)
 
     attns, weights = list(zip(*[
-        attention(state, weights, hidden, encoder, encoder_input_length=input_length,
+        attention(state, weights, hidden, encoder, encoder_input_length=input_length, pos=pos_,
                   scope='attention_{}'.format(encoder.name), **kwargs)
-        for weights, hidden, encoder, input_length in zip(prev_weights, hidden_states, encoders, encoder_input_length)
+        for weights, hidden, encoder, input_length, pos_
+        in zip(prev_weights, hidden_states, encoders, encoder_input_length, pos)
     ]))
 
     return tf.concat(attns, 1), list(weights)
@@ -377,7 +378,7 @@ def get_embedding_function(decoder, encoders):
         return embed
 
 
-def attention_decoder_old(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
+def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
                       decoder_input_length=None, dropout=None, feed_previous=0.0, feed_argmax=True, use_edits=False,
                       **kwargs):
     """
@@ -471,6 +472,7 @@ def attention_decoder_old(decoder_inputs, initial_state, attention_states, encod
             pos = None
             if use_edits:
                 pos = tf.cast(edit_pos, tf.float32)
+            pos = [pos] + [None] * (len(encoders) - 1)
 
             context_vector, new_weights = attention_(state, prev_weights=prev_weights, pos=pos)
 
@@ -533,8 +535,7 @@ def attention_decoder_old(decoder_inputs, initial_state, attention_states, encod
             return (time + 1, input_, new_state, new_output, proj_outputs, decoder_outputs, samples, states, weights,
                     new_weights, edit_pos)
 
-        (_, _, new_state, new_output, proj_outputs, decoder_outputs, samples, states, weights, _, new_edit_pos
-         ) = tf.while_loop(
+        _, _, _, _, proj_outputs, decoder_outputs, samples, states, weights, _, _ = tf.while_loop(
             cond=lambda time, *_: time < time_steps,
             body=_time_step,
             loop_vars=(time, initial_input, state, output, proj_outputs, decoder_outputs, samples, weights, states,
@@ -551,13 +552,10 @@ def attention_decoder_old(decoder_inputs, initial_state, attention_states, encod
         # weights = tf.Print(weights, [weights[:,0]], summarize=20)
         # tf.control_dependencies()
 
-        beam_tensors = namedtuple('beam_tensors', 'state new_state output new_output edit_pos new_edit_pos')
-        return (proj_outputs, weights, decoder_outputs, beam_tensors(state, new_state, output, new_output,
-                                                                     edit_pos, new_edit_pos),
-                samples, states)
+        return proj_outputs, weights, decoder_outputs, samples, states
 
 
-def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
+def attention_decoder_new(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
                       decoder_input_length=None, feed_previous=0.0, dropout=None, use_edits=False, **kwargs):
     assert decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'   # because of maxout
 
@@ -576,7 +574,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
         attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
-                                       encoder_input_length=encoder_input_length, prev_weights=[None])
+                                       encoder_input_length=encoder_input_length, prev_weights=[None] * len(encoders))
         input_shape = tf.shape(decoder_inputs)
         time_steps = input_shape[0]
         batch_size = input_shape[1]
@@ -607,6 +605,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         edit_pos = tf.zeros([batch_size], tf.int32)
 
         def get_output(input_, state, pos=None):
+            pos = [pos] + [None] * (len(encoders) - 1)
             context_vector, _ = attention_(state, pos=pos)
             output_ = linear_unsafe([state, input_, context_vector], decoder.cell_size, False, scope='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
@@ -625,6 +624,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         def _time_step(time, state, output, outputs, context_vector, edit_pos):
             argmax = lambda: tf.argmax(output, axis=1)
             target = lambda: inputs.read(time)
+
             sample = tf.cond(tf.random_uniform([]) >= feed_previous, target, argmax)
             sample.set_shape([None])
             sample = tf.stop_gradient(sample)
@@ -685,7 +685,7 @@ def beam_attention_decoder(initial_state, attention_states, encoders, decoder, e
 
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
         attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
-                                       encoder_input_length=encoder_input_length, prev_weights=[None])
+                                       encoder_input_length=encoder_input_length, prev_weights=[None] * len(encoders))
         if decoder.oracle:
             output_size = len(utils._START_VOCAB)
         else:
@@ -695,6 +695,7 @@ def beam_attention_decoder(initial_state, attention_states, encoders, decoder, e
         initial_state = tf.nn.tanh(linear_unsafe(initial_state, state_size, True, scope='initial_state_projection'))
 
         def get_output(input_, state, pos=None):
+            pos = [pos] + [None] * (len(encoders) - 1)
             context_vector, _ = attention_(state, pos=pos)
             output_ = linear_unsafe([state, input_, context_vector], decoder.cell_size, False, scope='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
