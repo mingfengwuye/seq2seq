@@ -72,7 +72,7 @@ class AttrDict(dict):
         self.__dict__ = self  # dark magic
 
 
-def reverse_edits(source, edits, fix=True, strict=True):
+def reverse_edits(source, edits, fix=True, strict=False):
     src_words = source.split()
     target = []
 

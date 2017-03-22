@@ -111,7 +111,6 @@ class TranslationModel(BaseTranslationModel):
         self.src_ext = [encoder.get('ext') or encoder.name for encoder in encoders]
         self.trg_ext = decoder.get('ext') or decoder.name
         self.oracle = decoder.oracle
-        # self.oracle_ext = decoder.get('oracle_ext')
         self.dev_prefix = dev_prefix
 
         self.extensions = self.src_ext + [self.trg_ext]
@@ -137,10 +136,6 @@ class TranslationModel(BaseTranslationModel):
         for encoder_or_decoder, vocab in zip(encoders + [decoder], self.vocabs):
             if encoder_or_decoder.vocab_size <= 0 and vocab is not None:
                 encoder_or_decoder.vocab_size = len(vocab.reverse)
-
-        # decoder.oracle_vocab_size = None
-        # if self.oracle_vocab is not None:
-        #     decoder.oracle_vocab_size = len(self.oracle_vocab)
 
         # this adds an `embedding' attribute to each encoder and decoder
         utils.read_embeddings(self.filenames.embeddings, encoders + [decoder], load_embeddings, self.vocabs)
@@ -185,12 +180,6 @@ class TranslationModel(BaseTranslationModel):
         ]
         *self.src_vocab, self.trg_vocab = self.vocabs
         self.ngrams = self.filenames.lm_path and utils.read_ngrams(self.filenames.lm_path, self.trg_vocab.vocab)
-
-        # if self.oracle_ext is not None:
-        #     vocab_filename = self.filenames.vocab[-1][:-len(self.trg_ext)] + self.oracle_ext
-        #     self.oracle_vocab = utils.initialize_vocabulary(vocab_filename)
-        # else:
-        #     self.oracle_vocab = None
 
     def train(self, *args, **kwargs):
         raise NotImplementedError('use MultiTaskModel')
@@ -257,8 +246,6 @@ class TranslationModel(BaseTranslationModel):
                                                                         early_stopping=early_stopping,
                                                                         use_edits=use_edits)
                 batch_token_ids = [hypotheses[0]]  # first hypothesis is the highest scoring one
-            # else:
-            #     batch_token_ids = self.seq2seq_model.greedy_step_by_step_decoding(sess, token_ids)
             elif self.oracle:
                batch_token_ids = self.seq2seq_model.greedy_step_by_step_decoding(sess, token_ids)
             else:
@@ -389,10 +376,6 @@ class TranslationModel(BaseTranslationModel):
             if on_dev and max_dev_size:
                 lines = lines[:max_dev_size]
 
-            # if self.oracle_ext is not None:
-            #     filename = filenames_[-1][:-len(self.trg_ext)] + self.oracle_ext
-            #     oracle_lines = list(utils.read_lines([filename], [self.oracle_ext], [False]))
-
             hypotheses = []
             references = []
 
@@ -413,10 +396,6 @@ class TranslationModel(BaseTranslationModel):
                     hypothesis, raw = hypothesis
                     if use_edits:
                         reference = utils.reverse_edits(sources[0], reference)
-
-                    # if self.oracle_ext is not None:
-                    #     hypothesis = utils.apply_oracle(hypothesis, oracle_lines[i][0])
-                    #     reference = utils.apply_oracle(reference, oracle_lines[i][0], strict=True)
 
                     hypotheses.append(hypothesis)
                     references.append(reference.strip().replace('@@ ', ''))

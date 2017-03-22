@@ -37,3 +37,15 @@ scripts/prepare-data.py ${data_dir}/train src pe mt edits ${data_dir} --mode voc
 #--vocab-prefix vocab-concat --vocab-size 30000
 
 # TODO: truecase data
+
+scripts/reverse.py < ${data_dir}/train.mt > ${data_dir}/train.rev.mt
+scripts/reverse.py < ${data_dir}/train.pe > ${data_dir}/train.rev.pe
+scripts/reverse.py < ${data_dir}/train.edits > ${data_dir}/train.rev.edits
+
+cat ${data_dir}/{train,train.rev}.mt > ${data_dir}/train.concat.mt
+cat ${data_dir}/{train,train.rev}.pe > ${data_dir}/train.concat.pe
+cat ${data_dir}/{train,train.rev}.edits > ${data_dir}/train.concat.edits
+
+scripts/reverse.py < ${data_dir}/dev.mt > ${data_dir}/dev.rev.mt
+scripts/reverse.py < ${data_dir}/dev.pe > ${data_dir}/dev.rev.pe
+scripts/reverse.py < ${data_dir}/dev.edits > ${data_dir}/dev.rev.edits

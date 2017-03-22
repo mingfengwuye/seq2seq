@@ -13,7 +13,7 @@ max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data
-model_dir: experiments/APE16/edits/oracle
+model_dir: experiments/APE16/edits/multi
 
 batch_size: 32
 
@@ -36,12 +36,17 @@ read_ahead: 10
 encoders:
   - name: mt
     attention_window_size: 2
+    cell_size: 96
+    attn_size: 96
+    embedding_size: 96
+  - name: src
+    attention_window_size: 2
+    cell_size: 64
+    attn_size: 64
+    embedding_size: 64
 
 decoder:
     name: edits
-    oracle: True
 
 use_edits: True
 raw_output: True
-dev_prefix: [dev, train]
-max_dev_size: 2000
