@@ -12,8 +12,8 @@ max_output_len: 45   # 99% coverage
 max_input_len: 36
 weight_scale: 0.1
 
-data_dir: experiments/APE16/true_edits/data_new
-model_dir: experiments/APE16/true_edits/debug
+data_dir: experiments/APE16/edits/data
+model_dir: experiments/APE16/edits/oracle
 
 batch_size: 32
 
@@ -40,7 +40,8 @@ encoders:
 decoder:
     name: edits
     oracle: True
-    # oracle_ext: edits.words
 
 use_edits: True
 raw_output: True
+dev_prefix: [dev, train]
+max_dev_size: 2000

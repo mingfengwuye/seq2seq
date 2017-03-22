@@ -257,13 +257,11 @@ class TranslationModel(BaseTranslationModel):
                                                                         early_stopping=early_stopping,
                                                                         use_edits=use_edits)
                 batch_token_ids = [hypotheses[0]]  # first hypothesis is the highest scoring one
-
+            elif self.oracle:
+               batch_token_ids = self.seq2seq_model.greedy_step_by_step_decoding(sess, token_ids)
             else:
-                batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
-            # elif self.oracle:
-            #     batch_token_ids = self.seq2seq_model.greedy_step_by_step_decoding(sess, token_ids)
-            # else:
-            #     batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
+               batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
+
 
             for src_tokens, trg_token_ids in zip(batch, batch_token_ids):
                 trg_token_ids = list(trg_token_ids)

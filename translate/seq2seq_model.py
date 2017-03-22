@@ -186,7 +186,7 @@ class Seq2SeqModel(object):
         return update_ops
 
     def init_xent(self, optimizers, decode_only=False):
-        self.xent_loss = decoders.sequence_loss(logits=self.outputs, targets=self.targets[1:, :],
+        self.xent_loss = decoders.sequence_loss(logits=self.outputs, targets=self.targets[1:, :],  # skip BOS
                                                 weights=self.target_weights)
 
         if not decode_only:
@@ -227,14 +227,20 @@ class Seq2SeqModel(object):
         batch = self.get_batch(data)
         encoder_inputs, targets, encoder_input_length = batch
 
-        input_feed = {self.targets: targets}
+        input_feed = {}
 
-        # TODO: feed oracle as target
-        # TODO: same for greedy decoding
         if self.oracle:
-            decoder_inputs = targets[:-1,:]
-            decoder_inputs[decoder_inputs >= len(utils._START_VOCAB)] = utils.INS_ID   # no SUB op for now
+            decoder_inputs = targets[:-1,:]    # feed decoder with full op
             input_feed[self.decoder_inputs] = decoder_inputs
+
+            # learn to predict op type
+            targets[targets >= len(utils._START_VOCAB)] = utils.INS_ID   # no SUB op for now
+            targets[targets == utils.UNK_ID] = utils.INS_ID
+
+        input_feed[self.targets] = targets
+
+        # if not update_model:
+        #     import ipdb; ipdb.set_trace()
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
@@ -609,18 +615,18 @@ class Seq2SeqModel(object):
         if self.dropout is not None:
             session.run(self.dropout_off)
 
-        if self.oracle:
-            data = token_ids
-        else:
-            data = token_ids + [[]]
-
-        batch = self.get_batch(data, decoding=False)
-        encoder_inputs, references, encoder_input_length = batch
-
-        insertions = [
-            [i for i in reference if i >= len(utils._START_VOCAB)]
-            for reference in references.T
+        data = [
+            ids + [[]] if len(ids) == self.encoder_count else ids
+            for ids in token_ids
         ]
+
+        if self.oracle:
+            encoder_inputs, references, encoder_input_length =  self.get_batch(data, decoding=False)
+            insertions = [[i for i in reference if i >= len(utils._START_VOCAB)]
+                          for reference in references.T]
+        else:
+            encoder_inputs, _, encoder_input_length = self.get_batch(data, decoding=True)
+            insertions = None
 
         input_feed = {}
         for i in range(self.encoder_count):
@@ -645,16 +651,27 @@ class Seq2SeqModel(object):
                         try:
                             new_targets.append(insertions_.pop(0))
                         except IndexError:
-                            # new_targets.append(target)   # replace by previous target
-                            if len(hypotheses) > 0:
-                                new_targets.append(hypotheses[-1][j])
-                            else:
-                                new_targets.append(utils.BOS_ID)
+                            new_targets.append(utils.NONE_ID)
                     else:
                         new_targets.append(target)
+
                 targets = np.array(new_targets)
 
-            hypotheses.append(targets)   # TODO: early stopping if all hypotheses are finished
+            new_targets = []
+            for i, target in enumerate(targets):
+                if target == utils.NONE_ID:   # replace NONE_ID by latest output symbol
+                    prev = [hyp[i] for hyp in hypotheses if hyp[i] != utils.NONE_ID]
+                    target = prev[-1] if len(prev) > 0 else utils.BOS_ID
+
+                new_targets.append(target)
+
+            hypotheses.append(targets)
+
+            # early stopping if all hypotheses are finished
+            if all(utils.EOS_ID in hyp for hyp in hypotheses):
+                break
+
+            targets = new_targets
 
             input_feed = {
                 self.beam_tensors.data: data,
@@ -672,15 +689,10 @@ class Seq2SeqModel(object):
             data, output = session.run(output_feed, input_feed)
 
         hypotheses = np.array(hypotheses).T
-        hypotheses_ = []
-        for hypothesis in hypotheses:
-            hypothesis = list(hypothesis)
-            if utils.EOS_ID in hypothesis:
-                hypothesis = hypothesis[:hypothesis.index(utils.EOS_ID)]
-            hypothesis = [i for i in hypothesis if i != utils.BOS_ID]
-            hypotheses_.append(hypothesis)
+        hypotheses = [[i for i in hypothesis if i != utils.BOS_ID and i != utils.NONE_ID]
+                      for hypothesis in hypotheses]
 
-        return hypotheses_
+        return hypotheses
 
     def beam_search_decoding(self, session, token_ids, beam_size, use_edits=False, early_stopping=True,
                              *args, **kwargs):

@@ -29,10 +29,10 @@ BOS_ID = 0
 EOS_ID = 1
 UNK_ID = 2
 KEEP_ID = 3
-SUB_ID = 4
+DEL_ID = 4
 INS_ID = 5
-DEL_ID = 6
-
+SUB_ID = 6
+NONE_ID = 7
 
 class FinishedTrainingException(Exception):
     def __init__(self):
@@ -72,15 +72,21 @@ class AttrDict(dict):
         self.__dict__ = self  # dark magic
 
 
-def reverse_edits(source, edits):
+def reverse_edits(source, edits, fix=True, strict=True):
     src_words = source.split()
     target = []
 
     i = 0
 
+    consistent = True
+
     for edit in edits.split():
+        if strict and not consistent:
+            break
+
         if edit in (_DEL, _KEEP, _SUB) or edit.startswith(_SUB + '_'):
             if i >= len(src_words):
+                consistent = False
                 continue
 
             if edit == _KEEP:
@@ -96,7 +102,9 @@ def reverse_edits(source, edits):
         else:
             target.append(edit)
 
-    target += src_words[i:]   # TODO: try other strategies
+    if fix:
+        target += src_words[i:]
+
     return ' '.join(target)
 
 
