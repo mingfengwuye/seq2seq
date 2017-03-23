@@ -12,10 +12,19 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     with open(args.log_file) as log_file:
-        lines = log_file.readlines()
+        scores = {}
+        current_step = 0
 
-        scores = [re.findall('(\w+)=(\d+.\d+)', line) for line in lines]
-        scores = [{k: float(v) for k, v in score} for score in scores if score]
+        for line in log_file:
+            m = re.search('step (\d+)', line)
+            if m:
+                current_step = int(m.group(1))
+                continue
+
+            m = re.findall('(\w+)=(\d+.\d+)', line)
+            if m:
+                scores_ = {k: float(v) for k, v in m}
+                scores.setdefault(current_step, scores_)
 
         def key(d):
             score = d.get(args.score.lower()) or d.get('score')
@@ -23,9 +32,9 @@ if __name__ == '__main__':
                 score = -score
             return score
 
-        best = max(scores, key=key)
+        step, best = max(scores.items(), key=lambda p: key(p[1]))
 
         key = args.score if args.score in best else 'score'
 
-        main_score = '{}={} '.format(key, best[key])
-        print(main_score + ' '.join('{}={}'.format(k, v)for k, v in sorted(best.items()) if k != key))
+        main_score = '{}={:.2f} step={} '.format(key, best[key], step)
+        print(main_score + ' '.join('{}={:.2f}'.format(k, v) for k, v in sorted(best.items()) if k != key))
