@@ -399,7 +399,6 @@ class Seq2SeqModel(object):
 
         batch = self.get_batch(data, decoding=True)
         encoder_inputs, targets, encoder_input_length = batch
-        # utils.debug(encoder_inputs[0][5])
 
         input_feed = {self.targets: targets, self.feed_previous: 1.0}
 
@@ -702,7 +701,6 @@ class Seq2SeqModel(object):
         if self.dropout is not None:
             session.run(self.dropout_off)
 
-        assert not self.oracle  # FIXME
         data = [token_ids + [[]]]
 
         batch = self.get_batch(data, decoding=False)

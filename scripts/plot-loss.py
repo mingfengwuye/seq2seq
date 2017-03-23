@@ -11,18 +11,26 @@ parser.add_argument('--max-steps', type=int, default=0)
 parser.add_argument('--min-steps', type=int, default=0)
 parser.add_argument('--labels', nargs='+')
 parser.add_argument('--plot', nargs='+', default=['train', 'dev', 'bleu', 'ter'])
+parser.add_argument('--average', type=int, nargs='+')
 
 args = parser.parse_args()
 args.plot = [x.lower() for x in args.plot]
 
+if args.average:
+    assert sum(args.average) == len(args.log_files)
+
+n = len(args.average) if args.average else len(args.log_files)
+
 if args.labels:
-    if len(args.labels) != len(args.log_files):
+    if len(args.labels) != n:
         raise Exception('error: wrong number of labels')
     labels = args.labels
 else:
-    labels = ['model {}'.format(i) for i in range(1, len(args.log_files) + 1)]
+    labels = ['model {}'.format(i) for i in range(1, n + 1)]
 
-for label, log_file in zip(labels, args.log_files):
+data = []
+
+for log_file in args.log_files:
     current_step = 0
 
     dev_perplexities = []
@@ -63,6 +71,31 @@ for label, log_file in zip(labels, args.log_files):
             if m and not any(step == current_step for step, _ in ter_scores):
                 ter_score = float(m.group(1))
                 ter_scores.append((current_step, ter_score))
+
+    data.append((dev_perplexities, train_perplexities, bleu_scores, ter_scores))
+
+
+if args.average:
+    new_data = []
+
+    i = 0
+    for n in args.average:
+        data_ = zip(*data[i:i + n])
+        i += n
+
+        def avg(data_):
+            dicts = [dict(l) for l in data_]
+            keys = set.intersection(*[set(d.keys()) for d in dicts])
+            data_ = {k: (sum(d[k] for d in dicts) / n) for k in keys}
+            return sorted(list(data_.items()))
+
+        new_data.append(list(map(avg, data_)))
+
+    data = new_data
+
+
+for label, data_ in zip(labels, data):
+    dev_perplexities, train_perplexities, bleu_scores, ter_scores = data_
 
     if 'bleu' in args.plot and bleu_scores:
         plt.plot(*zip(*bleu_scores), ':', label=' '.join([label, 'BLEU']))

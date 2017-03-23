@@ -234,17 +234,9 @@ def local_attention(state, prev_weights, hidden_states, encoder, encoder_input_l
         mlow = tf.to_float(idx < low)
         mhigh = tf.to_float(idx > high)
         m = mlow + mhigh + tf.to_float(idx >= encoder_input_length)    # degrades performance
-        # m = tf.to_float(idx >= encoder_input_length)
         # m = mlow + mhigh
 
-        # a = tf.to_float(idx >= encoder_input_length)
-        # m = tf.Print(m, [idx[5]], message='idx', summarize=100)
-        # m = tf.Print(m, [encoder_input_length[5]], message='length', summarize=100)
-        # m = tf.Print(m, [a[5]], message='a', summarize=100)
-        # m = tf.Print(m, [tf.reduce_sum(hidden_states[5], axis=1)], message='states', summarize=10000)
-
         mask = tf.to_float(tf.equal(m, 0.0))
-        # mask_bis = tf.to_float(tf.equal(mlow + mhigh, 0.0))
 
         if encoder.edit_window_size is not None and encoder.edit_window_size >= 0:
             compute_energy_ = compute_energy_edits
@@ -259,21 +251,8 @@ def local_attention(state, prev_weights, hidden_states, encoder, encoder_input_l
             edit_window_size=encoder.edit_window_size
         )
 
-        # import ipdb; ipdb.set_trace()
-        # e = tf.Print(e, [e[5]], message='e', summarize=100)
         weights = softmax(e, mask=mask)
-
-        # weights_bis = softmax(e, mask=mask_bis)
-        # weights = tf.Print(weights, [mask[5]], message='mask', summarize=100)
-        # weights = tf.Print(weights, [mask[5]], message='mask_bis', summarize=100)
-        # mask = tf.to_float(tf.not_equal(tf.reduce_sum(hidden_states, axis=2), 0.0))[5]
-        # weights = tf.Print(weights, [mask], message='true_mask', summarize=100)
-        # weights = tf.Print(weights, [weights[5] * mask], message='weights', summarize=100)
-        # weights = tf.Print(weights, [weights_bis[5] * mask], message='weights_bis', summarize=100)
-        # import ipdb; ipdb.set_trace()
-
         sigma = encoder.attention_window_size / 2
-        # sigma = 1.0
         numerator = -tf.pow((idx - pos), tf.convert_to_tensor(2, dtype=tf.float32))
         # div = tf.truediv(numerator, 2 * sigma ** 2)
         div = tf.truediv(numerator, sigma ** 2)
@@ -842,7 +821,7 @@ def softmax(logits, dim=-1, temperature=1.0, mask=None):
     if mask is not None:
         e *= mask
 
-    return e / (tf.reduce_sum(e, axis=dim, keep_dims=True) + 10e-12)  # FIXME
+    return e / (tf.reduce_sum(e, axis=dim, keep_dims=True) + 10e-12)
 
 
 def get_weights(sequence, eos_id, time_major=False, include_first_eos=True):
