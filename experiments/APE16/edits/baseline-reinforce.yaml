@@ -35,6 +35,7 @@ read_ahead: 10
 
 encoders:
   - name: mt
+    attention_type: 'local'
     attention_window_size: 2
 
 decoder:

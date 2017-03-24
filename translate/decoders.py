@@ -177,8 +177,11 @@ def compute_energy_edits(hidden, state, attn_size, edit_window_size=3, pos=None,
 
 
 def global_attention(state, prev_weights, hidden_states, encoder, encoder_input_length, pos=None, scope=None,
-                     **kwargs):
+                     context=None, **kwargs):
     with tf.variable_scope(scope or 'attention'):
+        if context is not None and encoder.use_context:
+            state = tf.concat([state, context], axis=1)
+
         if encoder.edit_window_size is not None and encoder.edit_window_size >= 0:
             compute_energy_ = compute_energy_edits
         elif encoder.attention_filters > 0:
@@ -227,22 +230,26 @@ def last_state_attention(hidden_states, encoder_input_length, *args, **kwargs):
 
 
 def local_attention(state, prev_weights, hidden_states, encoder, encoder_input_length, pos=None, scope=None,
-                    **kwargs):
+                    context=None, **kwargs):
     """
     Local attention of Luong et al. (http://arxiv.org/abs/1508.04025)
     """
     batch_size = tf.shape(state)[0]
     attn_length = tf.shape(hidden_states)[1]
+
+    if context is not None and encoder.use_context:
+        state = tf.concat([state, context], axis=1)
+
     state_size = state.get_shape()[1].value
 
     with tf.variable_scope(scope or 'attention'):
-        wp = get_variable_unsafe('Wp', [state_size, state_size])
-        vp = get_variable_unsafe('vp', [state_size, 1])
-
         encoder_input_length = tf.to_float(tf.expand_dims(encoder_input_length, axis=1))
 
         pos_ = pos
         if pos is None:
+            wp = get_variable_unsafe('Wp', [state_size, state_size])
+            vp = get_variable_unsafe('vp', [state_size, 1])
+
             pos = tf.nn.sigmoid(tf.matmul(tf.nn.tanh(tf.matmul(state, wp)), vp))
             pos = tf.floor(encoder_input_length * pos)
 
@@ -309,22 +316,27 @@ def attention(encoder, **kwargs):
     return attention_(encoder=encoder, **kwargs)
 
 
-def multi_attention(state, prev_weights, hidden_states, encoders, encoder_input_length, pos, **kwargs):
+def multi_attention(state, hidden_states, encoders, encoder_input_length, prev_weights=None, pos=None, **kwargs):
     """
     Same as `attention` except that prev_weights, hidden_states and encoders
     are lists whose length is the number of encoders.
     """
-    # hidden_states = tf.unstack(hidden_states)
+    attns = []
+    weights = []
 
-    attns, weights = list(zip(*[
-        attention(state=state, prev_weights=weights, hidden_states=hidden, encoder=encoder,
-                  encoder_input_length=input_length, pos=pos_,
-                  scope='attention_{}'.format(encoder.name), **kwargs)
-        for weights, hidden, encoder, input_length, pos_
-        in zip(prev_weights, hidden_states, encoders, encoder_input_length, pos)
-    ]))
+    context_vector = None
 
-    return tf.concat(attns, 1), list(weights)
+    for i, (hidden, encoder, input_length) in enumerate(zip(hidden_states, encoders, encoder_input_length)):
+        pos_ = pos[i] if pos is not None else None
+        prev_weights_ = prev_weights[i] if prev_weights is not None else None
+
+        context_vector, weights_ = attention(state=state, hidden_states=hidden, encoder=encoder,
+                                             prev_weights=prev_weights_, encoder_input_length=input_length,
+                                             pos=pos_, context=context_vector, **kwargs)
+        attns.append(context_vector)
+        weights.append(weights_)
+
+    return tf.concat(attns, 1), weights
 
 
 def get_embedding_function(decoder, encoders):
@@ -698,7 +710,7 @@ def beam_attention_decoder(initial_state, attention_states, encoders, decoder, e
 
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
         attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
-                                       encoder_input_length=encoder_input_length, prev_weights=[None] * len(encoders))
+                                       encoder_input_length=encoder_input_length)
         if decoder.oracle:
             output_size = len(utils._START_VOCAB)
         else:
