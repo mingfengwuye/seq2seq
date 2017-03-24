@@ -264,7 +264,7 @@ def linear(args, output_size, bias, bias_start=0.0, scope=None, initializer=None
     for shape in shapes:
         if len(shape) != 2:
             raise ValueError("Linear is expecting 2D arguments: %s" % str(shapes))
-        if not shape[1]:
+        if shape[1] is None:
             raise ValueError("Linear expects shape[1] of arguments: %s" % str(shapes))
         else:
             total_arg_size += shape[1]

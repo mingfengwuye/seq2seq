@@ -44,11 +44,12 @@ class Seq2SeqModel(object):
                  freeze_variables=None, lm_weight=None, max_output_len=50, feed_previous=0.0,
                  optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
                  reinforce_baseline=True, softmax_temperature=1.0, loss_function='xent', rollouts=None,
-                 partial_rewards=False, use_edits=False, sub_op=False, **kwargs):
+                 partial_rewards=False, sub_op=False, **kwargs):
         self.lm_weight = lm_weight
         self.encoders = encoders
         self.decoder = decoder
         self.oracle = decoder.oracle
+        self.use_edits = decoder.use_edits
 
         self.learning_rate = learning_rate
         self.global_step = global_step
@@ -118,8 +119,7 @@ class Seq2SeqModel(object):
         self.partial_rewards = partial_rewards
 
         parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
-                          encoder_input_length=self.encoder_input_length, rollouts=1,
-                          use_edits=use_edits, sub_op=sub_op)
+                          encoder_input_length=self.encoder_input_length, rollouts=1, sub_op=sub_op)
 
         self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
 
@@ -251,12 +251,13 @@ class Seq2SeqModel(object):
             output_feed['attn_weights'] = self.attention_weights
 
         res = session.run(output_feed, input_feed)
+
         return namedtuple('output', 'loss attn_weights')(res['loss'], res.get('attn_weights'))
 
 
-    def reinforce_step(self, session, data, update_model=True, update_baseline=True,
-                       use_sgd=False, reward_function=None, use_edits=False, vocabs=None, **kwargs):
-        assert vocabs or not use_edits
+    def reinforce_step(self, session, data, update_model=True, update_baseline=True, use_sgd=False,
+                       reward_function=None, vocabs=None, **kwargs):
+        assert vocabs or not self.use_edits
 
         if vocabs:
             src_vocab = vocabs[0]
@@ -313,7 +314,7 @@ class Seq2SeqModel(object):
             if len(j) > 0:
                 source = source[:j[0]]
 
-            if use_edits:   # use source sentence and sequence of edits to reconstruct output and target sequence
+            if self.use_edits:   # use source sentence and sequence of edits to reconstruct output and target sequence
                 # It makes more sense to compute the reward on the reconstructed sequences, than on the sequences
                 # of edits.
                 output = utils.reverse_edit_ids(source, output, src_vocab, trg_vocab)
@@ -410,8 +411,7 @@ class Seq2SeqModel(object):
 
         return np.argmax(outputs, axis=2).T
 
-    def beam_search_decoding_old(self, session, token_ids, beam_size, ngrams=None, early_stopping=True,
-                             use_edits=False):
+    def beam_search_decoding_old(self, session, token_ids, beam_size, ngrams=None, early_stopping=True):
         if not isinstance(session, list):
             session = [session]
 
@@ -586,7 +586,7 @@ class Seq2SeqModel(object):
             for hyp in hypotheses
         ]  # FIXME: counting EOS score
 
-        if use_edits:  # TODO: reverse edits
+        if self.use_edits:  # TODO: reverse edits
             hypothesis_len = [len(hyp) - hyp.count(utils.DEL_ID) for hyp in hypotheses]
             # TODO: penalty if hypothesis is broken
             # TODO: PEP (post-editing penalty) = -1 for each new word w.r.t the input
@@ -696,8 +696,7 @@ class Seq2SeqModel(object):
 
         return hypotheses
 
-    def beam_search_decoding(self, session, token_ids, beam_size, use_edits=False, early_stopping=True,
-                             *args, **kwargs):
+    def beam_search_decoding(self, session, token_ids, beam_size, early_stopping=True, *args, **kwargs):
         if self.dropout is not None:
             session.run(self.dropout_off)
 
@@ -786,7 +785,7 @@ class Seq2SeqModel(object):
         hypotheses += finished_hypotheses
         scores = np.concatenate([scores, finished_scores])
 
-        if use_edits:
+        if self.use_edits:
             hypothesis_len = [len(hyp) - hyp.count(utils.DEL_ID) for hyp in hypotheses]
         else:
             hypothesis_len = map(len, hypotheses)

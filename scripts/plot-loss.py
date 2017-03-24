@@ -10,8 +10,9 @@ parser.add_argument('--output')
 parser.add_argument('--max-steps', type=int, default=0)
 parser.add_argument('--min-steps', type=int, default=0)
 parser.add_argument('--labels', nargs='+')
-parser.add_argument('--plot', nargs='+', default=['train', 'dev', 'bleu', 'ter'])
+parser.add_argument('--plot', nargs='+', default=('train', 'dev'))
 parser.add_argument('--average', type=int, nargs='+')
+parser.add_argument('--smooth', type=int)
 
 args = parser.parse_args()
 args.plot = [x.lower() for x in args.plot]
@@ -87,10 +88,15 @@ if args.average:
             dicts = [dict(l) for l in data_]
             keys = set.intersection(*[set(d.keys()) for d in dicts])
             data_ = {k: (sum(d[k] for d in dicts) / n) for k in keys}
-            return sorted(list(data_.items()))
+            data_ = sorted(list(data_.items()))
+
+            if args.smooth is not None and args.smooth > 1:
+                k = args.smooth
+                data_ = [(data_[i*k][0], sum(x for _, x in data_[i*k:(i+1)*k]) / k) for i in range(len(data_) // k)]
+
+            return data_
 
         new_data.append(list(map(avg, data_)))
-
     data = new_data
 
 
@@ -106,7 +112,7 @@ for label, data_ in zip(labels, data):
     if 'train' in args.plot and train_perplexities:
         plt.plot(*zip(*train_perplexities), label=' '.join([label, 'train loss']))
 
-legend = plt.legend(loc='upper center', shadow=True)
+legend = plt.legend(loc='best', shadow=True)
 
 if args.output is not None:
     plt.savefig(args.output)

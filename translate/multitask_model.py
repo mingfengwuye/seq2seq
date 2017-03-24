@@ -42,7 +42,7 @@ class MultiTaskModel(BaseTranslationModel):
     def train(self, sess, beam_size, steps_per_checkpoint, steps_per_eval=None, eval_output=None, max_steps=0,
               max_epochs=0, eval_burn_in=0, decay_if_no_progress=5, decay_after_n_epoch=None, decay_every_n_epoch=None,
               sgd_after_n_epoch=None, loss_function='xent', baseline_steps=0, reinforce_baseline=True,
-              reward_function=None, use_edits=False, **kwargs):
+              reward_function=None, **kwargs):
         utils.log('reading training and development data')
 
         self.global_step = 0
@@ -67,7 +67,7 @@ class MultiTaskModel(BaseTranslationModel):
             for model in self.models:
                 baseline_loss = 0
                 for step in range(1, baseline_steps + 1):
-                    baseline_loss += model.baseline_step(sess, reward_function=reward_function, use_edits=use_edits)
+                    baseline_loss += model.baseline_step(sess, reward_function=reward_function)
 
                     if step % steps_per_checkpoint == 0:
                         loss = baseline_loss / steps_per_checkpoint
@@ -80,8 +80,7 @@ class MultiTaskModel(BaseTranslationModel):
             model = self.models[i]
 
             start_time = time.time()
-            res = model.train_step(sess, loss_function=loss_function, reward_function=reward_function,
-                                   use_edits=use_edits)
+            res = model.train_step(sess, loss_function=loss_function, reward_function=reward_function)
             model.loss += res.loss
 
             if loss_function == 'reinforce':
@@ -155,7 +154,7 @@ class MultiTaskModel(BaseTranslationModel):
                     # kwargs_ = {**kwargs, 'output': output}
                     kwargs_ = dict(kwargs)
                     kwargs_['output'] = output
-                    scores_ = model_.evaluate(sess, beam_size, on_dev=True, use_edits=use_edits, **kwargs_)
+                    scores_ = model_.evaluate(sess, beam_size, on_dev=True, **kwargs_)
                     score_ = scores_[0]  # in case there are several dev files, only the first one counts
 
                     # if there is a main task, pick best checkpoint according to its score

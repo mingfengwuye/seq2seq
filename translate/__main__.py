@@ -31,7 +31,7 @@ parser.add_argument('--purge', help='remove previous model files', action='store
 
 # Available actions (exclusive)
 parser.add_argument('--decode', help='translate this corpus (one filename for each encoder)', nargs='*')
-parser.add_argument('--align', help='translate and show alignments by the attention mechanism', nargs=2)
+parser.add_argument('--align', help='translate and show alignments by the attention mechanism', nargs='+')
 parser.add_argument('--eval', help='compute BLEU score on this corpus (source files and target file)', nargs='+')
 parser.add_argument('--train', help='train an NMT model', action='store_true')
 
@@ -154,7 +154,8 @@ def main(args=None):
         'cell_size', 'layers', 'vocab_size', 'embedding_size', 'attention_filters', 'attention_filter_length',
         'use_lstm', 'time_pooling', 'attention_window_size', 'dynamic', 'binary', 'character_level', 'bidir',
         'load_embeddings', 'pooling_avg', 'swap_memory', 'parallel_iterations', 'input_layers',
-        'residual_connections', 'attn_size', 'edit_window_size', 'op_embedding_size', 'oracle'
+        'residual_connections', 'attn_size', 'edit_window_size', 'op_embedding_size', 'oracle', 'use_edits',
+        'align_source', 'attention_type'
     ]
     # TODO: independent model dir for each task
     task_parameters = [

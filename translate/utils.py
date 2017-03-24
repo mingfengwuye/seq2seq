@@ -582,7 +582,7 @@ def heatmap(xlabels=None, ylabels=None, weights=None,
     ylabels = ylabels or []
 
     if wav_file is None:
-        _, ax = plt.subplots()
+        fig, ax = plt.subplots()
     else:
         import matplotlib.gridspec as gridspec
         gs = gridspec.GridSpec(2, 1, height_ratios=[1, 6])
@@ -616,11 +616,16 @@ def heatmap(xlabels=None, ylabels=None, weights=None,
 
     if wav_file is None:
         plt.xticks(rotation=90, fontsize=20)
-    plt.yticks(fontsize=20)
+    plt.xticks(fontsize=18)
+    plt.yticks(fontsize=18)
     plt.tight_layout()
-    # plt.subplots_adjust(wspace=0, hspace=0)
+    plt.subplots_adjust(wspace=0, hspace=0)
     # ax.set_aspect('equal')
     ax.grid(False)
+
+    xsize = max(len(xlabels) / 3, 8.0)
+    ysize = max(len(ylabels) / 3, 8.0)
+    fig.set_size_inches(xsize, ysize, forward=True)
 
     if output_file is None:
         plt.show()

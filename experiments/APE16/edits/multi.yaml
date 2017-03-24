@@ -35,15 +35,11 @@ read_ahead: 10
 
 encoders:
   - name: mt
-    attention_window_size: 2
-    cell_size: 96
-    attn_size: 96
-    embedding_size: 96
+    attention_window_size: 2  # FIXME
   - name: src
-    attention_window_size: 2
-    cell_size: 64
-    attn_size: 64
-    embedding_size: 64
+    align_source: True
+    average_attention: True
+
 
 decoder:
     name: edits

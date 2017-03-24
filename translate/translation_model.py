@@ -111,7 +111,9 @@ class TranslationModel(BaseTranslationModel):
         self.src_ext = [encoder.get('ext') or encoder.name for encoder in encoders]
         self.trg_ext = decoder.get('ext') or decoder.name
         self.oracle = decoder.oracle
+        self.use_edits = decoder.use_edits
         self.dev_prefix = dev_prefix
+        self.align_source_id = ([i for i, encoder in enumerate(encoders) if encoder.align_source] + [0])[0]
 
         self.extensions = self.src_ext + [self.trg_ext]
 
@@ -184,22 +186,21 @@ class TranslationModel(BaseTranslationModel):
     def train(self, *args, **kwargs):
         raise NotImplementedError('use MultiTaskModel')
 
-    def train_step(self, sess, loss_function='xent', reward_function=None, use_edits=False):
+    def train_step(self, sess, loss_function='xent', reward_function=None):
         if loss_function == 'reinforce':
             fun = self.seq2seq_model.reinforce_step
         else:
             fun = self.seq2seq_model.step
 
         return fun(sess, next(self.batch_iterator), update_model=True, update_baseline=True, use_sgd=self.use_sgd,
-                   reward_function=reward_function, use_edits=use_edits, vocabs=self.vocabs)
+                   reward_function=reward_function, vocabs=self.vocabs)
 
-    def baseline_step(self, sess, reward_function=None, use_edits=False):
+    def baseline_step(self, sess, reward_function=None):
         return self.seq2seq_model.reinforce_step(sess,
                                                  next(self.batch_iterator),
                                                  update_model=False,
                                                  update_baseline=True,
                                                  reward_function=reward_function,
-                                                 use_edits=use_edits,
                                                  vocabs=self.vocabs).baseline_loss
 
     def eval_step(self, sess):
@@ -216,8 +217,7 @@ class TranslationModel(BaseTranslationModel):
     def _decode_sentence(self, sess, sentence_tuple, beam_size=1, remove_unk=False, early_stopping=True):
         return next(self._decode_batch(sess, [sentence_tuple], beam_size, remove_unk, early_stopping))
 
-    def _decode_batch(self, sess, sentence_tuples, batch_size, beam_size=1, remove_unk=False, early_stopping=True,
-                      use_edits=False):
+    def _decode_batch(self, sess, sentence_tuples, batch_size, beam_size=1, remove_unk=False, early_stopping=True):
         beam_search = beam_size > 1 or isinstance(sess, list)
 
         if beam_search:
@@ -243,8 +243,7 @@ class TranslationModel(BaseTranslationModel):
             if beam_search:
                 hypotheses, _ = self.seq2seq_model.beam_search_decoding(sess, token_ids[0], beam_size,
                                                                         ngrams=self.ngrams,
-                                                                        early_stopping=early_stopping,
-                                                                        use_edits=use_edits)
+                                                                        early_stopping=early_stopping)
                 batch_token_ids = [hypotheses[0]]  # first hypothesis is the highest scoring one
             elif self.oracle:
                batch_token_ids = self.seq2seq_model.greedy_step_by_step_decoding(sess, token_ids)
@@ -266,7 +265,7 @@ class TranslationModel(BaseTranslationModel):
                 if remove_unk:
                     trg_tokens = [token for token in trg_tokens if token != utils._UNK]
 
-                if use_edits:
+                if self.use_edits:
                     trg_tokens = utils.reverse_edits(src_tokens[0], ' '.join(trg_tokens)).split()
 
                 if self.character_level[-1]:
@@ -275,8 +274,9 @@ class TranslationModel(BaseTranslationModel):
                     yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
 
     def align(self, sess, output=None, wav_files=None, **kwargs):
-        if len(self.src_ext) != 1:
-            raise NotImplementedError
+        # if len(self.src_ext) != 1:
+        #     raise NotImplementedError
+        # TODO: include <S> and </S>
 
         if len(self.filenames.test) != len(self.extensions):
             raise Exception('wrong number of input files')
@@ -290,16 +290,17 @@ class TranslationModel(BaseTranslationModel):
 
             _, weights = self.seq2seq_model.step(sess, data=[token_ids], forward_only=True, align=True,
                                                  update_model=False)
+
             trg_tokens = [self.trg_vocab.reverse[i] if i < len(self.trg_vocab.reverse) else utils._UNK
                           for i in token_ids[-1]]
 
-            weights = weights.squeeze()[:len(trg_tokens),:len(token_ids[0])].T
+            weights = weights.squeeze()[:len(trg_tokens),:len(token_ids[self.align_source_id])].T
             max_len = weights.shape[0]
 
             if self.binary_input[0]:
                 src_tokens = None
             else:
-                src_tokens = lines[0].split()[:max_len]
+                src_tokens = lines[self.align_source_id].split()[:max_len]
 
             if wav_files is not None:
                 wav_file = wav_files[line_id]
@@ -307,10 +308,14 @@ class TranslationModel(BaseTranslationModel):
                 wav_file = None
 
             output_file = '{}.{}.svg'.format(output, line_id + 1) if output is not None else None
+
+            if self.use_edits:
+                src_tokens, trg_tokens = trg_tokens, src_tokens
+                weights = weights.T
+
             utils.heatmap(src_tokens, trg_tokens, weights.T, wav_file=wav_file, output_file=output_file)
 
-    def decode(self, sess, beam_size, output=None, remove_unk=False, early_stopping=True, use_edits=False,
-               raw_output=False, **kwargs):
+    def decode(self, sess, beam_size, output=None, remove_unk=False, early_stopping=True, raw_output=False, **kwargs):
         utils.log('starting decoding')
 
         # empty `test` means that we read from standard input, which is not possible with multiple encoders
@@ -333,8 +338,7 @@ class TranslationModel(BaseTranslationModel):
                 lines = list(lines)
 
             hypothesis_iter = self._decode_batch(sess, lines, batch_size, beam_size=beam_size,
-                                                 early_stopping=early_stopping, remove_unk=remove_unk,
-                                                 use_edits=use_edits)
+                                                 early_stopping=early_stopping, remove_unk=remove_unk)
 
             for hypothesis, raw in hypothesis_iter:
                 if raw_output:
@@ -347,7 +351,7 @@ class TranslationModel(BaseTranslationModel):
                 output_file.close()
 
     def evaluate(self, sess, beam_size, score_function, on_dev=True, output=None, remove_unk=False, max_dev_size=None,
-                 script_dir='scripts', early_stopping=True, use_edits=False, raw_output=False, **kwargs):
+                 script_dir='scripts', early_stopping=True, raw_output=False, **kwargs):
         """
         :param score_function: name of the scoring function used to score and rank models
           (typically 'bleu_score')
@@ -389,12 +393,11 @@ class TranslationModel(BaseTranslationModel):
                 src_sentences = list(zip(*src_sentences))
 
                 hypothesis_iter = self._decode_batch(sess, lines, self.batch_size, beam_size=beam_size,
-                                                     early_stopping=early_stopping, remove_unk=remove_unk,
-                                                     use_edits=use_edits)
+                                                     early_stopping=early_stopping, remove_unk=remove_unk)
                 for i, (sources, hypothesis, reference) in enumerate(zip(src_sentences, hypothesis_iter,
                                                                          trg_sentences)):
                     hypothesis, raw = hypothesis
-                    if use_edits:
+                    if self.use_edits:
                         reference = utils.reverse_edits(sources[0], reference)
 
                     hypotheses.append(hypothesis)
