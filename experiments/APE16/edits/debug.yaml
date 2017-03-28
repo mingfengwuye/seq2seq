@@ -17,7 +17,6 @@ model_dir: experiments/APE16/edits/debug
 
 batch_size: 32
 
-loss_function: 'xent'
 optimizer: 'sgd'
 learning_rate: 1.0
 learning_rate_decay_factor: 0.95
@@ -43,16 +42,10 @@ encoders:
     bidir: True
     attention_type: 'global'
 
-    # cell_size: 256
-    # attn_size: 256
-#  - name: src
-#    attention_type: 'local'
-#    attention_window_size: 0
-
 decoder:
     name: edits
     # aggregation_method: sum
 
 chained_encoders: True
-use_edits: True
+pred_edits: True
 raw_output: True

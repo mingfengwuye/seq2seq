@@ -17,7 +17,6 @@ model_dir: experiments/APE16/edits/multi
 
 batch_size: 32
 
-loss_function: 'xent'
 optimizer: 'sgd'
 learning_rate: 1.0
 learning_rate_decay_factor: 0.95
@@ -45,5 +44,5 @@ encoders:
 decoder:
     name: edits
 
-use_edits: True
+pred_edits: True
 raw_output: True
