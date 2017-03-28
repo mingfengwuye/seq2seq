@@ -108,50 +108,6 @@ def reverse_edits(source, edits, fix=True, strict=False):
     return ' '.join(target)
 
 
-def apply_oracle(hypothesis, oracle, strict=False):
-    words = hypothesis.split()
-
-    ins_words = []
-    sub_words = []
-    both = []
-
-    for word in oracle.split():
-        if word in (_KEEP, _DEL, _NONE):
-            continue
-        if word.startswith(_INS):
-            ins_words.append(word[:-len(_INS) - 1])
-        elif word.startswith(_SUB):
-            sub_words.append(word[:-len(_SUB) - 1])
-        else:
-            both.append(word)
-
-    res = []
-    for word in words:
-        if word == _INS and len(ins_words) > 0:
-            word = ins_words.pop(0)
-        elif word == _SUB and len(sub_words) > 0:
-            word = sub_words.pop(0)
-        elif word == _INS or word == _SUB:
-            if len(both) > 0:
-                word = both.pop(0)
-            elif strict:
-                raise Exception
-
-        res.append(word)
-
-    if strict and (ins_words or sub_words or both):
-        raise Exception
-
-    return ' '.join(res)
-
-
-def reverse_edit_ids(src_ids, edit_ids, src_vocab, trg_vocab):
-    src_words = [src_vocab.reverse[src_id] for src_id in src_ids]
-    trg_words = [trg_vocab.reverse[edit_id] for edit_id in edit_ids]
-
-    return reverse_edits(' '.join(src_words), ' '.join(trg_words)).split()
-
-
 def initialize_vocabulary(vocabulary_path):
     """
     Initialize vocabulary from file.
@@ -241,62 +197,6 @@ def get_filenames(data_dir, extensions, train_prefix, dev_prefix, vocab_prefix,
 
     filenames = namedtuple('filenames', ['train', 'dev', 'test', 'vocab', 'lm_path', 'embeddings'])
     return filenames(train, dev, test, vocab, lm_path, embeddings)
-
-
-def read_embeddings(embedding_filenames, encoders_and_decoder, load_embeddings,
-                    vocabs, norm_embeddings=False):
-    for encoder_or_decoder, vocab, filename in zip(encoders_and_decoder,
-                                                   vocabs,
-                                                   embedding_filenames):
-        name = encoder_or_decoder.name
-        if not load_embeddings or name not in load_embeddings:
-            encoder_or_decoder.embedding = None
-            continue
-
-        with open(filename) as file_:
-            lines = (line.split() for line in file_)
-            _, size_ = next(lines)
-            size_ = int(size_)
-            assert int(size_) == encoder_or_decoder.embedding_size, 'wrong embedding size'
-            embedding = np.zeros((encoder_or_decoder.vocab_size, size_), dtype="float32")
-
-            d = dict((line[0], np.array(map(float, line[1:]))) for line in lines)
-
-        for word, index in vocab.vocab.items():
-            if word in d:
-                embedding[index] = d[word]
-            else:
-                embedding[index] = np.random.uniform(-math.sqrt(3), math.sqrt(3), size_)
-
-        if norm_embeddings:  # FIXME
-            embedding /= np.linalg.norm(embedding)
-
-        encoder_or_decoder.embedding = embedding
-
-
-def read_binary_features(filename):
-    """
-    Reads a binary file containing vector features. First two (int32) numbers correspond to
-    number of entries (lines), and dimension of the vectors.
-    Each entry starts with a 32 bits integer indicating the number of frames, followed by
-    (frames * dimension) 32 bits floats.
-
-    Use `scripts/extract-audio-features.py` to create such a file for audio (MFCCs).
-
-    :param filename: path to the binary file containing the features
-    :return: list of arrays of shape (frames, dimension)
-    """
-    all_feats = []
-
-    with open(filename, 'rb') as f:
-        lines, dim = struct.unpack('ii', f.read(8))
-        for _ in range(lines):
-            frames, = struct.unpack('i', f.read(4))
-            n = frames * dim
-            feats = struct.unpack('f' * n, f.read(4 * n))
-            all_feats.append(list(np.array(feats).reshape(frames, dim)))
-
-    return all_feats
 
 
 def read_dataset(paths, extensions, vocabs, max_size=None, binary_input=None,
@@ -404,27 +304,6 @@ def read_ahead_batch_iterator(data, batch_size, read_ahead=10, shuffle=True, all
             yield batch
 
 
-def read_ahead_batch_iterator_blocks(data, batch_size, read_ahead=10, shuffle=True):
-    random.shuffle(data)
-
-    while True:
-        batch_count = len(data) // batch_size
-        batches = [data[i * batch_size:(i + 1) * batch_size] for i in range(batch_count + 1)]
-
-        while True:
-            batches_ = batches[:read_ahead]
-            batches = batches[read_ahead:]
-
-            if not batches_:
-                break
-
-            data_ = sorted(sum(batches_, []), key=lambda lines: len(lines[-1]))
-            for i in range(read_ahead):
-                batch = data_[i * batch_size:(i + 1) * batch_size]
-                if batch:
-                    yield batch
-
-
 def get_batches(data, batch_size, batches=0, allow_smaller=True):
     """
     Segment `data` into a given number of fixed-size batches. The dataset is automatically shuffled.
@@ -453,58 +332,17 @@ def get_batches(data, batch_size, batches=0, allow_smaller=True):
     return batches
 
 
-def read_lines(paths, extensions, binary_input=None):
-    binary_input = binary_input or [False] * len(extensions)
-
+def read_lines(paths, extensions):
     if not paths:  # read from stdin (only works with one encoder with text input)
-        assert len(extensions) == 1 and not any(binary_input)
+        assert len(extensions) == 1
         paths = [None]
 
     iterators = [
-        sys.stdin if filename is None else read_binary_features(filename) if binary else open(filename)
-        for ext, filename, binary in zip(extensions, paths, binary_input)
+        sys.stdin if filename is None else open(filename)
+        for ext, filename in zip(extensions, paths,)
     ]
 
     return zip(*iterators)
-
-
-def read_ngrams(lm_path, vocab):
-    """
-    Read a language model from a file in the ARPA format,
-    and return it as a list of dicts.
-
-    :param lm_path: full path to language model file
-    :param vocab: vocabulary used to map words from the LM to token ids
-    :return: one dict for each ngram order, containing mappings from
-      ngram (as a sequence of token ids) to (log probability, backoff weight)
-    """
-    ngram_list = []
-    with open(lm_path) as f:
-        for line in f:
-            line = line.strip()
-            if re.match(r'\\\d-grams:', line):
-                ngram_list.append({})
-            elif not line or line == '\\end\\':
-                continue
-            elif ngram_list:
-                arr = list(map(str.rstrip, line.split('\t')))
-                ngram = arr.pop(1)
-                ngram_list[-1][ngram] = list(map(float, arr))
-
-    debug('loaded n-grams, order={}'.format(len(ngram_list)))
-
-    ngrams = []
-    mappings = {'<s>': _BOS, '</s>': _EOS, '<unk>': _UNK}
-
-    for kgrams in ngram_list:
-        d = {}
-        for seq, probas in kgrams.items():
-            ids = tuple(vocab.get(mappings.get(w, w)) for w in seq.split())
-            if any(id_ is None for id_ in ids):
-                continue
-            d[ids] = probas
-        ngrams.append(d)
-    return ngrams
 
 
 def create_logger(log_file=None):
@@ -537,32 +375,6 @@ def debug(msg): log(msg, level=logging.DEBUG)
 
 
 def warn(msg): log(msg, level=logging.WARN)
-
-
-def estimate_lm_score(sequence, ngrams):
-    """
-    Compute the log score of a sequence according to given language model.
-
-    :param sequence: list of token ids
-    :param ngrams: list of dicts, as returned by `read_ngrams`
-    :return: log probability of `sequence`
-
-    P(w_3 | w_1, w_2) =
-        log_prob(w_1 w_2 w_3)             } if (w_1 w_2 w_3) in language model
-        P(w_3 | w_2) + backoff(w_1 w_2)   } otherwise
-    in case (w_1 w_2) has no backoff weight, a weight of 0.0 is used
-    """
-    sequence = tuple(sequence)
-    order = len(sequence)
-    assert 0 < order <= len(ngrams)
-    ngrams_ = ngrams[order - 1]
-
-    if sequence in ngrams_:
-        return ngrams_[sequence][0]
-    else:
-        weights = ngrams[order - 2].get(sequence[:-1])
-        backoff_weight = weights[1] if weights is not None and len(weights) > 1 else 0.0
-        return estimate_lm_score(sequence[1:], ngrams) + backoff_weight
 
 
 def heatmap(xlabels=None, ylabels=None, weights=None,

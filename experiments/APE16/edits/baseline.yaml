@@ -5,7 +5,8 @@ attn_size: 128
 embedding_size: 128
 
 layers: 1
-bidir: True
+# bidir: True
+bidir: False
 use_lstm: True
 
 max_output_len: 45   # 99% coverage

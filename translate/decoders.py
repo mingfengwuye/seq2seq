@@ -817,54 +817,6 @@ def sequence_loss(logits, targets, weights, average_across_timesteps=False, aver
         return cost
 
 
-def baseline_loss(reward, weights, average_across_timesteps=False,
-                  average_across_batch=True):
-    """
-    :param reward: tensor of shape (time_steps, batch_size)
-    :param weights: tensor of shape (time_steps, batch_size)
-    """
-    batch_size = tf.shape(reward)[1]
-
-    cost = reward ** 2
-    cost = tf.reduce_sum(cost * weights, axis=0)
-
-    if average_across_timesteps:
-        total_size = tf.reduce_sum(weights, 0)
-        total_size += 1e-12  # just to avoid division by 0 for all-0 weights
-        cost /= total_size
-
-    cost = tf.reduce_sum(cost)
-
-    if average_across_batch:
-        cost /= tf.cast(batch_size, tf.float32)
-
-    return cost
-
-
-def reinforce_baseline(decoder_states, reward):
-    """
-    Center the reward by computing a baseline reward over decoder states.
-
-    :param decoder_states: internal states of the decoder, tensor of shape (time_steps, batch_size, state_size)
-    :param reward: reward for each time step, tensor of shape (time_steps, batch_size)
-    :return: reward - computed baseline, tensor of shape (time_steps, batch_size)
-    """
-    time_steps = tf.shape(decoder_states)[0]
-    batch_size = tf.shape(decoder_states)[1]
-    state_size = decoder_states.get_shape()[2]
-
-    states = tf.reshape(decoder_states, shape=tf.stack([time_steps * batch_size, state_size]))
-
-    baseline = fully_connected(tf.stop_gradient(states), num_outputs=1, activation_fn=None,
-                               scope='reward_baseline',
-                               weights_initializer=tf.constant_initializer(0.0),
-                               biases_initializer=tf.constant_initializer(0.01))
-
-    baseline = tf.reshape(baseline, shape=tf.stack([time_steps, batch_size]))
-
-    return reward - baseline
-
-
 def softmax(logits, dim=-1, temperature=1.0, mask=None):
     """
     Softmax with a `temperature` parameter:

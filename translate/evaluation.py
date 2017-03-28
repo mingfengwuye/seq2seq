@@ -7,8 +7,6 @@ import re
 import os
 
 from collections import Counter, OrderedDict
-from functools import partial
-from translate import pyter
 
 
 def sentence_bleu(hypothesis, reference, smoothing=True, order=4, **kwargs):
@@ -109,18 +107,7 @@ def corpus_bleu(hypotheses, references, smoothing=False, order=4, **kwargs):
 
 
 @score_function_decorator(reversed=True)
-def corpus_ter(hypotheses, references, **kwargs):
-    scores = [pyter.ter(hyp.split(), ref.split()) for hyp, ref in zip(hypotheses, references)]
-    score = 100 * sum(scores) / len(scores)
-
-    hyp_length = sum(len(hyp.split()) for hyp in hypotheses)
-    ref_length = sum(len(ref.split()) for ref in references)
-
-    return score, 'ratio={:.3f}'.format(hyp_length / ref_length)
-
-
-@score_function_decorator(reversed=True)
-def corpus_tercom(hypotheses, references, case_sensitive=True, **kwargs):
+def corpus_ter(hypotheses, references, case_sensitive=True, **kwargs):
     with tempfile.NamedTemporaryFile('w') as hypothesis_file, tempfile.NamedTemporaryFile('w') as reference_file:
         for i, (hypothesis, reference) in enumerate(zip(hypotheses, references)):
             hypothesis_file.write('{} ({})\n'.format(hypothesis, i))
@@ -156,7 +143,7 @@ def corpus_wer(hypotheses, references, **kwargs):
 def corpus_scores(hypotheses, references, main='bleu', **kwargs):
     bleu_score, summary = corpus_bleu(hypotheses, references)
     # ter, _ = corpus_ter(hypotheses, references)
-    ter, _ = corpus_tercom(hypotheses, references)
+    ter, _ = corpus_ter(hypotheses, references)
     wer, _ = corpus_wer(hypotheses, references)
 
     scores = OrderedDict([('bleu', bleu_score), ('ter', ter), ('wer', wer)])
@@ -193,60 +180,6 @@ def levenhstein(src, trg):
         1 + levenhstein(src[1:], trg),
         1 + levenhstein(src, trg[1:])
     )
-
-
-# Reward functions
-
-def batch_tercom_reward(hypotheses, references, case_sensitive=True, **kwargs):
-    # Computes 1 - TER at the sentence-level for an entire batch of sentences.
-    # It is better to process an entire batch at a time because this calls a java program (and the
-    # JVM is slow to start)
-
-    with tempfile.NamedTemporaryFile('w') as hypothesis_file, tempfile.NamedTemporaryFile('w') as reference_file:
-        for i, (hypothesis, reference) in enumerate(zip(hypotheses, references)):
-            hypothesis_file.write('{} ({})\n'.format(hypothesis, i))
-            reference_file.write('{} ({})\n'.format(reference, i))
-        hypothesis_file.flush()
-        reference_file.flush()
-
-        filename = tempfile.mktemp()
-
-        cmd = ['java', '-jar', 'scripts/tercom.jar', '-h', hypothesis_file.name, '-r', reference_file.name,
-               '-o', 'ter', '-n', filename]
-        if case_sensitive:
-            cmd.append('-s')
-
-        output = open('/dev/null', 'w')
-        subprocess.call(cmd, stdout=output, stderr=output)
-
-    with open(filename + '.ter') as f:
-        lines = list(f)
-        scores = [float(line.split(' ')[-1]) for line in lines[2:]]
-
-    os.remove(filename + '.ter')
-    return [1 - score for score in scores]
-
-
-def ter_reward(hypothesis, reference, **kwargs):
-    """
-    This is not exactly TER, but 1 - TER,
-    which is necessary for this to be a reward function (the higher the better)
-    """
-    return 1 - pyter.ter(hypothesis, reference)
-
-
-def wer_reward(hypothesis, reference, **kwargs):
-    """
-    1 - WER
-    """
-    reference = tuple(reference.split())
-    hypothesis = tuple(hypothesis.split())
-
-    return 1 - levenhstein(hypothesis, reference) / len(reference)
-
-
-def bleu_reward(hypothesis, reference, **kwargs):
-    return sentence_bleu(hypothesis, reference)
 
 
 def tercom_statistics(hypotheses, references, case_sensitive=True, **kwargs):
