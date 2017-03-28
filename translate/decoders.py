@@ -35,21 +35,14 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, 
     embedding_variables = []
     for encoder in encoders:
         # inputs are token ids, which need to be mapped to vectors (embeddings)
-        if not encoder.binary:
-            if encoder.get('embedding') is not None:
-                initializer = encoder.embedding
-                embedding_shape = None
-            else:
-                # initializer = tf.random_uniform_initializer(-math.sqrt(3), math.sqrt(3))
-                initializer = None
-                embedding_shape = [encoder.vocab_size, encoder.embedding_size]
+        # initializer = tf.random_uniform_initializer(-math.sqrt(3), math.sqrt(3))
+        initializer = None
+        embedding_shape = [encoder.vocab_size, encoder.embedding_size]
 
-            with tf.device('/cpu:0'):
-                embedding = get_variable_unsafe('embedding_{}'.format(encoder.name), shape=embedding_shape,
-                                                initializer=initializer)
-            embedding_variables.append(embedding)
-        else:  # do nothing: inputs are already vectors
-            embedding_variables.append(None)
+        with tf.device('/cpu:0'):
+            embedding = get_variable_unsafe('embedding_{}'.format(encoder.name), shape=embedding_shape,
+                                            initializer=initializer)
+        embedding_variables.append(embedding)
 
     for i, encoder in enumerate(encoders):
         with tf.variable_scope('encoder_{}'.format(encoder.name)):
@@ -398,7 +391,6 @@ def get_embedding_function(decoder, encoders):
             embedding_shape = None
         else:
             initializer = None
-            # embedding_shape = [decoder.oracle_vocab_size or decoder.vocab_size, decoder.embedding_size]
             embedding_shape = [decoder.vocab_size, decoder.embedding_size]
 
         with tf.device('/cpu:0'):
@@ -458,11 +450,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
         align_source_id = ([i for i, encoder in enumerate(encoders) if encoder.align_source] + [0])[0]
 
-        if decoder.oracle:
-            output_size = len(utils._START_VOCAB)
-        else:
-            output_size = decoder.vocab_size
-
+        output_size = decoder.vocab_size
         state_size = cell.state_size
 
         if initial_state is not None:
@@ -507,7 +495,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         def _time_step(time, input_, state, output, proj_outputs, decoder_outputs, samples, states, weights,
                        prev_weights, edit_pos):
             pos = None
-            if decoder.use_edits:
+            if decoder.pred_edits:
                 pos = tf.cast(edit_pos, tf.float32)
             pos = [pos] + [None] * (len(encoders) - 1)
 
@@ -534,7 +522,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
                 default=argmax)   # default case is useful for beam-search
 
             sample.set_shape([None])
-            sample = tf.stop_gradient(sample)   # apply oracle here
+            sample = tf.stop_gradient(sample)
 
             is_keep = tf.equal(sample, utils.KEEP_ID)
             is_sub = tf.equal(sample, utils.SUB_ID)
@@ -616,10 +604,7 @@ def attention_decoder_new(decoder_inputs, initial_state, attention_states, encod
         time_steps = input_shape[0]
         batch_size = input_shape[1]
 
-        if decoder.oracle:
-            output_size = len(utils._START_VOCAB)
-        else:
-            output_size = decoder.vocab_size
+        output_size = decoder.vocab_size
 
         state_size = cell.state_size
 
@@ -651,7 +636,7 @@ def attention_decoder_new(decoder_inputs, initial_state, attention_states, encod
             return context_vector, proj_output
 
         pos = None
-        if decoder.use_edits:
+        if decoder.pred_edits:
             pos = tf.cast(edit_pos, tf.float32)
 
         context_vector, output = get_output(initial_input, state, pos=pos)
@@ -690,7 +675,7 @@ def attention_decoder_new(decoder_inputs, initial_state, attention_states, encod
                 skip_conditionals=True)
 
             pos = None
-            if decoder.use_edits:
+            if decoder.pred_edits:
                 pos = tf.cast(edit_pos, tf.float32)
 
             context_vector, output = get_output(input_, state, pos=pos)
@@ -723,11 +708,7 @@ def beam_attention_decoder(initial_state, attention_states, encoders, decoder, e
         attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
                                        encoder_input_length=encoder_input_length,
                                        aggregation_method=decoder.aggregation_method)
-        if decoder.oracle:
-            output_size = len(utils._START_VOCAB)
-        else:
-            output_size = decoder.vocab_size
-
+        output_size = decoder.vocab_size
         state_size = cell.state_size
         initial_state = tf.nn.tanh(linear_unsafe(initial_state, state_size, True, scope='initial_state_projection'))
 
@@ -756,7 +737,7 @@ def beam_attention_decoder(initial_state, attention_states, encoders, decoder, e
         initial_data = tf.concat([initial_state, initial_context_vector, initial_edit_pos], axis=1)
         decoder_input = tf.placeholder(tf.int64, shape=[None])
 
-        if decoder.use_edits:
+        if decoder.pred_edits:
             is_keep = tf.equal(decoder_input, utils.KEEP_ID)
             is_sub = tf.equal(decoder_input, utils.SUB_ID)
             is_del = tf.equal(decoder_input, utils.DEL_ID)

@@ -76,7 +76,7 @@ class BaseTranslationModel(object):
             for score_, step_ in scores:
                 f.write('{:.2f} {}\n'.format(score_, step_))
 
-    def initialize(self, sess, checkpoints=None, reset=False, reset_learning_rate=False,
+    def initialize(self, sess, load=None, reset=False, reset_learning_rate=False,
                    max_to_keep=1, keep_every_n_hours=0, **kwargs):
         if keep_every_n_hours <= 0 or keep_every_n_hours is None:
             keep_every_n_hours = float('inf')
@@ -92,8 +92,8 @@ class BaseTranslationModel(object):
         if reset:
             blacklist.append('global_step')
         
-        if checkpoints:  # load partial checkpoints
-            for checkpoint in checkpoints:  # checkpoint files to load
+        if load:  # load partial checkpoints
+            for checkpoint in load:  # checkpoint files to load
                 load_checkpoint(sess, None, checkpoint, blacklist=blacklist)
         elif not reset:
             load_checkpoint(sess, self.checkpoint_dir, blacklist=blacklist)
@@ -104,14 +104,13 @@ class BaseTranslationModel(object):
 
 class TranslationModel(BaseTranslationModel):
     def __init__(self, name, encoders, decoder, checkpoint_dir, learning_rate, learning_rate_decay_factor, batch_size,
-                 keep_best=1, load_embeddings=None, max_input_len=None, max_output_len=None, dev_prefix=None, **kwargs):
+                 keep_best=1, max_input_len=None, max_output_len=None, dev_prefix=None, **kwargs):
         super(TranslationModel, self).__init__(name, checkpoint_dir, keep_best, **kwargs)
 
         self.batch_size = batch_size
         self.src_ext = [encoder.get('ext') or encoder.name for encoder in encoders]
         self.trg_ext = decoder.get('ext') or decoder.name
-        self.oracle = decoder.oracle
-        self.use_edits = decoder.use_edits
+        self.pred_edits = decoder.pred_edits
         self.dev_prefix = dev_prefix
         self.align_source_id = ([i for i, encoder in enumerate(encoders) if encoder.align_source] + [0])[0]
 
@@ -121,10 +120,9 @@ class TranslationModel(BaseTranslationModel):
         self.max_output_len = max_output_len
 
         encoders_and_decoder = encoders + [decoder]
-        self.binary_input = [encoder_or_decoder.binary for encoder_or_decoder in encoders_and_decoder]
         self.character_level = [encoder_or_decoder.character_level for encoder_or_decoder in encoders_and_decoder]
         self.pred_characters = self.character_level[-1]
-        if self.use_edits:
+        if self.pred_edits:
             self.character_level[-1] = False
 
         self.learning_rate = tf.Variable(learning_rate, trainable=False, name='learning_rate', dtype=tf.float32)
@@ -142,9 +140,6 @@ class TranslationModel(BaseTranslationModel):
             if encoder_or_decoder.vocab_size <= 0 and vocab is not None:
                 encoder_or_decoder.vocab_size = len(vocab.reverse)
 
-        # this adds an `embedding' attribute to each encoder and decoder
-        utils.read_embeddings(self.filenames.embeddings, encoders + [decoder], load_embeddings, self.vocabs)
-
         # main model
         utils.debug('creating model {}'.format(name))
         self.seq2seq_model = Seq2SeqModel(encoders, decoder, self.learning_rate, self.global_step,
@@ -155,13 +150,16 @@ class TranslationModel(BaseTranslationModel):
         self.train_size = None
         self.use_sgd = False
 
+        self.checkpoint_dir = checkpoint_dir
+        # dest_vocab_path = os.path.join(model_dir, 'data', '{}.vocab'.format(task.name))
+
     def read_data(self, max_train_size, max_dev_size, read_ahead=10, batch_mode='standard', shuffle=True,
                   **kwargs):
         utils.debug('reading training data')
         max_len = [self.max_input_len for _ in self.src_ext] + [self.max_output_len]
         train_set = utils.read_dataset(self.filenames.train, self.extensions, self.vocabs,
-                                       max_size=max_train_size, binary_input=self.binary_input,
-                                       character_level=self.character_level, max_seq_len=max_len)
+                                       max_size=max_train_size, character_level=self.character_level,
+                                       max_seq_len=max_len)
         self.train_size = len(train_set)
         self.batch_iterator = utils.read_ahead_batch_iterator(train_set, self.batch_size, read_ahead=read_ahead,
                                                               mode=batch_mode, shuffle=shuffle)
@@ -170,7 +168,7 @@ class TranslationModel(BaseTranslationModel):
 
         dev_sets = [
             utils.read_dataset(dev, self.extensions, self.vocabs, max_size=max_dev_size,
-                               binary_input=self.binary_input, character_level=self.character_level)
+                               character_level=self.character_level)
             for dev in self.filenames.dev
         ]
         # subset of the dev set whose perplexity is periodically evaluated
@@ -179,37 +177,19 @@ class TranslationModel(BaseTranslationModel):
     def _read_vocab(self):
         # don't try reading vocabulary for encoders that take pre-computed features
         self.vocabs = [
-            utils.initialize_vocabulary(vocab_path) if not binary else None
-            for ext, vocab_path, binary in zip(self.extensions, self.filenames.vocab, self.binary_input)
+            utils.initialize_vocabulary(vocab_path)
+            for ext, vocab_path in zip(self.extensions, self.filenames.vocab)
         ]
         *self.src_vocab, self.trg_vocab = self.vocabs
-        self.ngrams = self.filenames.lm_path and utils.read_ngrams(self.filenames.lm_path, self.trg_vocab.vocab)
 
-    def train(self, *args, **kwargs):
-        raise NotImplementedError('use MultiTaskModel')
-
-    def train_step(self, sess, loss_function='xent', reward_function=None):
-        if loss_function == 'reinforce':
-            fun = self.seq2seq_model.reinforce_step
-        else:
-            fun = self.seq2seq_model.step
-
-        return fun(sess, next(self.batch_iterator), update_model=True, update_baseline=True, use_sgd=self.use_sgd,
-                   reward_function=reward_function, vocabs=self.vocabs)
-
-    def baseline_step(self, sess, reward_function=None):
-        return self.seq2seq_model.reinforce_step(sess,
-                                                 next(self.batch_iterator),
-                                                 update_model=False,
-                                                 update_baseline=True,
-                                                 reward_function=reward_function,
-                                                 vocabs=self.vocabs).baseline_loss
+    def train_step(self, sess):
+        return self.seq2seq_model.step(sess, next(self.batch_iterator), update_model=True, use_sgd=self.use_sgd)
 
     def eval_step(self, sess):
         # compute perplexity on dev set
         for prefix, dev_batches in zip(self.dev_prefix, self.dev_batches):
             eval_loss = sum(
-                self.seq2seq_model.step(sess, batch, update_model=False, update_baseline=False).loss * len(batch)
+                self.seq2seq_model.step(sess, batch, update_model=False).loss * len(batch)
                 for batch in dev_batches
             )
             eval_loss /= sum(map(len, dev_batches))
@@ -244,11 +224,8 @@ class TranslationModel(BaseTranslationModel):
 
             if beam_search:
                 hypotheses, _ = self.seq2seq_model.beam_search_decoding(sess, token_ids[0], beam_size,
-                                                                        ngrams=self.ngrams,
                                                                         early_stopping=early_stopping)
                 batch_token_ids = [hypotheses[0]]  # first hypothesis is the highest scoring one
-            elif self.oracle:
-               batch_token_ids = self.seq2seq_model.greedy_step_by_step_decoding(sess, token_ids)
             else:
                batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
 
@@ -267,7 +244,7 @@ class TranslationModel(BaseTranslationModel):
                 if remove_unk:
                     trg_tokens = [token for token in trg_tokens if token != utils._UNK]
 
-                if self.use_edits:
+                if self.pred_edits:
                     trg_tokens = utils.reverse_edits(src_tokens[0], ' '.join(trg_tokens)).split()
 
                 if self.pred_characters:
@@ -275,7 +252,7 @@ class TranslationModel(BaseTranslationModel):
                 else:
                     yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
 
-    def align(self, sess, output=None, wav_files=None, **kwargs):
+    def align(self, sess, output=None, **kwargs):
         # if len(self.src_ext) != 1:
         #     raise NotImplementedError
         # TODO: include <S> and </S>
@@ -283,7 +260,7 @@ class TranslationModel(BaseTranslationModel):
         if len(self.filenames.test) != len(self.extensions):
             raise Exception('wrong number of input files')
 
-        for line_id, lines in enumerate(utils.read_lines(self.filenames.test, self.extensions, self.binary_input)):
+        for line_id, lines in enumerate(utils.read_lines(self.filenames.test, self.extensions)):
             token_ids = [
                 utils.sentence_to_token_ids(sentence, vocab.vocab, character_level=char_level)
                 if vocab is not None else sentence
@@ -299,31 +276,21 @@ class TranslationModel(BaseTranslationModel):
             weights = weights.squeeze()[:len(trg_tokens),:len(token_ids[self.align_source_id])].T
             max_len = weights.shape[0]
 
-            if self.binary_input[0]:
-                src_tokens = None
-            else:
-                src_tokens = lines[self.align_source_id].split()[:max_len]
-
-            if wav_files is not None:
-                wav_file = wav_files[line_id]
-            else:
-                wav_file = None
+            src_tokens = lines[self.align_source_id].split()[:max_len]
 
             output_file = '{}.{}.svg'.format(output, line_id + 1) if output is not None else None
 
-            if self.use_edits:
+            if self.pred_edits:
                 src_tokens, trg_tokens = trg_tokens, src_tokens
                 weights = weights.T
 
-            utils.heatmap(src_tokens, trg_tokens, weights.T, wav_file=wav_file, output_file=output_file)
+            utils.heatmap(src_tokens, trg_tokens, weights.T, output_file=output_file)
 
     def decode(self, sess, beam_size, output=None, remove_unk=False, early_stopping=True, raw_output=False, **kwargs):
         utils.log('starting decoding')
 
         # empty `test` means that we read from standard input, which is not possible with multiple encoders
         assert len(self.src_ext) == 1 or self.filenames.test
-        # we can't read binary data from standard input
-        assert self.filenames.test or self.src_ext[0] not in self.binary_input
         # check that there is the right number of files for decoding
         assert not self.filenames.test or len(self.filenames.test) == len(self.src_ext)
 
@@ -331,7 +298,7 @@ class TranslationModel(BaseTranslationModel):
         try:
             output_file = sys.stdout if output is None else open(output, 'w')
 
-            lines = utils.read_lines(self.filenames.test, self.src_ext, self.binary_input)
+            lines = utils.read_lines(self.filenames.test, self.src_ext)
 
             if self.filenames.test is None:   # interactive mode
                 batch_size = 1
@@ -378,7 +345,7 @@ class TranslationModel(BaseTranslationModel):
         scores = []
 
         for filenames_, output_, prefix in zip(filenames, output, self.dev_prefix):  # evaluation on multiple corpora
-            lines = list(utils.read_lines(filenames_, self.extensions, self.binary_input))
+            lines = list(utils.read_lines(filenames_, self.extensions))
             if on_dev and max_dev_size:
                 lines = lines[:max_dev_size]
 
@@ -399,7 +366,7 @@ class TranslationModel(BaseTranslationModel):
                 for i, (sources, hypothesis, reference) in enumerate(zip(src_sentences, hypothesis_iter,
                                                                          trg_sentences)):
                     hypothesis, raw = hypothesis
-                    if self.use_edits:
+                    if self.pred_edits:
                         reference = utils.reverse_edits(sources[0], reference)
 
                     hypotheses.append(hypothesis)
@@ -433,6 +400,89 @@ class TranslationModel(BaseTranslationModel):
             scores.append(score)
 
         return scores
+
+    def train(self, sess, beam_size, steps_per_checkpoint, steps_per_eval=None, eval_output=None, max_steps=0,
+              max_epochs=0, eval_burn_in=0, decay_if_no_progress=5, decay_after_n_epoch=None, decay_every_n_epoch=None,
+              sgd_after_n_epoch=None, **kwargs):
+        utils.log('reading training and development data')
+
+        self.read_data(**kwargs)
+        # those parameters are used to track the progress of each task
+        self.loss, self.time, self.steps = 0, 0, 0
+        self.baseline_loss = 0
+        self.previous_losses = []
+        global_step = self.global_step.eval(sess)
+        self.epoch = self.batch_size * global_step // self.train_size
+        self.last_decay = global_step
+
+        for _ in range(global_step):  # read all the data up to this step
+            next(self.batch_iterator)
+
+
+        utils.log('starting training')
+        while True:
+            start_time = time.time()
+            res = self.train_step(sess)
+            self.loss += res.loss
+
+            self.time += time.time() - start_time
+            self.steps += 1
+            global_step = self.global_step.eval(sess)
+
+            epoch = self.batch_size * global_step / self.train_size
+            self.epoch = int(epoch) + 1
+
+            if decay_after_n_epoch is not None and epoch >= decay_after_n_epoch:
+                if decay_every_n_epoch is not None and (self.batch_size * (global_step - self.last_decay)
+                                                            >= decay_every_n_epoch * self.train_size):
+                    sess.run(self.learning_rate_decay_op)
+                    utils.debug('  decaying learning rate to: {:.4f}'.format(self.learning_rate.eval()))
+                    self.last_decay = global_step
+
+            if sgd_after_n_epoch is not None and epoch >= sgd_after_n_epoch:
+                if not self.use_sgd:
+                    utils.debug('  epoch {}, starting to use SGD'.format(self.epoch))
+                    self.use_sgd = True
+
+            if steps_per_checkpoint and global_step % steps_per_checkpoint == 0:
+                loss = self.loss / self.steps
+                step_time = self.time / self.steps
+
+                utils.log('{} step {} epoch {} learning rate {:.4f} step-time {:.4f} loss {:.4f}'.format(
+                    self.name, global_step, self.epoch, self.learning_rate.eval(),
+                    step_time, loss))
+
+                if decay_if_no_progress and len(self.previous_losses) >= decay_if_no_progress:
+                    if loss >= max(self.previous_losses[:decay_if_no_progress]):
+                        sess.run(self.learning_rate_decay_op)
+
+                self.previous_losses.append(loss)
+                self.loss, self.time, self.steps = 0, 0, 0
+                self.eval_step(sess)
+
+                self.save(sess)
+
+            if steps_per_eval and global_step % steps_per_eval == 0 and 0 <= eval_burn_in <= global_step:
+                if eval_output is None:
+                    output = None
+                else:
+                    os.makedirs(eval_output, exist_ok=True)
+
+                    # if there are several dev files, we define several output files
+                    output = [
+                        os.path.join(eval_output, '{}.{}.{}'.format(self.name, prefix, global_step))
+                        for prefix in self.dev_prefix
+                    ]
+
+                # kwargs_ = {**kwargs, 'output': output}
+                kwargs_ = dict(kwargs)
+                kwargs_['output'] = output
+                scores_ = self.evaluate(sess, beam_size, on_dev=True, **kwargs_)
+                score = scores_[0]  # in case there are several dev files, only the first one counts
+                self.manage_best_checkpoints(global_step, score)
+
+            if 0 < max_steps <= global_step or 0 < max_epochs <= epoch:
+                raise utils.FinishedTrainingException
 
 
 def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):

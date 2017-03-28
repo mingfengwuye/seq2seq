@@ -199,11 +199,11 @@ def get_filenames(data_dir, extensions, train_prefix, dev_prefix, vocab_prefix,
     return filenames(train, dev, test, vocab, lm_path, embeddings)
 
 
-def read_dataset(paths, extensions, vocabs, max_size=None, binary_input=None,
-                 character_level=None, sort_by_length=False, max_seq_len=None):
+def read_dataset(paths, extensions, vocabs, max_size=None, character_level=None, sort_by_length=False,
+                 max_seq_len=None):
     data_set = []
 
-    line_reader = read_lines(paths, extensions, binary_input=binary_input)
+    line_reader = read_lines(paths, extensions)
     character_level = character_level or [False] * len(extensions)
 
     for counter, inputs in enumerate(line_reader, 1):
@@ -377,39 +377,21 @@ def debug(msg): log(msg, level=logging.DEBUG)
 def warn(msg): log(msg, level=logging.WARN)
 
 
-def heatmap(xlabels=None, ylabels=None, weights=None,
-            output_file=None, wav_file=None):
+def heatmap(xlabels=None, ylabels=None, weights=None, output_file=None):
     """
     Draw a heatmap showing the alignment between two sequences.
 
-    :param xlabels: input words or None if binary input (use `wav_file` for audio)
+    :param xlabels: input words
     :param ylabels: output words
     :param weights: numpy array of shape (len(xlabels), len(ylabels))
     :param output_file: write the figure to this file, or show it into a window if None
-    :param wav_file: plot the waveform of this audio file on the x axis
     """
     from matplotlib import pyplot as plt
 
     xlabels = xlabels or []
     ylabels = ylabels or []
 
-    if wav_file is None:
-        fig, ax = plt.subplots()
-    else:
-        import matplotlib.gridspec as gridspec
-        gs = gridspec.GridSpec(2, 1, height_ratios=[1, 6])
-        # ax_audio = plt.subplot()
-        ax_audio = plt.subplot(gs[0])
-        ax = plt.subplot(gs[1])
-        from pylab import fromstring
-        f = wave.open(wav_file)
-        sound_info = f.readframes(-1)
-        sound_info = fromstring(sound_info, 'int16')
-        ax_audio.plot(sound_info, color='gray')
-        ax_audio.xaxis.set_visible(False)
-        ax_audio.yaxis.set_visible(False)
-        ax_audio.set_frame_on(False)
-        ax_audio.set_xlim(right=len(sound_info))
+    fig, ax = plt.subplots()
 
     plt.autoscale(enable=True, axis='x', tight=True)
     ax.pcolor(weights, cmap=plt.cm.Greys)
@@ -426,8 +408,7 @@ def heatmap(xlabels=None, ylabels=None, weights=None,
     ax.set_yticklabels(ylabels, minor=False)
     ax.tick_params(axis='both', which='both', length=0)
 
-    if wav_file is None:
-        plt.xticks(rotation=90, fontsize=20)
+    plt.xticks(rotation=90, fontsize=20)
     plt.xticks(fontsize=18)
     plt.yticks(fontsize=18)
     plt.tight_layout()

@@ -18,7 +18,6 @@ model_dir: models/debug
 batch_size: 32
 dev_prefix: dev
 
-loss_function: 'xent'
 optimizer: 'adam'
 
 steps_per_checkpoint: 500

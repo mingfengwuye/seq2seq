@@ -18,7 +18,7 @@ import tarfile
 from pprint import pformat
 from operator import itemgetter
 from translate import utils
-from translate.multitask_model import MultiTaskModel
+from translate.translation_model import TranslationModel
 
 parser = argparse.ArgumentParser()
 parser.add_argument('config', help='load a configuration file in the YAML format')
@@ -43,23 +43,18 @@ parser.add_argument('--no-gpu', action='store_true', help='run on CPU')
 parser.add_argument('--beam-size', type=int)
 parser.add_argument('--ensemble', action='store_const', const=True)
 parser.add_argument('--lm-file')
-parser.add_argument('--checkpoints', nargs='+')
+parser.add_argument('--load', nargs='+')
 parser.add_argument('--lm-weight', type=float)
-parser.add_argument('--len-normalization', type=float)
 parser.add_argument('--output')
 parser.add_argument('--max-steps', type=int)
 parser.add_argument('--remove-unk', action='store_const', const=True)
 parser.add_argument('--raw-output', action='store_const', const=True)
-parser.add_argument('--wav-files', nargs='*')
-parser.add_argument('--use-edits', action='store_const', const=True)
+parser.add_argument('--pred-edits', action='store_const', const=True)
 parser.add_argument('--model-dir')
 
 
 """
 Benchmarks:
-- replicate speech recognition results
-- replicate the experiments of the WMT paper on neural post-editing
-
 Scores on English->French WMT14 (ntst14)
 - Bahdanau et al.:  28.45 (shallow attention-based MT with max-out layer, 30k vocabulary, after 667k iterations)
 - Baseline (Moses): 33.30
@@ -69,14 +64,6 @@ Scores on English->French WMT14 (ntst14)
 - Us:               28.05 (after 450k iterations, with Adadelta + SGD)
                     28.69 (after 940k iterations, with Adadelta + SGD)
                     29.75 (with subword units, after 200k iterations, with Adam + SGD)
-
-TODO:
-- pervasive dropout (dropout in the recurrent connections)
-- symbolic beam-search
-- possibility to build an encoder with 1 bi-directional layer, and several uni-directional layers
-- pre-load data on GPU for small datasets
-- load training data as a stream for large datasets
-- possibility to run model on several GPUs
 """
 
 
@@ -152,53 +139,30 @@ def main(args=None):
     # for those parameters)
     model_parameters = [
         'cell_size', 'layers', 'vocab_size', 'embedding_size', 'attention_filters', 'attention_filter_length',
-        'use_lstm', 'time_pooling', 'attention_window_size', 'dynamic', 'binary', 'character_level', 'bidir',
+        'use_lstm', 'time_pooling', 'attention_window_size', 'character_level', 'bidir',
         'load_embeddings', 'pooling_avg', 'swap_memory', 'parallel_iterations', 'input_layers',
-        'residual_connections', 'attn_size', 'edit_window_size', 'op_embedding_size', 'oracle', 'use_edits',
+        'residual_connections', 'attn_size', 'edit_window_size', 'op_embedding_size', 'pred_edits',
         'align_source', 'attention_type', 'use_context', 'aggregation_method', 'chained_encoders'
     ]
-    # TODO: independent model dir for each task
-    task_parameters = [
-        'data_dir', 'train_prefix', 'dev_prefix', 'vocab_prefix', 'ratio', 'lm_file', 'learning_rate',
-        'learning_rate_decay_factor', 'max_input_len', 'max_output_len', 'encoders', 'decoder'
-    ]
 
-    # in case no task is defined (standard mono-task settings), define a "main" task
-    config.setdefault(
-        'tasks', [{'encoders': config.encoders, 'decoder': config.decoder, 'name': 'main', 'ratio': 1.0}]
-    )
-    config.tasks = [utils.AttrDict(task) for task in config.tasks]
+    if isinstance(config.dev_prefix, str):  # for back-compatibility with old config files
+        config.dev_prefix = [config.dev_prefix]
 
-    for task in config.tasks:
-        for parameter in task_parameters:
-            task.setdefault(parameter, config.get(parameter))
+    # convert dicts to AttrDicts for convenience
+    config.encoders = [utils.AttrDict(encoder) for encoder in config.encoders]
+    config.decoder = utils.AttrDict(config.decoder)
 
-        if isinstance(task.dev_prefix, str):  # for back-compatibility with old config files
-            task.dev_prefix = [task.dev_prefix]
-
-        # convert dicts to AttrDicts for convenience
-        task.encoders = [utils.AttrDict(encoder) for encoder in task.encoders]
-        task.decoder = utils.AttrDict(task.decoder)
-
-        for encoder_or_decoder in task.encoders + [task.decoder]:
-            # move parameters all the way up from base level to encoder/decoder level:
-            # default values for encoder/decoder parameters can be defined at the task level and base level
-            # default values for tasks can be defined at the base level
-            for parameter in model_parameters:
-                if parameter in encoder_or_decoder:
-                    continue
-                elif parameter in task:
-                    encoder_or_decoder[parameter] = task[parameter]
-                else:
-                    encoder_or_decoder[parameter] = config.get(parameter)
+    for encoder_or_decoder in config.encoders + [config.decoder]:
+        for parameter in model_parameters:
+            if parameter in encoder_or_decoder:
+                continue
+            else:
+                encoder_or_decoder[parameter] = config.get(parameter)
 
     # log parameters
     utils.debug('program arguments')
     for k, v in sorted(config.items(), key=itemgetter(0)):
-        if k == 'tasks':
-            utils.debug('  {:<20}\n{}'.format(k, pformat(v)))
-        elif k not in model_parameters and k not in task_parameters:
-            utils.debug('  {:<20} {}'.format(k, pformat(v)))
+        utils.debug('  {:<20} {}'.format(k, pformat(v)))
 
     device = None
     if config.no_gpu:
@@ -221,7 +185,7 @@ def main(args=None):
 
         tf.get_variable_scope().set_initializer(initializer)
         decode_only = args.decode is not None or args.eval or args.align  # exempt from creating gradient ops
-        model = MultiTaskModel(name='main', checkpoint_dir=checkpoint_dir, decode_only=decode_only, **config)
+        model = TranslationModel(name='main', checkpoint_dir=checkpoint_dir, decode_only=decode_only, **config)
 
     # count parameters
     utils.log('model parameters ({})'.format(len(tf.global_variables())))
@@ -245,12 +209,12 @@ def main(args=None):
 
         if config.ensemble and (args.eval or args.decode is not None):
             # create one session for each model in the ensemble
-            sess = [tf.Session() for _ in config.checkpoints]
-            for sess_, checkpoint in zip(sess, config.checkpoints):
+            sess = [tf.Session() for _ in config.load]
+            for sess_, checkpoint in zip(sess, config.load):
                 model.initialize(sess_, [checkpoint], reset=True)
-        elif (not config.checkpoints and (args.eval or args.decode is not None or args.align) and
+        elif (not config.load and (args.eval or args.decode is not None or args.align) and
              (os.path.isfile(best_checkpoint + '.index') or os.path.isfile(best_checkpoint + '.index'))):
-            # in decoding and evaluation mode, unless specified otherwise (by `checkpoints`),
+            # in decoding and evaluation mode, unless specified otherwise (by `load`),
             # try to load the best checkpoint)
             model.initialize(sess, [best_checkpoint], reset=True)
         else:

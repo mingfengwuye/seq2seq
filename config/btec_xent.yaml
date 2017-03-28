@@ -15,7 +15,6 @@ model_dir: models/btec_xent
 batch_size: 32
 dev_prefix: dev
 
-loss_function: 'xent'
 optimizer: 'adam'
 
 sgd_after_n_epoch: 20

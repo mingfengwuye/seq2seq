@@ -41,15 +41,12 @@ class Seq2SeqModel(object):
     """
 
     def __init__(self, encoders, decoder, learning_rate, global_step, max_gradient_norm, dropout_rate=0.0,
-                 freeze_variables=None, lm_weight=None, max_output_len=50, feed_previous=0.0,
+                 freeze_variables=None, max_output_len=50, feed_previous=0.0,
                  optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
-                 reinforce_baseline=True, softmax_temperature=1.0, loss_function='xent', rollouts=None,
-                 partial_rewards=False, sub_op=False, chained_encoders=False, **kwargs):
-        self.lm_weight = lm_weight
+                 chained_encoders=False, **kwargs):
         self.encoders = encoders
         self.decoder = decoder
-        self.oracle = decoder.oracle
-        self.use_edits = decoder.use_edits
+        self.pred_edits = decoder.pred_edits
 
         self.learning_rate = learning_rate
         self.global_step = global_step
@@ -57,7 +54,6 @@ class Seq2SeqModel(object):
         self.encoder_count = len(encoders)
         self.trg_vocab_size = decoder.vocab_size
         self.trg_cell_size = decoder.cell_size
-        self.binary_input = [encoder.name for encoder in encoders if encoder.binary]
 
         self.max_output_len = max_output_len
         self.max_input_len = max_input_len
@@ -84,13 +80,9 @@ class Seq2SeqModel(object):
         self.max_gradient_norm = max_gradient_norm
 
         for encoder in self.encoders:
-            if encoder.binary:
-                placeholder = tf.placeholder(tf.float32, shape=[None, None, encoder.embedding_size],
-                                             name='encoder_{}'.format(encoder.name))
-            else:
-                # batch_size x time
-                placeholder = tf.placeholder(tf.int32, shape=[None, None],
-                                             name='encoder_{}'.format(encoder.name))
+            # batch_size x time
+            placeholder = tf.placeholder(tf.int32, shape=[None, None],
+                                         name='encoder_{}'.format(encoder.name))
 
             self.encoder_inputs.append(placeholder)
             self.encoder_input_length.append(
@@ -100,23 +92,11 @@ class Seq2SeqModel(object):
 
         # starts with BOS, and ends with EOS  (time x batch_size)
         self.targets = tf.placeholder(tf.int32, shape=[None, None], name='target_{}'.format(self.decoder.name))
-
-        if self.oracle:
-            self.decoder_inputs = tf.placeholder(tf.int32, shape=[None, None], name='decoder_inputs_{}'.format(
-                self.decoder.name))
-        else:
-            self.decoder_inputs = self.targets[:-1,:]
+        self.decoder_inputs = self.targets[:-1,:]
 
         self.target_weights = decoders.get_weights(self.targets[1:,:], utils.EOS_ID, time_major=True,
                                                    include_first_eos=True)
         self.target_length = tf.reduce_sum(self.target_weights, axis=0)
-
-        if loss_function == 'xent' or decode_only:  # FIXME: use tensor instead
-            self.rollouts = None
-        else:
-            self.rollouts = rollouts
-
-        self.partial_rewards = partial_rewards
 
         if chained_encoders:
             parameters = dict(encoders=encoders[1:], decoder=encoders[0], dropout=self.dropout,
@@ -152,7 +132,7 @@ class Seq2SeqModel(object):
             # import ipdb; ipdb.set_trace()
         else:
             parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
-                              encoder_input_length=self.encoder_input_length, rollouts=1, sub_op=sub_op)
+                              encoder_input_length=self.encoder_input_length)
             self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
 
         # self.attention_states[0] = tf.Print(self.attention_states[0], [tf.shape(states)], summarize=1000)
@@ -174,15 +154,10 @@ class Seq2SeqModel(object):
 
         optimizers = self.get_optimizers(optimizer, learning_rate)
 
-        self.xent_loss, self.reinforce_loss, self.baseline_loss = None, None, None
-        self.update_op, self.sgd_update_op, self.baseline_update_op = None, None, None
-        self.rewards = None
+        self.xent_loss = None
+        self.update_op, self.sgd_update_op = None, None
 
-        if loss_function == 'xent':
-            self.init_xent(optimizers, decode_only)
-        else:
-            self.init_reinforce(optimizers, reinforce_baseline, decode_only)
-            self.init_xent(optimizers, decode_only=True)   # used for eval
+        self.init_xent(optimizers, decode_only)
 
     @staticmethod
     def get_optimizers(optimizer_name, learning_rate):
@@ -220,34 +195,6 @@ class Seq2SeqModel(object):
         if not decode_only:
             self.update_op, self.sgd_update_op = self.get_update_op(self.xent_loss, optimizers, self.global_step)
 
-    def init_reinforce(self, optimizers, reinforce_baseline=True, decode_only=False):
-        self.rewards = tf.placeholder(tf.float32, [None, None], 'rewards')
-
-        if reinforce_baseline:
-            reward = decoders.reinforce_baseline(self.decoder_outputs, self.rewards)
-            weights = decoders.get_weights(self.sampled_output, utils.EOS_ID, time_major=True,
-                                           include_first_eos=False)
-            self.baseline_loss = decoders.baseline_loss(reward=reward, weights=weights)
-        else:
-            reward = self.rewards
-            self.baseline_loss = tf.constant(0.0)
-
-        weights = decoders.get_weights(self.sampled_output, utils.EOS_ID, time_major=True,
-                                       include_first_eos=True)   # FIXME: True or False?
-        self.reinforce_loss = decoders.sequence_loss(logits=self.outputs, targets=self.sampled_output,
-                                                     weights=weights, reward=reward)
-
-        if not decode_only:
-            self.update_op, self.sgd_update_op = self.get_update_op(self.reinforce_loss,
-                                                                    optimizers,
-                                                                    self.global_step)
-
-            if reinforce_baseline:
-                baseline_opt = tf.train.AdamOptimizer(learning_rate=0.001)
-                self.baseline_update_op, = self.get_update_op(self.baseline_loss, [baseline_opt])
-            else:
-                self.baseline_update_op = tf.constant(0.0)   # dummy tensor
-
     def step(self, session, data, update_model=True, align=False, use_sgd=False, **kwargs):
         if self.dropout is not None:
             session.run(self.dropout_on)
@@ -255,18 +202,7 @@ class Seq2SeqModel(object):
         batch = self.get_batch(data)
         encoder_inputs, targets, encoder_input_length = batch
 
-        # import ipdb; ipdb.set_trace()
-
         input_feed = {}
-
-        if self.oracle:
-            decoder_inputs = targets[:-1,:]    # feed decoder with full op
-            input_feed[self.decoder_inputs] = decoder_inputs
-
-            # learn to predict op type
-            targets[targets >= len(utils._START_VOCAB)] = utils.INS_ID   # no SUB op for now
-            targets[targets == utils.UNK_ID] = utils.INS_ID
-
         input_feed[self.targets] = targets
 
         for i in range(self.encoder_count):
@@ -283,140 +219,6 @@ class Seq2SeqModel(object):
 
         return namedtuple('output', 'loss attn_weights')(res['loss'], res.get('attn_weights'))
 
-
-    def reinforce_step(self, session, data, update_model=True, update_baseline=True, use_sgd=False,
-                       reward_function=None, vocabs=None, **kwargs):
-        assert vocabs or not self.use_edits
-
-        if vocabs:
-            src_vocab = vocabs[0]
-            trg_vocab = vocabs[-1]
-
-        if self.dropout is not None:
-            session.run(self.dropout_off)
-
-        batch = self.get_batch(data)
-        encoder_inputs, targets, encoder_input_length = batch
-
-        time_steps = targets.shape[0]
-        batch_size = targets.shape[1]
-
-        max_output_len = min(self.max_output_len, int(1.5 * time_steps))
-
-        if time_steps <= max_output_len:
-            targets = np.pad(targets,
-                [(0, max_output_len + 1 - time_steps), (0, 0)],
-                mode='constant', constant_values=utils.EOS_ID,)
-        target_length = [max_output_len] * batch_size
-
-        input_feed = {
-            self.targets: targets,
-            self.target_length: target_length,
-            self.feed_previous: 1.0,
-            self.feed_argmax: False   # sample from softmax
-        }
-
-        for i in range(self.encoder_count):
-            input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
-            input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
-
-        sampled_output, outputs, states = session.run([self.sampled_output, self.outputs, self.states],
-                                                       input_feed)
-
-        time_steps = sampled_output.shape[0]
-
-        if reward_function is None:
-            reward_function = 'sentence_bleu'
-
-        reward_function = getattr(evaluation, reward_function)
-
-        def compute_reward(output, target, source, partial=False):
-            j, = np.where(output == utils.EOS_ID)  # array of indices whose value is EOS_ID
-            if len(j) > 0:
-                output = output[:j[0]]
-
-            j, = np.where(target == utils.EOS_ID)
-            if len(j) > 0:
-                target = target[:j[0]]
-
-            j, = np.where(source == utils.EOS_ID)
-            if len(j) > 0:
-                source = source[:j[0]]
-
-            if self.use_edits:   # use source sentence and sequence of edits to reconstruct output and target sequence
-                # It makes more sense to compute the reward on the reconstructed sequences, than on the sequences
-                # of edits.
-                output = utils.reverse_edit_ids(source, output, src_vocab, trg_vocab)
-                target = utils.reverse_edit_ids(source, target, src_vocab, trg_vocab)
-
-            if partial:
-                reward = [reward_function(output[:i + 1], target) for i in range(len(output))]
-                reward = [0] + reward
-                reward += [reward[-1]] * (time_steps - len(reward) + 1)
-                reward = np.array(reward)
-                return reward[1:] - reward[:-1]
-            else:
-                return reward_function(output, target)
-
-        def compute_rewards(outputs, targets, partial=False):
-            return np.array([compute_reward(output, target, source, partial=partial)
-                             for output, target, source in zip(outputs.T, targets.T, encoder_inputs[0])])
-
-        targets = targets[1:]
-
-        if self.rollouts is not None and self.rollouts > 1:
-            rewards = []
-
-            for i in range(time_steps):
-
-                if i == time_steps - 1:
-                    rewards.append(compute_rewards(sampled_output, targets))
-                    continue
-
-                reward = 0
-
-                for _ in range(self.rollouts):
-                    prefix = sampled_output[:i + 1]
-
-                    input_ = np.expand_dims(sampled_output[i], axis=0)
-                    targets_ = targets[i + 1:]
-                    targets_ = np.concatenate([input_, targets_], axis=0)
-                    target_length_ = [time_steps - i - 1] * batch_size
-
-                    input_feed_ = dict(input_feed)
-                    input_feed_[self.targets] = targets_
-                    input_feed_[self.target_length] = target_length_
-                    input_feed_[self.beam_tensors.state] = states[i]
-
-                    outputs_ = session.run(self.sampled_output, input_feed_)
-                    outputs_ = np.concatenate([prefix, outputs_], axis=0)
-
-                    reward += compute_rewards(outputs_, targets) / self.rollouts
-
-                rewards.append(reward)
-
-            rewards = np.array(rewards)
-        elif self.partial_rewards:
-            rewards = compute_rewards(sampled_output, targets, partial=True).T
-        else:
-            rewards = compute_rewards(sampled_output, targets)
-            rewards = np.stack([rewards] * time_steps)
-
-        input_feed[self.rewards] = rewards
-        input_feed[self.outputs] = outputs
-        input_feed[self.sampled_output] = sampled_output
-
-        output_feed = {'loss': self.reinforce_loss, 'baseline_loss': self.baseline_loss}
-
-        if update_model:
-            output_feed['updates'] = self.sgd_update_op if use_sgd else self.update_op
-
-        if update_baseline:
-            output_feed['baseline_updates'] = self.baseline_update_op
-
-        res = session.run(output_feed, input_feed)
-
-        return namedtuple('output', 'loss baseline_loss')(res['loss'], res['baseline_loss'])
 
     def greedy_decoding(self, session, token_ids):
         if self.dropout is not None:
@@ -529,7 +331,7 @@ class Seq2SeqModel(object):
         hypotheses += finished_hypotheses
         scores = np.concatenate([scores, finished_scores])
 
-        if self.use_edits:
+        if self.pred_edits:
             hypothesis_len = [len(hyp) - hyp.count(utils.DEL_ID) for hyp in hypotheses]
         else:
             hypothesis_len = map(len, hypotheses)
@@ -565,12 +367,7 @@ class Seq2SeqModel(object):
 
         for *src_sentences, trg_sentence in data:
             for i, (encoder, src_sentence) in enumerate(zip(self.encoders, src_sentences)):
-                if encoder.binary:
-                    # when using binary input, the input sequence is a sequence of vectors,
-                    # instead of a sequence of indices
-                    pad = np.zeros([encoder.embedding_size], dtype=np.float32)
-                else:
-                    pad = utils.EOS_ID
+                pad = utils.EOS_ID
 
                 # pad sequences so that all sequences in the same batch have the same length
                 src_sentence = src_sentence[:max_input_len[i]]
@@ -590,9 +387,9 @@ class Seq2SeqModel(object):
         # convert lists to numpy arrays
         input_length = [np.array(input_length_, dtype=np.int32) for input_length_ in input_length]
         inputs = [
-            np.array(inputs_, dtype=(np.float32 if ext in self.binary_input else np.int32))
+            np.array(inputs_, dtype=np.int32)
             for ext, inputs_ in zip(self.encoder_names, inputs)
-        ]  # for binary input, the data type is float32
+        ]
 
         # starts with BOS and ends with EOS, shape is (time, batch_size)
         targets = np.array(targets).T
