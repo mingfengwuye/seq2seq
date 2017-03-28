@@ -119,22 +119,43 @@ class Seq2SeqModel(object):
         self.partial_rewards = partial_rewards
 
         if chained_encoders:
-            parameters = dict(encoders=encoders[:-1], decoder=encoders[-1], dropout=self.dropout,
-                              encoder_input_length=self.encoder_input_length[:-1])
-            attention_states, encoder_state = decoders.multi_encoder(self.encoder_inputs[:-1], **parameters)
+            parameters = dict(encoders=encoders[1:], decoder=encoders[0], dropout=self.dropout,
+                              encoder_input_length=self.encoder_input_length[1:])
 
+            # (batch_size, time_steps)
+            attention_states, encoder_state = decoders.multi_encoder(self.encoder_inputs[1:], **parameters)
+
+            # import ipdb; ipdb.set_trace()
             # FIXME decoder_inputs/encoder_inputs
+            # states: (time_steps, batch_size)
+            # encoder_inputs: (batch_size, time_steps)
+
+            decoder_inputs = tf.transpose(self.encoder_inputs[0], perm=(1, 0))
+            batch_size = tf.shape(decoder_inputs)[1]
+            pad = tf.ones(shape=tf.stack([1, batch_size]), dtype=tf.int32) * utils.BOS_ID
+            decoder_inputs = tf.concat([pad, decoder_inputs], axis=0)
+            decoder_input_length = 1 + self.encoder_input_length[0]
+
             outputs, attention_weights, decoder_outputs, sampled_output, states = decoders.attention_decoder(
                 attention_states=attention_states, initial_state=encoder_state,
-                decoder_inputs=self.encoder_inputs[-1], decoder_input_length=self.encoder_input_length[-1],
+                decoder_inputs=decoder_inputs, decoder_input_length=decoder_input_length,
                 **parameters
             )
 
+            states = tf.transpose(states, perm=(1, 0, 2))
+            self.attention_states = [states]   # or decoder_outputs
+            self.encoder_state = encoder_state
+
+            parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=self.dropout,
+                              encoder_input_length=self.encoder_input_length[:1])
+
+            # import ipdb; ipdb.set_trace()
         else:
             parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length, rollouts=1, sub_op=sub_op)
             self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
 
+        # self.attention_states[0] = tf.Print(self.attention_states[0], [tf.shape(states)], summarize=1000)
 
         (self.outputs, self.attention_weights, self.decoder_outputs, self.sampled_output,
          self.states) = decoders.attention_decoder(
@@ -143,13 +164,13 @@ class Seq2SeqModel(object):
             decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
         )
 
-        self.beam_tensors = decoders.beam_attention_decoder(
-            attention_states=self.attention_states, initial_state=self.encoder_state,
-            feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
-            decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
-        )
-
-        self.beam_output = decoders.softmax(self.outputs[0, :, :], temperature=softmax_temperature)
+        # self.beam_tensors = decoders.beam_attention_decoder(
+        #     attention_states=self.attention_states, initial_state=self.encoder_state,
+        #     feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
+        #     decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
+        # )
+        #
+        # self.beam_output = decoders.softmax(self.outputs[0, :, :], temperature=softmax_temperature)
 
         optimizers = self.get_optimizers(optimizer, learning_rate)
 
@@ -233,6 +254,8 @@ class Seq2SeqModel(object):
 
         batch = self.get_batch(data)
         encoder_inputs, targets, encoder_input_length = batch
+
+        # import ipdb; ipdb.set_trace()
 
         input_feed = {}
 
