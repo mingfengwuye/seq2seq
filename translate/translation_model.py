@@ -123,6 +123,9 @@ class TranslationModel(BaseTranslationModel):
         encoders_and_decoder = encoders + [decoder]
         self.binary_input = [encoder_or_decoder.binary for encoder_or_decoder in encoders_and_decoder]
         self.character_level = [encoder_or_decoder.character_level for encoder_or_decoder in encoders_and_decoder]
+        self.pred_characters = self.character_level[-1]
+        if self.use_edits:
+            self.character_level[-1] = False
 
         self.learning_rate = tf.Variable(learning_rate, trainable=False, name='learning_rate', dtype=tf.float32)
         self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * learning_rate_decay_factor)
@@ -156,7 +159,6 @@ class TranslationModel(BaseTranslationModel):
                   **kwargs):
         utils.debug('reading training data')
         max_len = [self.max_input_len for _ in self.src_ext] + [self.max_output_len]
-
         train_set = utils.read_dataset(self.filenames.train, self.extensions, self.vocabs,
                                        max_size=max_train_size, binary_input=self.binary_input,
                                        character_level=self.character_level, max_seq_len=max_len)
@@ -268,8 +270,8 @@ class TranslationModel(BaseTranslationModel):
                 if self.use_edits:
                     trg_tokens = utils.reverse_edits(src_tokens[0], ' '.join(trg_tokens)).split()
 
-                if self.character_level[-1]:
-                    yield ''.join(trg_tokens), raw
+                if self.pred_characters:
+                    yield ''.join(trg_tokens).replace('<SPACE>', ' '), raw
                 else:
                     yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
 

@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 
-# predict a sequence of edit ops
-# vocab and embeddings are shared beween MT and Edits
-# - there is no special embedding to encode the op type
-# - there is no SUB op
-
 raw_data=experiments/APE16/raw_data
 data_dir=experiments/APE16/edits/data_shared
 

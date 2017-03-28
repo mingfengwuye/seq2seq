@@ -2,6 +2,7 @@
 
 import argparse
 import functools
+import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument('source')
@@ -9,6 +10,7 @@ parser.add_argument('target')
 parser.add_argument('--subs', action='store_true')
 parser.add_argument('--ops-only', action='store_true')
 parser.add_argument('--words-only', action='store_true')
+parser.add_argument('--char-level', action='store_true')
 
 @functools.lru_cache(maxsize=1024)
 def levenshtein(src, trg, subs=False):
@@ -39,10 +41,16 @@ if __name__ == '__main__':
     args = parser.parse_args()
     assert not args.words_only or not args.ops_only
 
+    sys.setrecursionlimit(10000)
+
     with open(args.source) as src_file, open(args.target) as trg_file:
         for src_line, trg_line in zip(src_file, trg_file):
-            src_words = tuple(src_line.split())
-            trg_words = tuple(trg_line.split())
+            if args.char_level:
+                src_words = tuple(x if x.strip() else '<SPACE>' for x in src_line.strip('\n'))
+                trg_words = tuple(x if x.strip() else '<SPACE>' for x in trg_line.strip('\n'))
+            else:
+                src_words = tuple(src_line.split())
+                trg_words = tuple(trg_line.split())
 
             _, ops = levenshtein(src_words, trg_words, subs=args.subs)
 

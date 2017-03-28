@@ -10,6 +10,10 @@ from translate import utils
 from collections import namedtuple
 
 
+def deep_encoder(encoders, decoder):
+    pass
+
+
 def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, **kwargs):
     """
     Build multiple encoders according to the configuration in `encoders`, reading from `encoder_inputs`.
@@ -316,7 +320,8 @@ def attention(encoder, **kwargs):
     return attention_(encoder=encoder, **kwargs)
 
 
-def multi_attention(state, hidden_states, encoders, encoder_input_length, prev_weights=None, pos=None, **kwargs):
+def multi_attention(state, hidden_states, encoders, encoder_input_length, prev_weights=None, pos=None,
+                    aggregation_method='sum', **kwargs):
     """
     Same as `attention` except that prev_weights, hidden_states and encoders
     are lists whose length is the number of encoders.
@@ -336,7 +341,12 @@ def multi_attention(state, hidden_states, encoders, encoder_input_length, prev_w
         attns.append(context_vector)
         weights.append(weights_)
 
-    return tf.concat(attns, 1), weights
+    if aggregation_method == 'sum':
+        context_vector = tf.reduce_sum(tf.stack(attns, axis=2), axis=2)
+    else:
+        context_vector = tf.concat(attns, axis=1)
+
+    return context_vector, weights
 
 
 def get_embedding_function(decoder, encoders):
@@ -440,7 +450,8 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
         attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
-                                       encoder_input_length=encoder_input_length)
+                                       encoder_input_length=encoder_input_length,
+                                       aggregation_method=decoder.aggregation_method)
         input_shape = tf.shape(decoder_inputs)
         time_steps = input_shape[0]
         batch_size = input_shape[1]
@@ -710,7 +721,8 @@ def beam_attention_decoder(initial_state, attention_states, encoders, decoder, e
 
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
         attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
-                                       encoder_input_length=encoder_input_length)
+                                       encoder_input_length=encoder_input_length,
+                                       aggregation_method=decoder.aggregation_method)
         if decoder.oracle:
             output_size = len(utils._START_VOCAB)
         else:

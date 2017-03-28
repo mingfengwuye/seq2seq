@@ -44,7 +44,7 @@ class Seq2SeqModel(object):
                  freeze_variables=None, lm_weight=None, max_output_len=50, feed_previous=0.0,
                  optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
                  reinforce_baseline=True, softmax_temperature=1.0, loss_function='xent', rollouts=None,
-                 partial_rewards=False, sub_op=False, **kwargs):
+                 partial_rewards=False, sub_op=False, chained_encoders=False, **kwargs):
         self.lm_weight = lm_weight
         self.encoders = encoders
         self.decoder = decoder
@@ -118,17 +118,23 @@ class Seq2SeqModel(object):
 
         self.partial_rewards = partial_rewards
 
-        parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
-                          encoder_input_length=self.encoder_input_length, rollouts=1, sub_op=sub_op)
+        if chained_encoders:
+            parameters = dict(encoders=encoders[:-1], decoder=encoders[-1], dropout=self.dropout,
+                              encoder_input_length=self.encoder_input_length[:-1])
+            attention_states, encoder_state = decoders.multi_encoder(self.encoder_inputs[:-1], **parameters)
 
-        self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
+            # FIXME decoder_inputs/encoder_inputs
+            outputs, attention_weights, decoder_outputs, sampled_output, states = decoders.attention_decoder(
+                attention_states=attention_states, initial_state=encoder_state,
+                decoder_inputs=self.encoder_inputs[-1], decoder_input_length=self.encoder_input_length[-1],
+                **parameters
+            )
 
-        # (self.outputs, self.attention_weights, self.decoder_outputs, self.beam_tensors,
-        #  self.sampled_output, self.states) = decoders.attention_decoder(
-        #     attention_states=self.attention_states, initial_state=self.encoder_state,
-        #     feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
-        #     decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
-        # )
+        else:
+            parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
+                              encoder_input_length=self.encoder_input_length, rollouts=1, sub_op=sub_op)
+            self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
+
 
         (self.outputs, self.attention_weights, self.decoder_outputs, self.sampled_output,
          self.states) = decoders.attention_decoder(

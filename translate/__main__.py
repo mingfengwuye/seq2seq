@@ -155,7 +155,7 @@ def main(args=None):
         'use_lstm', 'time_pooling', 'attention_window_size', 'dynamic', 'binary', 'character_level', 'bidir',
         'load_embeddings', 'pooling_avg', 'swap_memory', 'parallel_iterations', 'input_layers',
         'residual_connections', 'attn_size', 'edit_window_size', 'op_embedding_size', 'oracle', 'use_edits',
-        'align_source', 'attention_type', 'use_context'
+        'align_source', 'attention_type', 'use_context', 'aggregation_method', 'chained_encoders'
     ]
     # TODO: independent model dir for each task
     task_parameters = [
