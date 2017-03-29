@@ -507,7 +507,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         def _time_step(time, input_, state, output, proj_outputs, decoder_outputs, samples, states, weights,
                        prev_weights, edit_pos):
             pos = None
-            if decoder.use_edits:
+            if decoder.use_edits and decoder.align_edit:
                 pos = tf.cast(edit_pos, tf.float32)
             pos = [pos] + [None] * (len(encoders) - 1)
 
@@ -651,7 +651,7 @@ def attention_decoder_new(decoder_inputs, initial_state, attention_states, encod
             return context_vector, proj_output
 
         pos = None
-        if decoder.use_edits:
+        if decoder.use_edits and decoder.align_edit:
             pos = tf.cast(edit_pos, tf.float32)
 
         context_vector, output = get_output(initial_input, state, pos=pos)
@@ -690,7 +690,7 @@ def attention_decoder_new(decoder_inputs, initial_state, attention_states, encod
                 skip_conditionals=True)
 
             pos = None
-            if decoder.use_edits:
+            if decoder.use_edits and decoder.align_edit:
                 pos = tf.cast(edit_pos, tf.float32)
 
             context_vector, output = get_output(input_, state, pos=pos)
@@ -756,7 +756,7 @@ def beam_attention_decoder(initial_state, attention_states, encoders, decoder, e
         initial_data = tf.concat([initial_state, initial_context_vector, initial_edit_pos], axis=1)
         decoder_input = tf.placeholder(tf.int64, shape=[None])
 
-        if decoder.use_edits:
+        if decoder.use_edits and decoder.align_edit:
             is_keep = tf.equal(decoder_input, utils.KEEP_ID)
             is_sub = tf.equal(decoder_input, utils.SUB_ID)
             is_del = tf.equal(decoder_input, utils.DEL_ID)
