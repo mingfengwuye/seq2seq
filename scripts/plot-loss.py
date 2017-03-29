@@ -41,7 +41,7 @@ for log_file in args.log_files:
 
     with open(log_file) as f:
         for line in f:
-            m = re.search('main step (\d+)', line)
+            m = re.search('step (\d+)', line)
             if m:
                 current_step = int(m.group(1))
 

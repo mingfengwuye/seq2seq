@@ -18,7 +18,13 @@ model_dir: models/debug
 batch_size: 32
 dev_prefix: dev
 
+# optimizer: 'adam'
 optimizer: 'adam'
+sgd_after_n_epoch: 10
+learning_rate: 0.2
+decay_after_n_epoch: 15
+decay_every_n_epoch: 1
+learning_rate_decay_factor: 0.95
 
 steps_per_checkpoint: 500
 steps_per_eval: 500

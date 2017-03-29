@@ -4,115 +4,21 @@ import pickle
 import time
 import sys
 import math
-import numpy as np
 import shutil
 from translate import utils, evaluation
 from translate.seq2seq_model import Seq2SeqModel
 
 
-class BaseTranslationModel(object):
-    def __init__(self, name, checkpoint_dir, keep_best=1, score_function='corpus_scores', **kwargs):
-        self.name = name
-        self.keep_best = keep_best
-        self.checkpoint_dir = checkpoint_dir
-        self.saver = None
-        self.global_step = None
-
-        try:
-            self.reversed_scores = getattr(evaluation, score_function).reversed  # the lower the better
-        except AttributeError:
-            self.reversed_scores = False  # the higher the better
-
-    def manage_best_checkpoints(self, step, score):
-        score_filename = os.path.join(self.checkpoint_dir, 'scores.txt')
-        # try loading previous scores
-        try:
-            with open(score_filename) as f:
-                # list of pairs (score, step)
-                scores = [(float(line.split()[0]), int(line.split()[1])) for line in f]
-        except IOError:
-            scores = []
-
-        if any(step_ >= step for _, step_ in scores):
-            utils.warn('inconsistent scores.txt file')
-
-        best_scores = sorted(scores, reverse=not self.reversed_scores)[:self.keep_best]
-
-        def full_path(filename):
-            return os.path.join(self.checkpoint_dir, filename)
-
-        lower = lambda x, y: y < x if self.reversed_scores else lambda x, y: x < y
-
-        if any(lower(score_, score) for score_, _ in best_scores) or not best_scores:
-            # if this checkpoint is in the top, save it under a special name
-
-            prefix = 'translate-{}'.format(step)
-            dest_prefix = 'best-{}'.format(step)
-
-            for filename in os.listdir(self.checkpoint_dir):
-                if filename.startswith(prefix):
-                    dest_filename = filename.replace(prefix, dest_prefix)
-                    shutil.copy(full_path(filename), full_path(dest_filename))
-
-                    # FIXME (wrong `best`)
-                    # also copy to `best` if this checkpoint is the absolute best
-                    if all(lower(score_, score) for score_, _ in best_scores):
-                        dest_filename = filename.replace(prefix, 'best')
-                        shutil.copy(full_path(filename), full_path(dest_filename))
-
-            best_scores = sorted(best_scores + [(score, step)], reverse=not self.reversed_scores)
-
-            for _, step_ in best_scores[self.keep_best:]:
-                # remove checkpoints that are not in the top anymore
-                prefix = 'best-{}'.format(step_)
-                for filename in os.listdir(self.checkpoint_dir):
-                    if filename.startswith(prefix):
-                        os.remove(full_path(filename))
-
-        # save bleu scores
-        scores.append((score, step))
-
-        with open(score_filename, 'w') as f:
-            for score_, step_ in scores:
-                f.write('{:.2f} {}\n'.format(score_, step_))
-
-    def initialize(self, sess, load=None, reset=False, reset_learning_rate=False,
-                   max_to_keep=1, keep_every_n_hours=0, **kwargs):
-        if keep_every_n_hours <= 0 or keep_every_n_hours is None:
-            keep_every_n_hours = float('inf')
-
-        self.saver = tf.train.Saver(max_to_keep=max_to_keep, keep_checkpoint_every_n_hours=keep_every_n_hours,
-                                    sharded=False)
-
-        sess.run(tf.global_variables_initializer())
-        blacklist = ['dropout_keep_prob']
-
-        if reset_learning_rate or reset:
-            blacklist.append('learning_rate')
-        if reset:
-            blacklist.append('global_step')
-        
-        if load:  # load partial checkpoints
-            for checkpoint in load:  # checkpoint files to load
-                load_checkpoint(sess, None, checkpoint, blacklist=blacklist)
-        elif not reset:
-            load_checkpoint(sess, self.checkpoint_dir, blacklist=blacklist)
-
-    def save(self, sess):
-        save_checkpoint(sess, self.saver, self.checkpoint_dir, self.global_step)
-
-
-class TranslationModel(BaseTranslationModel):
-    def __init__(self, name, encoders, decoder, checkpoint_dir, learning_rate, learning_rate_decay_factor, batch_size,
-                 keep_best=1, max_input_len=None, max_output_len=None, dev_prefix=None, **kwargs):
-        super(TranslationModel, self).__init__(name, checkpoint_dir, keep_best, **kwargs)
+class TranslationModel:
+    def __init__(self, encoders, decoder, checkpoint_dir, learning_rate, learning_rate_decay_factor,
+                 batch_size, keep_best=1, max_input_len=None, max_output_len=None, dev_prefix=None,
+                 score_function='corpus_scores', **kwargs):
 
         self.batch_size = batch_size
         self.src_ext = [encoder.get('ext') or encoder.name for encoder in encoders]
         self.trg_ext = decoder.get('ext') or decoder.name
         self.pred_edits = decoder.pred_edits
         self.dev_prefix = dev_prefix
-        self.align_source_id = ([i for i, encoder in enumerate(encoders) if encoder.align_source] + [0])[0]
 
         self.extensions = self.src_ext + [self.trg_ext]
 
@@ -131,17 +37,17 @@ class TranslationModel(BaseTranslationModel):
         with tf.device('/cpu:0'):
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
-        self.filenames = utils.get_filenames(extensions=self.extensions, dev_prefix=dev_prefix, **kwargs)
+        self.filenames = utils.get_filenames(extensions=self.extensions, dev_prefix=dev_prefix,
+                                             **kwargs)
         # TODO: check that filenames exist
         utils.debug('reading vocabularies')
-        self._read_vocab()
+        self.read_vocab()
 
         for encoder_or_decoder, vocab in zip(encoders + [decoder], self.vocabs):
             if encoder_or_decoder.vocab_size <= 0 and vocab is not None:
                 encoder_or_decoder.vocab_size = len(vocab.reverse)
 
-        # main model
-        utils.debug('creating model {}'.format(name))
+        utils.debug('creating model')
         self.seq2seq_model = Seq2SeqModel(encoders, decoder, self.learning_rate, self.global_step,
                                           max_input_len=max_input_len, max_output_len=max_output_len, **kwargs)
 
@@ -149,9 +55,14 @@ class TranslationModel(BaseTranslationModel):
         self.dev_batches = None
         self.train_size = None
         self.use_sgd = False
-
+        self.saver = None
+        self.keep_best = keep_best
         self.checkpoint_dir = checkpoint_dir
-        # dest_vocab_path = os.path.join(model_dir, 'data', '{}.vocab'.format(task.name))
+
+        try:
+            self.reversed_scores = getattr(evaluation, score_function).reversed  # the lower the better
+        except AttributeError:
+            self.reversed_scores = False  # the higher the better
 
     def read_data(self, max_train_size, max_dev_size, read_ahead=10, batch_mode='standard', shuffle=True,
                   **kwargs):
@@ -174,7 +85,7 @@ class TranslationModel(BaseTranslationModel):
         # subset of the dev set whose perplexity is periodically evaluated
         self.dev_batches = [utils.get_batches(dev_set, batch_size=self.batch_size) for dev_set in dev_sets]
 
-    def _read_vocab(self):
+    def read_vocab(self):
         # don't try reading vocabulary for encoders that take pre-computed features
         self.vocabs = [
             utils.initialize_vocabulary(vocab_path)
@@ -196,10 +107,10 @@ class TranslationModel(BaseTranslationModel):
 
             utils.log("  {} eval: loss {:.2f}".format(prefix, eval_loss))
 
-    def _decode_sentence(self, sess, sentence_tuple, beam_size=1, remove_unk=False, early_stopping=True):
-        return next(self._decode_batch(sess, [sentence_tuple], beam_size, remove_unk, early_stopping))
+    def decode_sentence(self, sess, sentence_tuple, beam_size=1, remove_unk=False, early_stopping=True):
+        return next(self.decode_batch(sess, [sentence_tuple], beam_size, remove_unk, early_stopping))
 
-    def _decode_batch(self, sess, sentence_tuples, batch_size, beam_size=1, remove_unk=False, early_stopping=True):
+    def decode_batch(self, sess, sentence_tuples, batch_size, beam_size=1, remove_unk=False, early_stopping=True):
         beam_search = beam_size > 1 or isinstance(sess, list)
 
         if beam_search:
@@ -240,7 +151,6 @@ class TranslationModel(BaseTranslationModel):
 
                 raw = ' '.join(trg_tokens)
 
-                # utils.debug(' '.join(trg_tokens))
                 if remove_unk:
                     trg_tokens = [token for token in trg_tokens if token != utils._UNK]
 
@@ -253,8 +163,6 @@ class TranslationModel(BaseTranslationModel):
                     yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
 
     def align(self, sess, output=None, **kwargs):
-        # if len(self.src_ext) != 1:
-        #     raise NotImplementedError
         # TODO: include <S> and </S>
 
         if len(self.filenames.test) != len(self.extensions):
@@ -273,10 +181,10 @@ class TranslationModel(BaseTranslationModel):
             trg_tokens = [self.trg_vocab.reverse[i] if i < len(self.trg_vocab.reverse) else utils._UNK
                           for i in token_ids[-1]]
 
-            weights = weights.squeeze()[:len(trg_tokens),:len(token_ids[self.align_source_id])].T
+            weights = weights.squeeze()[:len(trg_tokens),:len(token_ids[0])].T
             max_len = weights.shape[0]
 
-            src_tokens = lines[self.align_source_id].split()[:max_len]
+            src_tokens = lines[0].split()[:max_len]
 
             output_file = '{}.{}.svg'.format(output, line_id + 1) if output is not None else None
 
@@ -306,8 +214,8 @@ class TranslationModel(BaseTranslationModel):
                 batch_size = self.batch_size
                 lines = list(lines)
 
-            hypothesis_iter = self._decode_batch(sess, lines, batch_size, beam_size=beam_size,
-                                                 early_stopping=early_stopping, remove_unk=remove_unk)
+            hypothesis_iter = self.decode_batch(sess, lines, batch_size, beam_size=beam_size,
+                                                early_stopping=early_stopping, remove_unk=remove_unk)
 
             for hypothesis, raw in hypothesis_iter:
                 if raw_output:
@@ -361,8 +269,8 @@ class TranslationModel(BaseTranslationModel):
                 *src_sentences, trg_sentences = zip(*lines)
                 src_sentences = list(zip(*src_sentences))
 
-                hypothesis_iter = self._decode_batch(sess, lines, self.batch_size, beam_size=beam_size,
-                                                     early_stopping=early_stopping, remove_unk=remove_unk)
+                hypothesis_iter = self.decode_batch(sess, lines, self.batch_size, beam_size=beam_size,
+                                                    early_stopping=early_stopping, remove_unk=remove_unk)
                 for i, (sources, hypothesis, reference) in enumerate(zip(src_sentences, hypothesis_iter,
                                                                          trg_sentences)):
                     hypothesis, raw = hypothesis
@@ -387,12 +295,8 @@ class TranslationModel(BaseTranslationModel):
             score, score_summary = getattr(evaluation, score_function)(hypotheses, references, script_dir=script_dir)
 
             # print scoring information
-            score_info = []
-            if self.name is not None:
-                score_info.append(self.name)
+            score_info = [prefix, 'score={:.2f}'.format(score)]
 
-            score_info.append(prefix)
-            score_info.append('score={:.2f}'.format(score))
             if score_summary:
                 score_info.append(score_summary)
 
@@ -402,18 +306,16 @@ class TranslationModel(BaseTranslationModel):
         return scores
 
     def train(self, sess, beam_size, steps_per_checkpoint, steps_per_eval=None, eval_output=None, max_steps=0,
-              max_epochs=0, eval_burn_in=0, decay_if_no_progress=5, decay_after_n_epoch=None, decay_every_n_epoch=None,
-              sgd_after_n_epoch=None, **kwargs):
+              max_epochs=0, eval_burn_in=0, decay_if_no_progress=None, decay_after_n_epoch=None,
+              decay_every_n_epoch=None, sgd_after_n_epoch=None, **kwargs):
         utils.log('reading training and development data')
 
         self.read_data(**kwargs)
         # those parameters are used to track the progress of each task
-        self.loss, self.time, self.steps = 0, 0, 0
-        self.baseline_loss = 0
-        self.previous_losses = []
+        loss, time_, steps = 0, 0, 0
+        previous_losses = []
         global_step = self.global_step.eval(sess)
-        self.epoch = self.batch_size * global_step // self.train_size
-        self.last_decay = global_step
+        last_decay = global_step
 
         for _ in range(global_step):  # read all the data up to this step
             next(self.batch_iterator)
@@ -423,43 +325,42 @@ class TranslationModel(BaseTranslationModel):
         while True:
             start_time = time.time()
             res = self.train_step(sess)
-            self.loss += res.loss
+            loss += res.loss
 
-            self.time += time.time() - start_time
-            self.steps += 1
+            time_ += time.time() - start_time
+            steps += 1
             global_step = self.global_step.eval(sess)
 
-            epoch = self.batch_size * global_step / self.train_size
-            self.epoch = int(epoch) + 1
+            epoch = self.batch_size * global_step // self.train_size
 
             if decay_after_n_epoch is not None and epoch >= decay_after_n_epoch:
-                if decay_every_n_epoch is not None and (self.batch_size * (global_step - self.last_decay)
-                                                            >= decay_every_n_epoch * self.train_size):
+                if decay_every_n_epoch is not None and (self.batch_size * (global_step - last_decay)
+                                                        >= decay_every_n_epoch * self.train_size):
                     sess.run(self.learning_rate_decay_op)
                     utils.debug('  decaying learning rate to: {:.4f}'.format(self.learning_rate.eval()))
-                    self.last_decay = global_step
+                    last_decay = global_step
 
             if sgd_after_n_epoch is not None and epoch >= sgd_after_n_epoch:
                 if not self.use_sgd:
-                    utils.debug('  epoch {}, starting to use SGD'.format(self.epoch))
+                    utils.debug('epoch {}, starting to use SGD'.format(epoch + 1))
                     self.use_sgd = True
 
             if steps_per_checkpoint and global_step % steps_per_checkpoint == 0:
-                loss = self.loss / self.steps
-                step_time = self.time / self.steps
+                loss = loss / steps
+                step_time = time_ / steps
 
-                utils.log('{} step {} epoch {} learning rate {:.4f} step-time {:.4f} loss {:.4f}'.format(
-                    self.name, global_step, self.epoch, self.learning_rate.eval(),
-                    step_time, loss))
+                utils.log('step {} epoch {} learning rate {:.4f} step-time {:.4f} loss {:.4f}'.format(
+                    global_step, epoch + 1, self.learning_rate.eval(), step_time, loss)
+                )
 
-                if decay_if_no_progress and len(self.previous_losses) >= decay_if_no_progress:
-                    if loss >= max(self.previous_losses[:decay_if_no_progress]):
+                if decay_if_no_progress and len(previous_losses) >= decay_if_no_progress:
+                    if loss >= max(previous_losses[:decay_if_no_progress]):
                         sess.run(self.learning_rate_decay_op)
 
-                self.previous_losses.append(loss)
-                self.loss, self.time, self.steps = 0, 0, 0
-                self.eval_step(sess)
+                previous_losses.append(loss)
+                loss, time_, steps = 0, 0, 0
 
+                self.eval_step(sess)
                 self.save(sess)
 
             if steps_per_eval and global_step % steps_per_eval == 0 and 0 <= eval_burn_in <= global_step:
@@ -470,23 +371,100 @@ class TranslationModel(BaseTranslationModel):
 
                     # if there are several dev files, we define several output files
                     output = [
-                        os.path.join(eval_output, '{}.{}.{}'.format(self.name, prefix, global_step))
+                        os.path.join(eval_output, '{}.{}.out'.format(prefix, global_step))
                         for prefix in self.dev_prefix
                     ]
 
                 # kwargs_ = {**kwargs, 'output': output}
                 kwargs_ = dict(kwargs)
                 kwargs_['output'] = output
-                scores_ = self.evaluate(sess, beam_size, on_dev=True, **kwargs_)
-                score = scores_[0]  # in case there are several dev files, only the first one counts
+                score, *_ = self.evaluate(sess, beam_size, on_dev=True, **kwargs_)
                 self.manage_best_checkpoints(global_step, score)
 
             if 0 < max_steps <= global_step or 0 < max_epochs <= epoch:
                 raise utils.FinishedTrainingException
 
+    def manage_best_checkpoints(self, step, score):
+        score_filename = os.path.join(self.checkpoint_dir, 'scores.txt')
+        # try loading previous scores
+        try:
+            with open(score_filename) as f:
+                # list of pairs (score, step)
+                scores = [(float(line.split()[0]), int(line.split()[1])) for line in f]
+        except IOError:
+            scores = []
+
+        if any(step_ >= step for _, step_ in scores):
+            utils.warn('inconsistent scores.txt file')
+
+        best_scores = sorted(scores, reverse=not self.reversed_scores)[:self.keep_best]
+
+        def full_path(filename):
+            return os.path.join(self.checkpoint_dir, filename)
+
+        lower = lambda x, y: y < x if self.reversed_scores else lambda x, y: x < y
+
+        if any(lower(score_, score) for score_, _ in best_scores) or not best_scores:
+            # if this checkpoint is in the top, save it under a special name
+
+            prefix = 'translate-{}'.format(step)
+            dest_prefix = 'best-{}'.format(step)
+
+            for filename in os.listdir(self.checkpoint_dir):
+                if filename.startswith(prefix):
+                    dest_filename = filename.replace(prefix, dest_prefix)
+                    shutil.copy(full_path(filename), full_path(dest_filename))
+
+                    # FIXME (wrong `best`)
+                    # also copy to `best` if this checkpoint is the absolute best
+                    if all(lower(score_, score) for score_, _ in best_scores):
+                        dest_filename = filename.replace(prefix, 'best')
+                        shutil.copy(full_path(filename), full_path(dest_filename))
+
+            best_scores = sorted(best_scores + [(score, step)], reverse=not self.reversed_scores)
+
+            for _, step_ in best_scores[self.keep_best:]:
+                # remove checkpoints that are not in the top anymore
+                prefix = 'best-{}'.format(step_)
+                for filename in os.listdir(self.checkpoint_dir):
+                    if filename.startswith(prefix):
+                        os.remove(full_path(filename))
+
+        # save scores
+        scores.append((score, step))
+
+        with open(score_filename, 'w') as f:
+            for score_, step_ in scores:
+                f.write('{:.2f} {}\n'.format(score_, step_))
+
+    def initialize(self, sess, load=None, reset=False, reset_learning_rate=False, max_to_keep=1,
+                   keep_every_n_hours=0, **kwargs):
+        if keep_every_n_hours <= 0 or keep_every_n_hours is None:
+            keep_every_n_hours = float('inf')
+
+        self.saver = tf.train.Saver(max_to_keep=max_to_keep, keep_checkpoint_every_n_hours=keep_every_n_hours,
+                                    sharded=False)
+
+        sess.run(tf.global_variables_initializer())
+        blacklist = ['dropout_keep_prob']
+
+        if reset_learning_rate or reset:
+            blacklist.append('learning_rate')
+        if reset:
+            blacklist.append('global_step')
+
+        if load:  # load partial checkpoints
+            for checkpoint in load:  # checkpoint files to load
+                load_checkpoint(sess, None, checkpoint, blacklist=blacklist)
+        elif not reset:
+            load_checkpoint(sess, self.checkpoint_dir, blacklist=blacklist)
+
+    def save(self, sess):
+        save_checkpoint(sess, self.saver, self.checkpoint_dir, self.global_step)
+
 
 def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
-    """ `checkpoint_dir` should be unique to this model
+    """
     if `filename` is None, we load last checkpoint, otherwise
       we ignore `checkpoint_dir` and load the given checkpoint file.
     """
@@ -520,7 +498,6 @@ def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
 
 
 def save_checkpoint(sess, saver, checkpoint_dir, step=None, name=None):
-    """ `checkpoint_dir` should be unique to this model """
     var_file = os.path.join(checkpoint_dir, 'vars.pkl')
     name = name or 'translate'
     os.makedirs(checkpoint_dir, exist_ok=True)

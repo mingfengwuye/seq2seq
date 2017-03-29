@@ -1,10 +1,3 @@
-"""Script for training translation models and decoding from them
-
-See the following papers for more information on neural translation models
- * http://arxiv.org/abs/1409.3215
- * http://arxiv.org/abs/1409.0473
- * http://arxiv.org/abs/1412.2007
-"""
 import os
 import sys
 import logging
@@ -51,20 +44,6 @@ parser.add_argument('--remove-unk', action='store_const', const=True)
 parser.add_argument('--raw-output', action='store_const', const=True)
 parser.add_argument('--pred-edits', action='store_const', const=True)
 parser.add_argument('--model-dir')
-
-
-"""
-Benchmarks:
-Scores on English->French WMT14 (ntst14)
-- Bahdanau et al.:  28.45 (shallow attention-based MT with max-out layer, 30k vocabulary, after 667k iterations)
-- Baseline (Moses): 33.30
-- Sutskever et al.: 30.59 (deep LSTMs with large vocab, huge model but without attention)
-- Jean et al.:      29.97 (same model as Bahdanau et al. + tuning while freezing embeddings)
-                    32.68 (with larger vocabulary + sampled softmax)
-- Us:               28.05 (after 450k iterations, with Adadelta + SGD)
-                    28.69 (after 940k iterations, with Adadelta + SGD)
-                    29.75 (with subword units, after 200k iterations, with Adam + SGD)
-"""
 
 
 def main(args=None):
@@ -138,14 +117,12 @@ def main(args=None):
     # list of encoder and decoder parameter names (each encoder and decoder can have a different value
     # for those parameters)
     model_parameters = [
-        'cell_size', 'layers', 'vocab_size', 'embedding_size', 'attention_filters', 'attention_filter_length',
-        'use_lstm', 'time_pooling', 'attention_window_size', 'character_level', 'bidir',
-        'load_embeddings', 'pooling_avg', 'swap_memory', 'parallel_iterations', 'input_layers',
-        'residual_connections', 'attn_size', 'edit_window_size', 'op_embedding_size', 'pred_edits',
-        'align_source', 'attention_type', 'use_context', 'aggregation_method', 'chained_encoders'
+        'cell_size', 'layers', 'vocab_size', 'embedding_size', 'use_lstm', 'attention_window_size', 'character_level',
+        'bidir', 'swap_memory', 'parallel_iterations', 'attn_size', 'pred_edits', 'attention_type', 'use_context',
+        'aggregation_method', 'chained_encoders'
     ]
 
-    if isinstance(config.dev_prefix, str):  # for back-compatibility with old config files
+    if isinstance(config.dev_prefix, str):
         config.dev_prefix = [config.dev_prefix]
 
     # convert dicts to AttrDicts for convenience
@@ -154,10 +131,7 @@ def main(args=None):
 
     for encoder_or_decoder in config.encoders + [config.decoder]:
         for parameter in model_parameters:
-            if parameter in encoder_or_decoder:
-                continue
-            else:
-                encoder_or_decoder[parameter] = config.get(parameter)
+            encoder_or_decoder.setdefault(parameter, config.get(parameter))
 
     # log parameters
     utils.debug('program arguments')
@@ -175,15 +149,10 @@ def main(args=None):
 
     with tf.device(device):
         checkpoint_dir = os.path.join(config.model_dir, 'checkpoints')
-        # All parameters except recurrent connexions and attention parameters are initialized with this.
-        # Recurrent connexions are initialized with orthogonal matrices, and the parameters of the attention model
-        # with a standard deviation of 0.001
-        if config.weight_scale:
-            initializer = tf.random_normal_initializer(stddev=config.weight_scale)
-        else:
-            initializer = None
 
+        initializer = tf.random_normal_initializer(stddev=config.weight_scale) if config.weight_scale else None
         tf.get_variable_scope().set_initializer(initializer)
+
         decode_only = args.decode is not None or args.eval or args.align  # exempt from creating gradient ops
         model = TranslationModel(name='main', checkpoint_dir=checkpoint_dir, decode_only=decode_only, **config)
 

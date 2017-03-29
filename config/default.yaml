@@ -13,7 +13,6 @@ decay_every_n_epoch: null
 decay_after_n_epoch: 0         # start decaying learning rate after this many epochs
 decay_if_no_progress: null     # measure average loss over this many checkpoints, and decay if no progress
 sgd_after_n_epoch: null        # use SGD optimizer after this many epochs (instead of adam/adadelta)
-reinforce_after_n_epoch: null  # switch to a reinforce loss after this many epochs TODO
 
 # batch iteration parameters
 batch_mode: 'standard'   # standard, random, or strict
@@ -44,16 +43,9 @@ bidir: True              # use bidirectional encoders
 attention_type: global   # global, local, none, last_state, average
 attention_window_size: 0 # window size for local attention mechanism
 edit_window_size: null
-attention_filters: 0     # number of convolution filters to use in the attention mechanism
-attention_filter_length: 0  # length of the convolution filters
 vocab_size: 0            # number of symbols of each encoder and decoder (0: size of vocab files)
 use_lstm: False          # use LSTM units instead of GRU units
 character_level: False   # input sequence is at the character level
-load_embeddings: []      # load pre-trained embeddings for those extensions
-time_pooling: null       # ratios of time steps to skip between layers
-pooling_avg: False       # average previous steps instead of skipping them
-input_layers: []         # fully connected layers between the embeddings and the RNN
-residual_connections: False  # connections between nth and nth+2 layer for easier gradient flow
 weight_scale: null       # if not null, initialize all weights to a normal distribution with this stdev
 
 # data
@@ -63,8 +55,7 @@ train_prefix: train      # name of the training corpus
 script_dir: scripts      # directory where the scripts are kepts (in particular the scoring scripts)
 dev_prefix: [dev]        # names of the development corpora
 vocab_prefix: vocab      # name of the vocabulary files
-embedding_prefix: vectors  # name of the embeddings files
-load: []                # list of checkpoints to load (in this specific order) after main checkpoint
+load: []                 # list of checkpoints to load (in this specific order) after main checkpoint
 max_input_len: 50        # maximum length of the input sequences (strongly affects memory usage)
 
 # decoding

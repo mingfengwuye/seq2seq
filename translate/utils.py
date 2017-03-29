@@ -151,8 +151,7 @@ def sentence_to_token_ids(sentence, vocabulary, character_level=False):
     return [vocabulary.get(w, UNK_ID) for w in sentence]
 
 
-def get_filenames(data_dir, extensions, train_prefix, dev_prefix, vocab_prefix,
-                  embedding_prefix, dest_vocab_path=None, lm_file=None, **kwargs):
+def get_filenames(data_dir, model_dir, extensions, train_prefix, dev_prefix, vocab_prefix, **kwargs):
     """
     Get a bunch of file prefixes and extensions, and output the list of filenames to be used
     by the model.
@@ -162,41 +161,34 @@ def get_filenames(data_dir, extensions, train_prefix, dev_prefix, vocab_prefix,
     :param train_prefix: name of the training corpus (usually 'train')
     :param dev_prefix: name of the dev corpus (usually 'dev')
     :param vocab_prefix: prefix of the vocab files (usually 'vocab')
-    :param embedding_prefix: prefix of the embedding files
-    :param lm_file: full path to a language model file in the ARPA format
     :param kwargs: optional contains an additional 'decode', 'eval' or 'align' parameter
     :return: namedtuple containing the filenames
     """
     train_path = os.path.join(data_dir, train_prefix)
     dev_path = [os.path.join(data_dir, prefix) for prefix in dev_prefix]
-    embedding_path = os.path.join(data_dir, embedding_prefix)
-    lm_path = lm_file
 
     train = ['{}.{}'.format(train_path, ext) for ext in extensions]
     dev = [['{}.{}'.format(path, ext) for ext in extensions] for path in dev_path]
 
     vocab_path = os.path.join(data_dir, vocab_prefix)
+    vocab_src = ['{}.{}'.format(vocab_path, ext) for ext in extensions]
+
+    vocab_path = os.path.join(model_dir, 'data', 'vocab')
     vocab = ['{}.{}'.format(vocab_path, ext) for ext in extensions]
+    os.makedirs(os.path.dirname(vocab_path), exist_ok=True)
 
-    if dest_vocab_path is not None:
-        vocab_dest = ['{}.{}'.format(dest_vocab_path, ext) for ext in extensions]
-        os.makedirs(os.path.dirname(dest_vocab_path), exist_ok=True)
-
-        for src, dest in zip(vocab, vocab_dest):
-            if not os.path.exists(dest):
-                debug('copying vocab to {}'.format(dest))
-                shutil.copy(src, dest)
-        vocab = vocab_dest
-
-    embeddings = ['{}.{}'.format(embedding_path, ext) for ext in extensions]
+    for src, dest in zip(vocab_src, vocab):
+        if not os.path.exists(dest):
+            debug('copying vocab to {}'.format(dest))
+            shutil.copy(src, dest)
 
     test = kwargs.get('decode')  # empty list means we decode from standard input
     if test is None:
         test = test or kwargs.get('eval')
         test = test or kwargs.get('align')
 
-    filenames = namedtuple('filenames', ['train', 'dev', 'test', 'vocab', 'lm_path', 'embeddings'])
-    return filenames(train, dev, test, vocab, lm_path, embeddings)
+    filenames = namedtuple('filenames', ['train', 'dev', 'test', 'vocab'])
+    return filenames(train, dev, test, vocab)
 
 
 def read_dataset(paths, extensions, vocabs, max_size=None, character_level=None, sort_by_length=False,

@@ -12,7 +12,6 @@ from collections import Counter, OrderedDict
 def sentence_bleu(hypothesis, reference, smoothing=True, order=4, **kwargs):
     """
     Compute sentence-level BLEU score between a translation hypothesis and a reference.
-    All reward functions used for REINFORCE should follow this interface.
 
     :param hypothesis: list of tokens or token ids
     :param reference: list of tokens or token ids
