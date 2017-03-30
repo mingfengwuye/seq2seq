@@ -23,6 +23,7 @@ import itertools
 from translate import utils, evaluation
 from translate import decoders
 from collections import namedtuple
+from translate.rnn import unsafe_decorator
 
 
 class Seq2SeqModel(object):
@@ -152,7 +153,8 @@ class Seq2SeqModel(object):
             # import ipdb; ipdb.set_trace()
         else:
             parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
-                              encoder_input_length=self.encoder_input_length, rollouts=1, sub_op=sub_op)
+                              encoder_input_length=self.encoder_input_length, rollouts=1, sub_op=sub_op,
+                              aggregation_method=decoder.aggregation_method)
             self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
 
         # self.attention_states[0] = tf.Print(self.attention_states[0], [tf.shape(states)], summarize=1000)

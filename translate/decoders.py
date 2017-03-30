@@ -14,7 +14,7 @@ def deep_encoder(encoders, decoder):
     pass
 
 
-def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, **kwargs):
+def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, aggregation_method='concat', **kwargs):
     """
     Build multiple encoders according to the configuration in `encoders`, reading from `encoder_inputs`.
     The result is a list of the outputs produced by those encoders (for each time-step), and their final state.
@@ -112,7 +112,13 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, 
             encoder_outputs.append(encoder_outputs_)
             encoder_states.append(encoder_state_)
 
-    encoder_state = tf.concat(encoder_states, 1)
+    encoder_state = tf.concat(encoder_states, axis=1)
+
+    if aggregation_method == 'sum':
+        encoder_state = tf.reduce_sum(tf.stack(encoder_states, axis=2), axis=2)
+    else:
+        encoder_state = tf.concat(encoder_states, 1)
+
     return encoder_outputs, encoder_state
 
 
