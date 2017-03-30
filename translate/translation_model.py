@@ -181,18 +181,28 @@ class TranslationModel:
             trg_tokens = [self.trg_vocab.reverse[i] if i < len(self.trg_vocab.reverse) else utils._UNK
                           for i in token_ids[-1]]
 
-            weights = weights.squeeze()[:len(trg_tokens),:len(token_ids[0])].T
+            if self.pred_edits:
+                src_tokens = lines[0].split()
+                new_trg_tokens = []
+                for trg_token in trg_tokens:
+                    if len(src_tokens) > 0 and trg_token == utils._KEEP or trg_token == utils._DEL:
+                        src_token = src_tokens.pop(0)
+                        trg_token = '{} {}'.format(src_token, trg_token)
+                    else:
+                        trg_token = '{} {}'.format(trg_token, utils._INS)
+
+                    new_trg_tokens.append(trg_token)
+                trg_tokens = new_trg_tokens
+
+            weights = weights.squeeze()
             max_len = weights.shape[0]
 
-            src_tokens = lines[0].split()[:max_len]
+            trg_tokens.append(utils._EOS)
+            src_tokens = lines[0].split()[:max_len - 1] + [utils._EOS]
 
             output_file = '{}.{}.svg'.format(output, line_id + 1) if output is not None else None
 
-            if self.pred_edits:
-                src_tokens, trg_tokens = trg_tokens, src_tokens
-                weights = weights.T
-
-            utils.heatmap(src_tokens, trg_tokens, weights.T, output_file=output_file)
+            utils.heatmap(src_tokens, trg_tokens, weights, output_file=output_file)
 
     def decode(self, sess, beam_size, output=None, remove_unk=False, early_stopping=True, raw_output=False, **kwargs):
         utils.log('starting decoding')

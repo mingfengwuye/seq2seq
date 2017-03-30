@@ -151,7 +151,6 @@ class Seq2SeqModel(object):
             output_feed['updates'] = self.sgd_update_op if use_sgd else self.update_op
         if align:
             output_feed['attn_weights'] = self.attention_weights
-            import ipdb; ipdb.set_trace()
 
         res = session.run(output_feed, input_feed)
 
