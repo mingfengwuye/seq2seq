@@ -623,8 +623,8 @@ def heatmap(xlabels=None, ylabels=None, weights=None,
     # ax.set_aspect('equal')
     ax.grid(False)
 
-    xsize = max(len(xlabels) / 3, 8.0)
-    ysize = max(len(ylabels) / 3, 8.0)
+    xsize = max(2.0 + len(xlabels) / 3, 8.0)
+    ysize = max(2.0 + len(ylabels) / 3, 8.0)
     fig.set_size_inches(xsize, ysize, forward=True)
 
     if output_file is None:

@@ -248,7 +248,7 @@ class Seq2SeqModel(object):
             else:
                 self.baseline_update_op = tf.constant(0.0)   # dummy tensor
 
-    def step(self, session, data, update_model=True, align=False, use_sgd=False, **kwargs):
+    def step(self, session, data, update_model=True, align=False, use_sgd=False, feed_previous=False, **kwargs):
         if self.dropout is not None:
             session.run(self.dropout_on)
 
@@ -272,6 +272,9 @@ class Seq2SeqModel(object):
         for i in range(self.encoder_count):
             input_feed[self.encoder_input_length[i]] = encoder_input_length[i]
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
+
+        if feed_previous:
+            input_feed[self.feed_previous] = True
 
         output_feed = {'loss': self.xent_loss}
         if update_model:
