@@ -163,8 +163,6 @@ class TranslationModel:
                     yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
 
     def align(self, sess, output=None, **kwargs):
-        # TODO: include <S> and </S>
-
         if len(self.filenames.test) != len(self.extensions):
             raise Exception('wrong number of input files')
 
@@ -195,7 +193,9 @@ class TranslationModel:
                 trg_tokens = new_trg_tokens
 
             weights = weights.squeeze()
-            max_len = weights.shape[0]
+            max_len = weights.shape[1]
+
+            utils.debug(weights)
 
             trg_tokens.append(utils._EOS)
             src_tokens = lines[0].split()[:max_len - 1] + [utils._EOS]

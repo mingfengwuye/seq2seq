@@ -149,11 +149,11 @@ class Seq2SeqModel(object):
         if update_model:
             output_feed['updates'] = self.sgd_update_op if use_sgd else self.update_op
         if align:
-            output_feed['attn_weights'] = self.attention_weights
+            output_feed['weights'] = self.attention_weights
 
         res = session.run(output_feed, input_feed)
 
-        return namedtuple('output', 'loss attn_weights')(res['loss'], res.get('attn_weights'))
+        return namedtuple('output', 'loss weights')(res['loss'], res.get('weights'))
 
     def greedy_decoding(self, session, token_ids):
         if self.dropout is not None:

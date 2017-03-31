@@ -163,6 +163,7 @@ def local_attention(state, hidden_states, encoder, encoder_input_length, pos=Non
             pos = tf.floor(encoder_input_length * pos)
 
         pos = tf.reshape(pos, [-1, 1])
+        pos = tf.minimum(pos, encoder_input_length - 1)
 
         if encoder.attention_window_size == 0:
             weights = tf.to_float(tf.one_hot(tf.cast(tf.squeeze(pos, axis=1), tf.int32), depth=attn_length))
