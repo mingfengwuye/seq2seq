@@ -40,4 +40,4 @@ decoder:
     name: mt
 
 train_prefix: train.concat
-vocab_prefix: vocab.train
+vocab_prefix: vocab.concat
