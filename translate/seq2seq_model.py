@@ -61,25 +61,25 @@ class Seq2SeqModel(object):
                                                    include_first_eos=True)
 
         if chained_encoders:
+            assert len(encoders) == 2
+
             parameters = dict(encoders=encoders[1:], decoder=encoders[0], dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length[1:])
 
             attention_states, encoder_state = decoders.multi_encoder(self.encoder_inputs[1:], **parameters)
 
-            # import ipdb; ipdb.set_trace()
-            # FIXME decoder_inputs/encoder_inputs
-            decoder_inputs = tf.transpose(self.encoder_inputs[0], perm=(1, 0))
-            batch_size = tf.shape(decoder_inputs)[1]
-            pad = tf.ones(shape=tf.stack([1, batch_size]), dtype=tf.int32) * utils.BOS_ID
-            decoder_inputs = tf.concat([pad, decoder_inputs], axis=0)
+            decoder_inputs = self.encoder_inputs[0]
+            batch_size = tf.shape(decoder_inputs)[0]
+
+            pad = tf.ones(shape=tf.stack([batch_size, 1]), dtype=tf.int32) * utils.BOS_ID
+            decoder_inputs = tf.concat([pad, decoder_inputs], axis=1)
 
             _, _, decoder_outputs, states, _ = decoders.attention_decoder(
-                attention_states=attention_states, initial_state=encoder_state,
-                decoder_inputs=decoder_inputs,
+                attention_states=attention_states, initial_state=encoder_state, decoder_inputs=decoder_inputs,
                 **parameters
             )
 
-            states = tf.transpose(states, perm=(1, 0, 2))
+            # states = tf.transpose(states, perm=(1, 0, 2))
             self.attention_states = [states]   # or decoder_outputs
             self.encoder_state = encoder_state
 
