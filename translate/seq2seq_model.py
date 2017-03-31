@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import re
+import itertools
 
 from translate import utils
 from translate import decoders
@@ -242,9 +243,21 @@ class Seq2SeqModel(object):
             new_input = []
             new_beam_size = beam_size
 
+            input_len = encoder_inputs[0].shape[1] - 1
+            def is_valid(hypothesis):
+                h = itertools.takewhile(lambda x: x != utils.EOS_ID, hypothesis)
+                hyp_len = sum(1 for x in h if x in [utils.KEEP_ID, utils.SUB_ID, utils.DEL_ID])
+                if hyp_len > input_len:
+                    return False
+                else:
+                    return hyp_len == input_len or utils.EOS_ID not in hypothesis
+
             for flat_id, hyp_id, token_id in zip(flat_ids, hyp_ids, token_ids_):
                 hypothesis = hypotheses[hyp_id] + [token_id]
                 score = scores_[flat_id]
+
+                if self.decoder.pred_edits and not is_valid(hypothesis):
+                    continue
 
                 if token_id == utils.EOS_ID:
                     # hypothesis is finished, it is thus unnecessary to keep expanding it
