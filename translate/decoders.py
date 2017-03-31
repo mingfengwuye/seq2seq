@@ -312,8 +312,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         initial_input = embed(inputs.read(0))   # first symbol is BOS
 
         def _time_step(time, input_, state, proj_outputs, decoder_outputs, states, weights, edit_pos):
-            pos = edit_pos if decoder.pred_edits else None
-            pos = [pos] + [None] * (len(encoders) - 1)
+            pos = [edit_pos if encoder.align_edits else None for encoder in encoders]
 
             context_vector, new_weights = attention_(state, pos=pos)
 
@@ -335,14 +334,15 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             sample.set_shape([None])
             sample = tf.stop_gradient(sample)
 
-            is_keep = tf.equal(sample, utils.KEEP_ID)
-            is_sub = tf.equal(sample, utils.SUB_ID)
-            is_del = tf.equal(sample, utils.DEL_ID)
+            if any(encoder.align_edits for encoder in encoders):
+                is_keep = tf.equal(sample, utils.KEEP_ID)
+                is_sub = tf.equal(sample, utils.SUB_ID)
+                is_del = tf.equal(sample, utils.DEL_ID)
 
-            i = tf.logical_or(is_keep, is_sub)
-            i = tf.logical_or(i, is_del)
-            i = tf.to_float(i)
-            edit_pos += i
+                i = tf.logical_or(is_keep, is_sub)
+                i = tf.logical_or(i, is_del)
+                i = tf.to_float(i)
+                edit_pos += i
 
             input_ = embed(sample)
 

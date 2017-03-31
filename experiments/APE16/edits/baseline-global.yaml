@@ -36,9 +36,6 @@ encoders:
   - name: mt
     attention_type: 'global'
 
-
 decoder:
     name: edits
     pred_edits: True
-
-raw_output: True

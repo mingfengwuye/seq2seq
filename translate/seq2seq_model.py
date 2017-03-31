@@ -14,7 +14,6 @@ class Seq2SeqModel(object):
                  chained_encoders=False, **kwargs):
         self.encoders = encoders
         self.decoder = decoder
-        self.pred_edits = decoder.pred_edits
 
         self.learning_rate = learning_rate
         self.global_step = global_step
