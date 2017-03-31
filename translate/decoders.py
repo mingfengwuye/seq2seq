@@ -163,7 +163,7 @@ def local_attention(state, hidden_states, encoder, encoder_input_length, pos=Non
             pos = tf.floor(encoder_input_length * pos)
 
         pos = tf.reshape(pos, [-1, 1])
-        pos = tf.minimum(pos, encoder_input_length - 1)
+        # pos = tf.minimum(pos, encoder_input_length - 1)
 
         if encoder.attention_window_size == 0:
             weights = tf.to_float(tf.one_hot(tf.cast(tf.squeeze(pos, axis=1), tf.int32), depth=attn_length))
@@ -348,6 +348,14 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             input_ = embed(sample)
 
             x = tf.concat([input_, context_vector], 1)
+
+            # if decoder.name == 'edits':
+            #     x = tf.Print(x, [tf.shape(attention_states)], message='attns', first_n=1, summarize=10)
+            #     x = tf.Print(x, [tf.shape(x)], message='x', first_n=1)
+            #     x = tf.Print(x, [tf.shape(input_)], message='input', first_n=1)
+            #     x = tf.Print(x, [tf.shape(context_vector)], message='context_vector', first_n=1)
+            #     x = tf.Print(x, [tf.shape(state)], message='state', first_n=1)
+
             _, new_state = unsafe_decorator(cell)(x, state)
 
             states = states.write(time, new_state)

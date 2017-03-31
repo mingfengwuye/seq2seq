@@ -2,7 +2,7 @@
 dropout_rate: 0.5
 cell_size: 256
 attn_size: 256
-embedding_size: 256
+embedding_size: 128
 
 layers: 1
 bidir: True
@@ -25,7 +25,7 @@ optimizer: 'adam'
 
 steps_per_checkpoint: 200
 steps_per_eval: 200
-score_function: corpus_scores_ter
+score_function: corpus_scores_bleu
 
 max_gradient_norm: 1.0
 max_epochs: 80
@@ -39,5 +39,5 @@ encoders:
 decoder:
     name: mt
 
-train_prefix: train.concat
-vocab_prefix: vocab.concat
+train_prefix: train
+vocab_prefix: vocab

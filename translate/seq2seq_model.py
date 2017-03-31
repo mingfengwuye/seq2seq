@@ -74,12 +74,15 @@ class Seq2SeqModel(object):
             pad = tf.ones(shape=tf.stack([batch_size, 1]), dtype=tf.int32) * utils.BOS_ID
             decoder_inputs = tf.concat([pad, decoder_inputs], axis=1)
 
-            _, _, decoder_outputs, states, _ = decoders.attention_decoder(
+            _, _, _, states, _ = decoders.attention_decoder(
                 attention_states=attention_states, initial_state=encoder_state, decoder_inputs=decoder_inputs,
                 **parameters
             )
 
-            # states = tf.transpose(states, perm=(1, 0, 2))
+            if decoder.use_lstm:
+                size = states.get_shape()[2].value
+                states = states[:,:,size // 2:]
+
             self.attention_states = [states]   # or decoder_outputs
             self.encoder_state = encoder_state
 
