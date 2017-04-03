@@ -166,13 +166,13 @@ class Seq2SeqModel(object):
             decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
         )
 
-        # self.beam_tensors = decoders.beam_attention_decoder(
-        #     attention_states=self.attention_states, initial_state=self.encoder_state,
-        #     feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
-        #     decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
-        # )
-        #
-        # self.beam_output = decoders.softmax(self.outputs[0, :, :], temperature=softmax_temperature)
+        self.beam_tensors = decoders.beam_attention_decoder(
+            attention_states=self.attention_states, initial_state=self.encoder_state,
+            feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
+            decoder_input_length=self.target_length, feed_argmax=self.feed_argmax, **parameters
+        )
+
+        self.beam_output = decoders.softmax(self.outputs[0, :, :], temperature=softmax_temperature)
 
         optimizers = self.get_optimizers(optimizer, learning_rate)
 
