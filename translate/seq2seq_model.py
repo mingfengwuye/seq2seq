@@ -39,6 +39,7 @@ class Seq2SeqModel(object):
 
         self.encoder_inputs = []
         self.encoder_input_length = []
+        self.input_weights = []
 
         self.extensions = [encoder.name for encoder in encoders] + [decoder.name]
         self.encoder_names = [encoder.name for encoder in encoders]
@@ -52,6 +53,7 @@ class Seq2SeqModel(object):
 
             self.encoder_inputs.append(placeholder)
             weights = decoders.get_weights(placeholder, utils.EOS_ID, time_major=False, include_first_eos=True)
+            self.input_weights.append(weights)
             self.encoder_input_length.append(tf.to_int32(tf.reduce_sum(weights, axis=1)))
 
         # starts with BOS, and ends with EOS
@@ -69,42 +71,51 @@ class Seq2SeqModel(object):
 
             attention_states, encoder_state = decoders.multi_encoder(self.encoder_inputs[1:], **parameters)
 
-            decoder_inputs = self.encoder_inputs[0]
+            decoder_inputs = self.encoder_inputs[0][:,:-1]
             batch_size = tf.shape(decoder_inputs)[0]
 
             pad = tf.ones(shape=tf.stack([batch_size, 1]), dtype=tf.int32) * utils.BOS_ID
             decoder_inputs = tf.concat([pad, decoder_inputs], axis=1)
 
-            _, _, _, states, _ = decoders.attention_decoder(
+            outputs, _, _, states, attns, _ = decoders.attention_decoder(
                 attention_states=attention_states, initial_state=encoder_state, decoder_inputs=decoder_inputs,
                 **parameters
             )
 
-            if decoder.use_lstm:
-                size = states.get_shape()[2].value
-                states = states[:,:,size // 2:]
+            xent_loss = decoders.sequence_loss(logits=outputs, targets=self.encoder_inputs[0],
+                                               weights=self.input_weights[0])
 
-            self.attention_states = [states]   # or decoder_outputs
-            self.encoder_state = encoder_state
+            # if decoder.use_lstm:
+            #     size = states.get_shape()[2].value
+            #     states = states[:,:,size // 2:]
+
+            # self.attention_states = [states]   # or decoder_outputs
+            # self.encoder_state = encoder_state
 
             parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=self.dropout,
-                              encoder_input_length=self.encoder_input_length[:1])
+                              encoder_input_length=self.encoder_input_length[:1],
+                              encoder_inputs=self.encoder_inputs[:1], other_inputs=attns)
         else:
+            xent_loss = None
             parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
-                              encoder_input_length=self.encoder_input_length)
-            self.attention_states, self.encoder_state = decoders.multi_encoder(self.encoder_inputs, **parameters)
+                              encoder_input_length=self.encoder_input_length,
+                              encoder_inputs=self.encoder_inputs)
 
-        self.outputs, self.attention_weights, _, _, self.beam_tensors = decoders.attention_decoder(
+        self.attention_states, self.encoder_state = decoders.multi_encoder(**parameters)
+
+        self.outputs, self.attention_weights, _, _, _, self.beam_tensors = decoders.attention_decoder(
             attention_states=self.attention_states, initial_state=self.encoder_state,
             feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
             **parameters
         )
+        self.xent_loss = decoders.sequence_loss(logits=self.outputs, targets=self.targets[:, 1:],
+                                                weights=self.target_weights)
+        if xent_loss is not None:
+            self.xent_loss += xent_loss
 
         self.beam_output = decoders.softmax(self.outputs[:, 0, :])
 
         optimizers = self.get_optimizers(optimizer, learning_rate)
-        self.xent_loss = decoders.sequence_loss(logits=self.outputs, targets=self.targets[:,1:],
-                                                weights=self.target_weights)
         if not decode_only:
             self.update_op, self.sgd_update_op = self.get_update_op(self.xent_loss, optimizers, self.global_step)
 

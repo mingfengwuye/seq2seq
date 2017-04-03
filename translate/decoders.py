@@ -6,7 +6,7 @@ from translate.rnn import multi_bidirectional_rnn_unsafe, unsafe_decorator, Mult
 from translate import utils
 
 
-def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, **kwargs):
+def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=None, dropout=None, **kwargs):
     """
     Build multiple encoders according to the configuration in `encoders`, reading from `encoder_inputs`.
     The result is a list of the outputs produced by those encoders (for each time-step), and their final state.
@@ -55,6 +55,9 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, 
                 flat_inputs = tf.nn.embedding_lookup(embedding, flat_inputs)
                 encoder_inputs_ = tf.reshape(flat_inputs,
                                              tf.stack([batch_size, time_steps, flat_inputs.get_shape()[1].value]))
+
+            if other_inputs is not None:
+                encoder_inputs_ = tf.concat([encoder_inputs_, other_inputs], axis=2)
 
             # Contrary to Theano's RNN implementation, states after the sequence length are zero
             # (while Theano repeats last state)
@@ -309,13 +312,15 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
                                 tf.cast(tf.transpose(decoder_inputs, perm=(1, 0)), tf.int64))
         states = tf.TensorArray(dtype=tf.float32, size=time_steps)
         weights = tf.TensorArray(dtype=tf.float32, size=time_steps)
+        attns = tf.TensorArray(dtype=tf.float32, size=time_steps)
 
         initial_input = embed(inputs.read(0))   # first symbol is BOS
 
-        def _time_step(time, input_, state, proj_outputs, decoder_outputs, states, weights, edit_pos):
+        def _time_step(time, input_, state, proj_outputs, decoder_outputs, states, weights, edit_pos, attns):
             pos = [edit_pos if encoder.align_edits else None for encoder in encoders]
 
             context_vector, new_weights = attention_(state, pos=pos)
+            attns = attns.write(time, context_vector)
 
             weights = weights.write(time, new_weights[0])
 
@@ -360,12 +365,12 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
             states = states.write(time, new_state)
 
-            return time + 1, input_, new_state, proj_outputs, decoder_outputs, states, weights, edit_pos
+            return time + 1, input_, new_state, proj_outputs, decoder_outputs, states, weights, edit_pos, attns
 
-        _, _, new_state, proj_outputs, decoder_outputs, states, weights, new_edit_pos = tf.while_loop(
+        _, _, new_state, proj_outputs, decoder_outputs, states, weights, new_edit_pos, attns = tf.while_loop(
             cond=lambda time, *_: time < time_steps,
             body=_time_step,
-            loop_vars=(time, initial_input, state, proj_outputs, decoder_outputs, weights, states, edit_pos),
+            loop_vars=(time, initial_input, state, proj_outputs, decoder_outputs, weights, states, edit_pos, attns),
             parallel_iterations=decoder.parallel_iterations,
             swap_memory=decoder.swap_memory)
 
@@ -373,6 +378,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         decoder_outputs = decoder_outputs.stack()
         weights = weights.stack()  # batch_size, encoders, output time, input time
         states = states.stack()
+        attns = attns.stack()
 
         new_data = tf.concat([new_state, tf.expand_dims(new_edit_pos, axis=1)], axis=1)
 
@@ -382,8 +388,9 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         weights = tf.transpose(weights, perm=(1, 0, 2))
         decoder_outputs = tf.transpose(decoder_outputs, perm=(1, 0, 2))
         states = tf.transpose(states, perm=(1, 0, 2))
+        attns = tf.transpose(attns, perm=(1, 0, 2))
 
-        return proj_outputs, weights, decoder_outputs, states, beam_tensors
+        return proj_outputs, weights, decoder_outputs, states, attns, beam_tensors
 
 
 def sequence_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True):

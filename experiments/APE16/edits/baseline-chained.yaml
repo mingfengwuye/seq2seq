@@ -1,7 +1,7 @@
 
 dropout_rate: 0.5
-cell_size: 256
-attn_size: 256
+cell_size: 128
+attn_size: 128
 embedding_size: 128
 
 layers: 1
@@ -14,8 +14,8 @@ weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data
 model_dir: experiments/APE16/edits/baseline_chained
-load: [experiments/APE16/edits/baseline_chained_pretrain/checkpoints/best,
-       experiments/APE16/edits/baseline_chained_pretrain_PE/checkpoints/best]
+# load: [experiments/APE16/edits/baseline_chained_pretrain/checkpoints/best,
+#        experiments/APE16/edits/baseline_chained_pretrain_PE/checkpoints/best]
 
 batch_size: 32
 
@@ -24,7 +24,7 @@ reset: True
 learning_rate: 0.5
 learning_rate_decay_factor: 0.95
 decay_every_n_epoch: 1
-decay_after_n_epoch: 5
+decay_after_n_epoch: 3
 
 steps_per_checkpoint: 200
 steps_per_eval: 200
@@ -47,8 +47,6 @@ encoders:
 decoder:
     name: edits
     pred_edits: True
-    cell_size: 128
-    attn_size: 128
 
 chained_encoders: True
 
