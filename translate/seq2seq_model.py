@@ -6,6 +6,7 @@ import itertools
 from translate import utils
 from translate import decoders
 from collections import namedtuple
+from translate.rnn import linear_unsafe
 
 
 class Seq2SeqModel(object):
@@ -92,16 +93,33 @@ class Seq2SeqModel(object):
             # self.attention_states = [states]   # or decoder_outputs
             # self.encoder_state = encoder_state
 
+            # parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=self.dropout,
+            #                   encoder_input_length=self.encoder_input_length[:1],
+            #                   encoder_inputs=self.encoder_inputs[:1], other_inputs=states)
+
             parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length[:1],
-                              encoder_inputs=self.encoder_inputs[:1], other_inputs=states)
+                              encoder_inputs=self.encoder_inputs[:1])
         else:
             xent_loss = None
             parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length,
                               encoder_inputs=self.encoder_inputs)
+            states = None
+            attns = None
 
         self.attention_states, self.encoder_state = decoders.multi_encoder(**parameters)
+
+        if chained_encoders:
+            # self.attention_states[0] = tf.concat([self.attention_states[0], states], axis=2)
+            # self.attention_states[0] = tf.concat([self.attention_states[0], attns], axis=2)
+            attn_size = tf.shape(self.attention_states[0])[2]
+            if self.dropout is not None:
+                attns = tf.nn.dropout(attns, keep_prob=self.dropout)
+
+            # attns = tf.nn.tanh(linear_unsafe(attns, attn_size, bias=True, scope='bridge'))
+
+            self.attention_states[0] += attns
 
         self.outputs, self.attention_weights, _, _, _, self.beam_tensors = decoders.attention_decoder(
             attention_states=self.attention_states, initial_state=self.encoder_state,

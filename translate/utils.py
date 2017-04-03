@@ -71,6 +71,8 @@ class AttrDict(dict):
         super(AttrDict, self).__init__(*args, **kwargs)
         self.__dict__ = self  # dark magic
 
+    def __getattr__(self, item):
+        return self.__dict__.get(item)
 
 def reverse_edits(source, edits, fix=True, strict=False):
     src_words = source.split()
