@@ -85,16 +85,16 @@ class Seq2SeqModel(object):
             xent_loss = decoders.sequence_loss(logits=outputs, targets=self.encoder_inputs[0],
                                                weights=self.input_weights[0])
 
-            # if decoder.use_lstm:
-            #     size = states.get_shape()[2].value
-            #     states = states[:,:,size // 2:]
+            if decoder.use_lstm:
+                size = states.get_shape()[2].value
+                states = states[:,:,size // 2:]
 
             # self.attention_states = [states]   # or decoder_outputs
             # self.encoder_state = encoder_state
 
             parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length[:1],
-                              encoder_inputs=self.encoder_inputs[:1], other_inputs=attns)
+                              encoder_inputs=self.encoder_inputs[:1], other_inputs=states)
         else:
             xent_loss = None
             parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
@@ -111,7 +111,7 @@ class Seq2SeqModel(object):
         self.xent_loss = decoders.sequence_loss(logits=self.outputs, targets=self.targets[:, 1:],
                                                 weights=self.target_weights)
         if xent_loss is not None:
-            self.xent_loss += xent_loss
+            self.xent_loss += 0.5 * xent_loss
 
         self.beam_output = decoders.softmax(self.outputs[:, 0, :])
 
@@ -190,7 +190,7 @@ class Seq2SeqModel(object):
         outputs = session.run(self.outputs, input_feed)
         return np.argmax(outputs, axis=2)
 
-    def beam_search_decoding(self, session, token_ids, beam_size, early_stopping=True):
+    def beam_search_decoding(self, session, token_ids, beam_size, early_stopping=True, vocabs=None):
         if not isinstance(session, list):
             session = [session]
 
@@ -219,7 +219,7 @@ class Seq2SeqModel(object):
 
         beam_data = None
 
-        for i in range(self.max_output_len):
+        for k in range(self.max_output_len):
             batch_size = targets.shape[0]
             targets = np.reshape(targets, [batch_size, 1])
             targets = np.concatenate([targets, np.ones(targets.shape) * utils.EOS_ID], axis=1)
@@ -235,10 +235,10 @@ class Seq2SeqModel(object):
                     feed[self.encoder_inputs[i]] = encoder_inputs[i]
                     feed[self.attention_states[i]] = attn_states_[i].repeat(batch_size, axis=0)
 
-            output_feed = namedtuple('beam_output', 'data proba')(self.beam_tensors.new_data, self.beam_output)
+            output_feed = [self.beam_tensors.new_data, self.beam_output]
 
             res = [session_.run(output_feed, input_feed_) for session_, input_feed_ in zip(session, input_feed)]
-            beam_data, proba = list(zip(*[(res_.data, res_.proba) for res_ in res]))
+            beam_data, proba = list(zip(*res))
 
             proba = [np.maximum(proba_, 1e-10) for proba_ in proba]
             scores_ = scores[:, None] - np.average([np.log(proba_) for proba_ in proba], axis=0)
@@ -263,12 +263,24 @@ class Seq2SeqModel(object):
                 else:
                     return hyp_len == input_len or utils.EOS_ID not in hypothesis
 
+            greedy_tokens = {}
+
             for flat_id, hyp_id, token_id in zip(flat_ids, hyp_ids, token_ids_):
                 hypothesis = hypotheses[hyp_id] + [token_id]
                 score = scores_[flat_id]
 
-                if self.decoder.pred_edits and not is_valid(hypothesis):
-                    continue
+                if self.decoder.pred_edits:
+                    # if not is_valid(hypothesis):
+                    #     continue
+
+                    # always follow greedy recommendation
+                    op_id = min(token_id, len(utils._START_VOCAB))
+                    greedy_tokens.setdefault(hyp_id, op_id)
+
+                    # print(greedy_tokens.get(hyp_id), op_id)
+
+                    # if op_id != greedy_tokens.get(hyp_id):
+                    #     continue
 
                 if token_id == utils.EOS_ID:
                     # hypothesis is finished, it is thus unnecessary to keep expanding it
@@ -290,13 +302,16 @@ class Seq2SeqModel(object):
                 if len(new_hypotheses) == beam_size:
                     break
 
+            # print(new_hypotheses)
+            # print(k, greedy_tokens)
+
             beam_size = new_beam_size
             hypotheses = new_hypotheses
             beam_data = [np.array(data_) for data_ in new_data]
             scores = np.array(new_scores)
             targets = np.array(new_input, dtype=np.int32)
 
-            if beam_size <= 0:
+            if beam_size <= 0 or len(hypotheses) == 0:
                 break
 
         hypotheses += finished_hypotheses
@@ -304,6 +319,16 @@ class Seq2SeqModel(object):
 
         if self.len_normalization > 0:  # normalize score by length (to encourage longer sentences)
             scores /= [len(hypothesis) ** self.len_normalization for hypothesis in hypotheses]
+
+        # def pep_penalty(hypothesis):
+        #     penalty = sum(1 for token_id in hypothesis if token_id >= len(utils._START_VOCAB)
+        #                   and vocabs[1].reverse[token_id] not in src_words)
+        #     return penalty
+        #
+        # if self.decoder.pred_edits:
+        #     src_words = set(encoder_inputs[0][0])
+        #     src_words = set(vocabs[0].reverse[token_id] for token_id in src_words)
+        #     scores = np.array([score + pep_penalty(hyp) for score, hyp in zip(scores, hypotheses)])
 
         # sort best-list by score
         sorted_idx = np.argsort(scores)

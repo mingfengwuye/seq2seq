@@ -19,12 +19,12 @@ model_dir: experiments/APE16/edits/baseline_chained
 
 batch_size: 32
 
-optimizer: 'sgd'
-reset: True
-learning_rate: 0.5
-learning_rate_decay_factor: 0.95
-decay_every_n_epoch: 1
-decay_after_n_epoch: 3
+optimizer: 'adam'
+#reset: True
+#learning_rate: 0.5
+#learning_rate_decay_factor: 0.95
+#decay_every_n_epoch: 1
+#decay_after_n_epoch: 3
 
 steps_per_checkpoint: 200
 steps_per_eval: 200
@@ -43,6 +43,9 @@ encoders:
 
   - name: src
     attention_type: 'global'
+    cell_size: 256
+    attn_size: 256
+    embedding_size: 128
 
 decoder:
     name: edits
@@ -50,5 +53,5 @@ decoder:
 
 chained_encoders: True
 
-#train_prefix: train.concat
-#vocab_prefix: vocab.concat
+train_prefix: train.concat
+vocab_prefix: vocab.concat
