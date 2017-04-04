@@ -18,11 +18,10 @@ model_dir: experiments/APE16/edits/chained
 batch_size: 32
 
 optimizer: 'adam'
-sgd_after_n_epoch: 8
-learning_rate: 0.5
-learning_rate_decay_factor: 0.96
+learning_rate: 0.001
+learning_rate_decay_factor: 0.95
 decay_every_n_epoch: 1
-decay_after_n_epoch: 12
+decay_after_n_epoch: 8
 
 steps_per_checkpoint: 200
 steps_per_eval: 200
@@ -53,7 +52,8 @@ vocab_prefix: vocab
 
 chained_encoders: True
 chaining_strategy: map_outputs   # share_states, share_outputs, concat_attns, concat_states, sum_attns, map_attns
-more_dropout: True
+more_dropout: False
 chaining_non_linearity: False
-chaining_bias: True
-chaining_loss_ratio: 0.2
+chaining_bias: False
+chaining_loss_ratio: 0.5
+chaining_stop_gradient: True

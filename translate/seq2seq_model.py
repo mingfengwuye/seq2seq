@@ -13,7 +13,8 @@ class Seq2SeqModel(object):
     def __init__(self, encoders, decoder, learning_rate, global_step, max_gradient_norm, dropout_rate=0.0,
                  freeze_variables=None, max_output_len=50, feed_previous=0.0,
                  optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
-                 chained_encoders=False, chaining_strategy=None, more_dropout=False, **kwargs):
+                 chained_encoders=False, chaining_strategy=None, more_dropout=False,
+                 **kwargs):
         self.encoders = encoders
         self.decoder = decoder
 
@@ -102,6 +103,9 @@ class Seq2SeqModel(object):
             else:
                 other_inputs = None
 
+            if other_inputs is not None and kwargs.get('chaining_stop_gradient'):
+                other_inputs = tf.stop_gradient(other_inputs)
+
             parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length[:1],
                               encoder_inputs=self.encoder_inputs[:1], other_inputs=other_inputs)
@@ -121,6 +125,11 @@ class Seq2SeqModel(object):
                 attns = tf.nn.dropout(attns, keep_prob=self.dropout)
                 states = tf.nn.dropout(states, keep_prob=self.dropout)
                 decoder_outputs = tf.nn.dropout(decoder_outputs, keep_prob=self.dropout)
+
+            if kwargs.get('chaining_stop_gradient'):
+                attns = tf.stop_gradient(attns)
+                states = tf.stop_gradient(states)
+                decoder_outputs = tf.stop_gradient(decoder_outputs)
 
             if chaining_strategy == 'concat_attns':
                 self.attention_states[0] = tf.concat([self.attention_states[0], attns], axis=2)
@@ -160,7 +169,6 @@ class Seq2SeqModel(object):
 
         chaining_loss_ratio = kwargs.get('chaining_loss_ratio')
         if xent_loss is not None and chaining_loss_ratio:
-            utils.debug('chaining_loss_ratio: {}'.format(chaining_loss_ratio))
             self.xent_loss += chaining_loss_ratio * xent_loss
 
         self.beam_output = decoders.softmax(self.outputs[:, 0, :])
@@ -172,11 +180,12 @@ class Seq2SeqModel(object):
     @staticmethod
     def get_optimizers(optimizer_name, learning_rate):
         sgd_opt = tf.train.GradientDescentOptimizer(learning_rate=learning_rate)
+
         if optimizer_name.lower() == 'adadelta':
             # same epsilon and rho as Bahdanau et al. 2015
-            opt = tf.train.AdadeltaOptimizer(learning_rate=1.0, epsilon=1e-06, rho=0.95)
+            opt = tf.train.AdadeltaOptimizer(learning_rate=learning_rate, epsilon=1e-06, rho=0.95)
         elif optimizer_name.lower() == 'adam':
-            opt = tf.train.AdamOptimizer(learning_rate=0.001)
+            opt = tf.train.AdamOptimizer(learning_rate=learning_rate)
         else:
             opt = sgd_opt
 

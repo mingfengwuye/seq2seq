@@ -7,8 +7,9 @@ description: |
   last line
 
 # SGD parameters
-learning_rate: 0.5             # initial learning rate
-learning_rate_decay_factor: 0.99
+learning_rate: 0.001           # initial learning rate
+sgd_learning_rate: 1.0
+learning_rate_decay_factor: null
 decay_every_n_epoch: null
 decay_after_n_epoch: 0         # start decaying learning rate after this many epochs
 decay_if_no_progress: null     # measure average loss over this many checkpoints, and decay if no progress
@@ -31,7 +32,7 @@ max_steps: 0             # maximum number of updates before stopping
 max_epochs: 0            # maximum number of epochs before stopping
 keep_best: 4             # number of best checkpoints to keep
 feed_previous: 0.0       # randomly feed previous output instead of groundtruth to decoder during training
-optimizer: 'sgd'         # 'sgd', 'adadelta', or 'adam'
+optimizer: 'adam'        # 'sgd', 'adadelta', or 'adam'
 
 # model (each one of these settings can be defined specifically in `encoders` and `decoder`, or generally here)
 batch_size: 80           # training batch size

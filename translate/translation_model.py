@@ -318,7 +318,7 @@ class TranslationModel:
 
     def train(self, sess, beam_size, steps_per_checkpoint, steps_per_eval=None, eval_output=None, max_steps=0,
               max_epochs=0, eval_burn_in=0, decay_if_no_progress=None, decay_after_n_epoch=None,
-              decay_every_n_epoch=None, sgd_after_n_epoch=None, **kwargs):
+              decay_every_n_epoch=None, sgd_after_n_epoch=None, sgd_learning_rate=None, **kwargs):
         utils.log('reading training and development data')
 
         self.read_data(**kwargs)
@@ -328,9 +328,12 @@ class TranslationModel:
         global_step = self.global_step.eval(sess)
         last_decay = global_step
 
+        epoch = self.batch_size * global_step // self.train_size
+        if sgd_after_n_epoch is not None and epoch >= sgd_after_n_epoch:  # already switched to SGD
+            self.use_sgd = True
+
         for _ in range(global_step):  # read all the data up to this step
             next(self.batch_iterator)
-
 
         utils.log('starting training')
         while True:
@@ -355,6 +358,9 @@ class TranslationModel:
                 if not self.use_sgd:
                     utils.debug('epoch {}, starting to use SGD'.format(epoch + 1))
                     self.use_sgd = True
+                    if sgd_learning_rate is not None:
+                        sess.run(self.learning_rate.assign(sgd_learning_rate))
+                    last_decay = global_step  # reset learning rate decay
 
             if steps_per_checkpoint and global_step % steps_per_checkpoint == 0:
                 loss = loss / steps
