@@ -13,7 +13,7 @@ max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data
-model_dir: experiments/APE16/edits/baseline_local_unconstrained
+model_dir: experiments/APE16/edits/global
 
 batch_size: 32
 
@@ -34,8 +34,7 @@ read_ahead: 10
 
 encoders:
   - name: mt
-    attention_type: 'local'
-    attention_window_size: 0
+    attention_type: 'global'
 
 decoder:
     name: edits

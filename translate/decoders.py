@@ -216,18 +216,11 @@ def attention(encoder, **kwargs):
 
 
 def multi_attention(state, hidden_states, encoders, encoder_input_length, pos=None, aggregation_method='sum',
-                    dropout=None, **kwargs):
+                    **kwargs):
     attns = []
     weights = []
 
     context_vector = None
-
-    if dropout is not None:
-        state = tf.nn.dropout(state, keep_prob=dropout)
-
-        for i in range(len(hidden_states)):
-            hidden_states[i] = tf.nn.dropout(hidden_states[i], keep_prob=dropout)
-
     for i, (hidden, encoder, input_length) in enumerate(zip(hidden_states, encoders, encoder_input_length)):
         pos_ = pos[i] if pos is not None else None
         context_vector, weights_ = attention(state=state, hidden_states=hidden, encoder=encoder,
@@ -255,7 +248,7 @@ def get_embedding_function(decoder):
 
 
 def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
-                      dropout=None, feed_previous=0.0, more_dropout=False, **kwargs):
+                      dropout=None, feed_previous=0.0, **kwargs):
     """
     :param targets: tensor of shape (output_length, batch_size)
     :param initial_state: initial state of the decoder (usually the final state of the encoder),
@@ -291,8 +284,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
         attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
                                        encoder_input_length=encoder_input_length,
-                                       aggregation_method=decoder.aggregation_method,
-                                       dropout=dropout if more_dropout else None)
+                                       aggregation_method=decoder.aggregation_method)
         input_shape = tf.shape(decoder_inputs)
         batch_size = input_shape[0]
         time_steps = input_shape[1]
@@ -333,17 +325,11 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
             # FIXME use `output` or `state` here?
             x = tf.concat([state, input_, context_vector], axis=1)
-            if more_dropout:
-                x = tf.nn.dropout(x, keep_prob=dropout)
-
             output_ = linear_unsafe(x, decoder.cell_size, bias=False, scope='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
             output_ = linear_unsafe(output_, decoder.embedding_size, bias=False, scope='softmax0')
             decoder_outputs = decoder_outputs.write(time, output_)
             output_ = linear_unsafe(output_, output_size, bias=True, scope='softmax1')
-
-            if more_dropout:
-                output_ = tf.nn.dropout(output_, keep_prob=dropout)
 
             proj_outputs = proj_outputs.write(time, output_)
 

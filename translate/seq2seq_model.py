@@ -64,6 +64,8 @@ class Seq2SeqModel(object):
         self.target_weights = decoders.get_weights(self.targets[:,1:], utils.EOS_ID, time_major=False,
                                                    include_first_eos=True)
 
+        self.losses = []
+
         if chained_encoders:
             assert len(encoders) == 2
 
@@ -85,6 +87,7 @@ class Seq2SeqModel(object):
 
             xent_loss = decoders.sequence_loss(logits=outputs, targets=self.encoder_inputs[0],
                                                weights=self.input_weights[0])
+            self.losses.append(xent_loss)
 
             if decoder.use_lstm:
                 size = states.get_shape()[2].value
@@ -101,13 +104,12 @@ class Seq2SeqModel(object):
 
             parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length[:1],
-                              encoder_inputs=self.encoder_inputs[:1], other_inputs=other_inputs,
-                              more_dropout=more_dropout)
+                              encoder_inputs=self.encoder_inputs[:1], other_inputs=other_inputs)
         else:
             xent_loss = None
             parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length,
-                              encoder_inputs=self.encoder_inputs, more_dropout=more_dropout)
+                              encoder_inputs=self.encoder_inputs)
             states = None
             attns = None
             decoder_outputs = None
@@ -142,9 +144,8 @@ class Seq2SeqModel(object):
                 x = tf.einsum('ijk,kl->ijl', x, w) + b
                 if kwargs.get('chaining_non_linearity'):
                     x = tf.nn.tanh(x)
-
-                if self.dropout is not None and more_dropout:
-                    x = tf.nn.dropout(x, keep_prob=self.dropout)
+                    if self.dropout is not None and more_dropout:
+                        x = tf.nn.dropout(x, keep_prob=self.dropout)
 
                 self.attention_states[0] += x
 
@@ -155,6 +156,7 @@ class Seq2SeqModel(object):
         )
         self.xent_loss = decoders.sequence_loss(logits=self.outputs, targets=self.targets[:, 1:],
                                                 weights=self.target_weights)
+        self.losses.append(self.xent_loss)
 
         chaining_loss_ratio = kwargs.get('chaining_loss_ratio')
         if xent_loss is not None and chaining_loss_ratio:
@@ -208,7 +210,7 @@ class Seq2SeqModel(object):
         for i in range(self.encoder_count):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
 
-        output_feed = {'loss': self.xent_loss}
+        output_feed = {'loss': self.losses[-1]}
         if update_model:
             output_feed['updates'] = self.sgd_update_op if use_sgd else self.update_op
         if align:

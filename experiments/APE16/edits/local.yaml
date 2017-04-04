@@ -5,7 +5,7 @@ attn_size: 128
 embedding_size: 128
 
 layers: 1
-bidir: False
+bidir: True
 use_lstm: True
 
 max_output_len: 45   # 99% coverage
@@ -13,7 +13,7 @@ max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data
-model_dir: experiments/APE16/edits/baseline_chained_pretrain_PE
+model_dir: experiments/APE16/edits/local
 
 batch_size: 32
 
@@ -34,15 +34,10 @@ read_ahead: 10
 
 encoders:
   - name: mt
+    align_edits: True
     attention_type: 'local'
     attention_window_size: 0
-    align_edits: True
-    cell_size: 256
-    attn_size: 256
 
 decoder:
     name: edits
     pred_edits: True
-
-train_prefix: train
-vocab_prefix: vocab
