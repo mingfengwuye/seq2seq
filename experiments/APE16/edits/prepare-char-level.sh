@@ -17,7 +17,7 @@ cp ${raw_data}/{train,dev,test,500K,4M}.{src,mt,pe} ${data_dir}
 scripts/extract-edits.py ${data_dir}/train.{mt,pe} --char-level > ${data_dir}/train.edits
 scripts/extract-edits.py ${data_dir}/dev.{mt,pe} --char-level > ${data_dir}/dev.edits
 scripts/extract-edits.py ${data_dir}/test.{mt,pe} --char-level > ${data_dir}/test.edits
-#scripts/extract-edits.py ${data_dir}/500K.{mt,pe} > ${data_dir}/500K.edits
+scripts/extract-edits.py ${data_dir}/500K.{mt,pe} --char-level > ${data_dir}/500K.edits
 #scripts/extract-edits.py ${data_dir}/4M.{mt,pe} > ${data_dir}/4M.edits
 
 scripts/prepare-data.py ${data_dir}/train src pe mt edits ${data_dir} --mode vocab --vocab-size 0
