@@ -13,15 +13,15 @@ max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data
-model_dir: experiments/APE16/edits/global_synthetic_adam
+model_dir: experiments/APE16/edits/global_synthetic
 
 batch_size: 64
 
-optimizer: 'adam'
-learning_rate: 0.001
+optimizer: 'sgd'
+learning_rate: 1.0
 learning_rate_decay_factor: 0.5
-decay_every_n_epoch: 1
-decay_after_n_epoch: 1
+decay_every_n_epoch: 0.5
+decay_after_n_epoch: 0
 
 steps_per_checkpoint: 200
 steps_per_eval: 200
