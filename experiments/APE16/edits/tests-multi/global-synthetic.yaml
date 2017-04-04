@@ -13,7 +13,7 @@ max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data
-model_dir: experiments/APE16/edits/global_synthetic
+model_dir: experiments/APE16/edits/tests-multi/global_synthetic
 
 batch_size: 32
 
