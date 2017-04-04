@@ -28,7 +28,7 @@ steps_per_eval: 200
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
-max_epochs: 80
+max_epochs: 8
 batch_mode: 'standard'
 read_ahead: 10
 
