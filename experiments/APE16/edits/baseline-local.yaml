@@ -41,3 +41,5 @@ encoders:
 decoder:
     name: edits
     pred_edits: True
+
+more_dropout: True

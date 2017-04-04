@@ -55,7 +55,7 @@ vocab_prefix: vocab
 
 chained_encoders: True
 chaining_strategy: map_attns   # share_states, share_outputs, concat_attns, concat_states, sum_states, map_attns, map_states
-aggressive_dropout: True
+more_dropout: True
 chaining_non_linearity: True
 chaining_bias: True
 chaining_loss_ratio: 1.0

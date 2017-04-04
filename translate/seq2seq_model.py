@@ -13,7 +13,7 @@ class Seq2SeqModel(object):
     def __init__(self, encoders, decoder, learning_rate, global_step, max_gradient_norm, dropout_rate=0.0,
                  freeze_variables=None, max_output_len=50, feed_previous=0.0,
                  optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
-                 chained_encoders=False, chaining_strategy=None, **kwargs):
+                 chained_encoders=False, chaining_strategy=None, more_dropout=False, **kwargs):
         self.encoders = encoders
         self.decoder = decoder
 
@@ -68,7 +68,7 @@ class Seq2SeqModel(object):
             assert len(encoders) == 2
 
             parameters = dict(encoders=encoders[1:], decoder=encoders[0], dropout=self.dropout,
-                              encoder_input_length=self.encoder_input_length[1:])
+                              encoder_input_length=self.encoder_input_length[1:], more_dropout=more_dropout)
 
             attention_states, encoder_state = decoders.multi_encoder(self.encoder_inputs[1:], **parameters)
 
@@ -97,17 +97,17 @@ class Seq2SeqModel(object):
             elif chaining_strategy == 'share_outputs':
                 other_inputs = decoder_outputs
             else:
-                utils.debug('no other inputs')
                 other_inputs = None
 
             parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length[:1],
-                              encoder_inputs=self.encoder_inputs[:1], other_inputs=other_inputs)
+                              encoder_inputs=self.encoder_inputs[:1], other_inputs=other_inputs,
+                              more_dropout=more_dropout)
         else:
             xent_loss = None
             parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length,
-                              encoder_inputs=self.encoder_inputs)
+                              encoder_inputs=self.encoder_inputs, more_dropout=more_dropout)
             states = None
             attns = None
             decoder_outputs = None
@@ -115,8 +115,7 @@ class Seq2SeqModel(object):
         self.attention_states, self.encoder_state = decoders.multi_encoder(**parameters)
 
         if chained_encoders:
-            if self.dropout is not None and kwargs.get('aggressive_dropout'):
-                utils.debug('aggressive_dropout')
+            if self.dropout is not None and more_dropout:
                 attns = tf.nn.dropout(attns, keep_prob=self.dropout)
                 states = tf.nn.dropout(states, keep_prob=self.dropout)
                 decoder_outputs = tf.nn.dropout(decoder_outputs, keep_prob=self.dropout)
@@ -127,9 +126,13 @@ class Seq2SeqModel(object):
                 self.attention_states[0] = tf.concat([self.attention_states[0], states], axis=2)
             elif chaining_strategy == 'sum_attns':
                 self.attention_states[0] += attns
-            elif chaining_strategy == 'map_attns' or chaining_strategy == 'map_states' or chaining_strategy == 'map_outputs':
-                utils.debug('chaining_strategy: map_attns')
-                x = attns if chaining_strategy == 'map_attns' else decoder_outputs if chaining_strategy == 'map_outputs' else states
+            elif chaining_strategy in ('map_attns', 'map_states', 'map_outputs'):
+                if chaining_strategy == 'map_attns':
+                    x = attns
+                elif chaining_strategy == 'map_outputs':
+                    x = decoder_outputs
+                else:
+                    x = states
 
                 shape = [x.get_shape()[-1], self.attention_states[0].get_shape()[-1]]
 
@@ -138,11 +141,9 @@ class Seq2SeqModel(object):
 
                 x = tf.einsum('ijk,kl->ijl', x, w) + b
                 if kwargs.get('chaining_non_linearity'):
-                    utils.debug('non-linearity')
                     x = tf.nn.tanh(x)
 
-                if self.dropout is not None and kwargs.get('aggressive_dropout'):
-                    utils.debug('aggressive_dropout')
+                if self.dropout is not None and more_dropout:
                     x = tf.nn.dropout(x, keep_prob=self.dropout)
 
                 self.attention_states[0] += x
