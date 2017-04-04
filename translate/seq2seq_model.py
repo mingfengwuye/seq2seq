@@ -13,7 +13,7 @@ class Seq2SeqModel(object):
     def __init__(self, encoders, decoder, learning_rate, global_step, max_gradient_norm, dropout_rate=0.0,
                  freeze_variables=None, max_output_len=50, feed_previous=0.0,
                  optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
-                 chained_encoders=False, **kwargs):
+                 chained_encoders=False, chaining_strategy=None, **kwargs):
         self.encoders = encoders
         self.decoder = decoder
 
@@ -88,18 +88,21 @@ class Seq2SeqModel(object):
 
             if decoder.use_lstm:
                 size = states.get_shape()[2].value
-                states = states[:,:,size // 2:]
+                decoder_outputs = states[:,:,size // 2:]
+            else:
+                decoder_outputs = states
 
-            # self.attention_states = [states]   # or decoder_outputs
-            # self.encoder_state = encoder_state
-
-            # parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=self.dropout,
-            #                   encoder_input_length=self.encoder_input_length[:1],
-            #                   encoder_inputs=self.encoder_inputs[:1], other_inputs=states)
+            if chaining_strategy == 'share_states':
+                other_inputs = states
+            elif chaining_strategy == 'share_outputs':
+                other_inputs = decoder_outputs
+            else:
+                utils.debug('no other inputs')
+                other_inputs = None
 
             parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length[:1],
-                              encoder_inputs=self.encoder_inputs[:1])
+                              encoder_inputs=self.encoder_inputs[:1], other_inputs=other_inputs)
         else:
             xent_loss = None
             parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
@@ -107,19 +110,42 @@ class Seq2SeqModel(object):
                               encoder_inputs=self.encoder_inputs)
             states = None
             attns = None
+            decoder_outputs = None
 
         self.attention_states, self.encoder_state = decoders.multi_encoder(**parameters)
 
         if chained_encoders:
-            # self.attention_states[0] = tf.concat([self.attention_states[0], states], axis=2)
-            # self.attention_states[0] = tf.concat([self.attention_states[0], attns], axis=2)
-            attn_size = tf.shape(self.attention_states[0])[2]
-            if self.dropout is not None:
+            if self.dropout is not None and kwargs.get('aggressive_dropout'):
+                utils.debug('aggressive_dropout')
                 attns = tf.nn.dropout(attns, keep_prob=self.dropout)
+                states = tf.nn.dropout(states, keep_prob=self.dropout)
+                decoder_outputs = tf.nn.dropout(decoder_outputs, keep_prob=self.dropout)
 
-            # attns = tf.nn.tanh(linear_unsafe(attns, attn_size, bias=True, scope='bridge'))
+            if chaining_strategy == 'concat_attns':
+                self.attention_states[0] = tf.concat([self.attention_states[0], attns], axis=2)
+            elif chaining_strategy == 'concat_states':
+                self.attention_states[0] = tf.concat([self.attention_states[0], states], axis=2)
+            elif chaining_strategy == 'sum_attns':
+                self.attention_states[0] += attns
+            elif chaining_strategy == 'map_attns' or chaining_strategy == 'map_states' or chaining_strategy == 'map_outputs':
+                utils.debug('chaining_strategy: map_attns')
+                x = attns if chaining_strategy == 'map_attns' else decoder_outputs if chaining_strategy == 'map_outputs' else states
 
-            self.attention_states[0] += attns
+                shape = [x.get_shape()[-1], self.attention_states[0].get_shape()[-1]]
+
+                w = tf.get_variable("map_attns/Matrix", shape=shape)
+                b = tf.get_variable("map_attns/bias", shape=shape[-1:])
+
+                x = tf.einsum('ijk,kl->ijl', x, w) + b
+                if kwargs.get('chaining_non_linearity'):
+                    utils.debug('non-linearity')
+                    x = tf.nn.tanh(x)
+
+                if self.dropout is not None and kwargs.get('aggressive_dropout'):
+                    utils.debug('aggressive_dropout')
+                    x = tf.nn.dropout(x, keep_prob=self.dropout)
+
+                self.attention_states[0] += x
 
         self.outputs, self.attention_weights, _, _, _, self.beam_tensors = decoders.attention_decoder(
             attention_states=self.attention_states, initial_state=self.encoder_state,
@@ -128,8 +154,11 @@ class Seq2SeqModel(object):
         )
         self.xent_loss = decoders.sequence_loss(logits=self.outputs, targets=self.targets[:, 1:],
                                                 weights=self.target_weights)
-        if xent_loss is not None:
-            self.xent_loss += 0.5 * xent_loss
+
+        chaining_loss_ratio = kwargs.get('chaining_loss_ratio')
+        if xent_loss is not None and chaining_loss_ratio:
+            utils.debug('chaining_loss_ratio: {}'.format(chaining_loss_ratio))
+            self.xent_loss += chaining_loss_ratio * xent_loss
 
         self.beam_output = decoders.softmax(self.outputs[:, 0, :])
 
