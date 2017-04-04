@@ -224,7 +224,9 @@ def multi_attention(state, hidden_states, encoders, encoder_input_length, pos=No
 
     if dropout is not None:
         state = tf.nn.dropout(state, keep_prob=dropout)
-        hidden_states = tf.nn.dropout(hidden_states, keep_prob=dropout)
+
+        for i in range(len(hidden_states)):
+            hidden_states[i] = tf.nn.dropout(hidden_states[i], keep_prob=dropout)
 
     for i, (hidden, encoder, input_length) in enumerate(zip(hidden_states, encoders, encoder_input_length)):
         pos_ = pos[i] if pos is not None else None
