@@ -248,7 +248,7 @@ def get_embedding_function(decoder):
 
 
 def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
-                      dropout=None, feed_previous=0.0, **kwargs):
+                      dropout=None, feed_previous=0.0, align_encoder_id=0, **kwargs):
     """
     :param targets: tensor of shape (output_length, batch_size)
     :param initial_state: initial state of the decoder (usually the final state of the encoder),
@@ -321,7 +321,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             context_vector, new_weights = attention_(state, pos=pos)
             attns = attns.write(time, context_vector)
 
-            weights = weights.write(time, new_weights[0])
+            weights = weights.write(time, new_weights[align_encoder_id])
 
             # FIXME use `output` or `state` here?
             x = tf.concat([state, input_, context_vector], axis=1)

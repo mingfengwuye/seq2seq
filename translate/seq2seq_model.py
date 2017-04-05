@@ -13,7 +13,7 @@ class Seq2SeqModel(object):
     def __init__(self, encoders, decoder, learning_rate, global_step, max_gradient_norm, dropout_rate=0.0,
                  freeze_variables=None, max_output_len=50, feed_previous=0.0,
                  optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
-                 chained_encoders=False, chaining_strategy=None, more_dropout=False,
+                 chained_encoders=False, chaining_strategy=None, more_dropout=False, align_encoder_id=0,
                  **kwargs):
         self.encoders = encoders
         self.decoder = decoder
@@ -161,7 +161,7 @@ class Seq2SeqModel(object):
         self.outputs, self.attention_weights, _, _, _, self.beam_tensors = decoders.attention_decoder(
             attention_states=self.attention_states, initial_state=self.encoder_state,
             feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
-            **parameters
+            align_encoder_id=align_encoder_id, **parameters
         )
         self.xent_loss = decoders.sequence_loss(logits=self.outputs, targets=self.targets[:, 1:],
                                                 weights=self.target_weights)

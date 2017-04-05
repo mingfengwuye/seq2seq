@@ -408,7 +408,7 @@ def heatmap(xlabels=None, ylabels=None, weights=None, output_file=None):
     plt.tight_layout()
     plt.subplots_adjust(wspace=0, hspace=0)
     # ax.set_aspect('equal')
-    ax.grid(False)
+    ax.grid(True)
 
     xsize = max(2.0 + len(xlabels) / 3, 8.0)
     ysize = max(2.0 + len(ylabels) / 3, 8.0)

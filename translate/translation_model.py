@@ -163,7 +163,7 @@ class TranslationModel:
                 else:
                     yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
 
-    def align(self, sess, output=None, **kwargs):
+    def align(self, sess, output=None, align_encoder_id=0, **kwargs):
         if len(self.filenames.test) != len(self.extensions):
             raise Exception('wrong number of input files')
 
@@ -199,7 +199,7 @@ class TranslationModel:
             utils.debug(weights)
 
             trg_tokens.append(utils._EOS)
-            src_tokens = lines[0].split()[:max_len - 1] + [utils._EOS]
+            src_tokens = lines[align_encoder_id].split()[:max_len - 1] + [utils._EOS]
 
             output_file = '{}.{}.svg'.format(output, line_id + 1) if output is not None else None
 

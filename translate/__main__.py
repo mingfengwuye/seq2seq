@@ -45,6 +45,8 @@ parser.add_argument('--raw-output', action='store_const', const=True)
 parser.add_argument('--pred-edits', action='store_const', const=True)
 parser.add_argument('--model-dir')
 
+parser.add_argument('--align-encoder-id', type=int, default=0)
+
 
 def main(args=None):
     args = parser.parse_args(args)
