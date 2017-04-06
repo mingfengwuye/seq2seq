@@ -13,7 +13,7 @@ max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data
-model_dir: experiments/APE16/edits/tests-chained/model.8
+model_dir: experiments/APE16/edits/tests-multi/global_syn
 
 batch_size: 32
 
@@ -34,25 +34,14 @@ read_ahead: 10
 
 encoders:
   - name: mt
-    align_edits: True
-    attention_type: 'local'
-    attention_window_size: 0
-
+    attention_type: 'global'
   - name: src
     attention_type: 'global'
 
 decoder:
     name: edits
     pred_edits: True
+    aggregation_method: sum
 
 train_prefix: train.concat
 vocab_prefix: vocab.concat
-
-chained_encoders: True
-chaining_strategy: map_outputs   # share_states, share_outputs, concat_attns, concat_states, sum_attns, map_attns
-
-more_dropout: False
-chaining_non_linearity: False
-chaining_bias: False
-chaining_loss_ratio: 1.0
-chaining_stop_gradient: True

@@ -13,7 +13,7 @@ max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data
-model_dir: experiments/APE16/edits/tests/global_syn
+model_dir: experiments/APE16/edits/tests-chained/model.trg
 
 batch_size: 32
 
@@ -42,3 +42,4 @@ decoder:
 
 train_prefix: train.concat
 vocab_prefix: vocab.concat
+

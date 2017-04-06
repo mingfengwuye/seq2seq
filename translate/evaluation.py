@@ -147,8 +147,7 @@ def corpus_scores(hypotheses, references, main='bleu', **kwargs):
 
     scores = OrderedDict([('bleu', bleu_score), ('ter', ter), ('wer', wer)])
     main_score = scores[main]
-    summary = ' '.join([summary] + ['{}={:.2f}'.format(k, v)
-                                    for k, v in scores.items() if k != main])
+    summary = ' '.join(['{}={:.2f}'.format(k, v) for k, v in scores.items() if k != main] + [summary])
 
     return main_score, summary
 
