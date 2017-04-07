@@ -23,14 +23,33 @@ mv ${main_dir}/output.1.svg ${main_dir}/src.chained-global.svg
 ./seq2seq.sh ${main_dir}/model.src.yaml --model-dir ${main_dir}/chained_global_syn --align current/data/dev.1.{src,mt} --output ${main_dir}/output --no-gpu 2>/dev/null
 mv ${main_dir}/output.1.svg ${main_dir}/src.chained-global-syn.svg
 
+./seq2seq.sh ${main_dir}/model.src.yaml --model-dir ${main_dir}/chained_syn_new --align current/data/dev.1.{src,mt} --output ${main_dir}/output --no-gpu 2>/dev/null
+mv ${main_dir}/output.1.svg ${main_dir}/src.chained-syn-new.svg
+
+echo "dev src->mt->pe"
 printf "chained            "; ./seq2seq.sh ${main_dir}/chained/config.yaml --eval current/data/dev.{mt,src,edits} 2>&1 | tail -n1 | sed "s/.*dev //"
 printf "chained-syn        "; ./seq2seq.sh ${main_dir}/chained_syn/config.yaml --eval current/data/dev.{mt,src,edits} 2>&1 | tail -n1 | sed "s/.*dev //"
 printf "chained-syn-new    "; ./seq2seq.sh ${main_dir}/chained_syn_new/config.yaml --eval current/data/dev.{mt,src,edits} 2>&1 | tail -n1 | sed "s/.*dev //"
 printf "chained-global     "; ./seq2seq.sh ${main_dir}/chained_global/config.yaml --eval current/data/dev.{mt,src,edits} 2>&1 | tail -n1 | sed "s/.*dev //"
 printf "chained-global-syn "; ./seq2seq.sh ${main_dir}/chained_global_syn/config.yaml --eval current/data/dev.{mt,src,edits} 2>&1 | tail -n1 | sed "s/.*dev //"
 
+echo "test src->mt->pe"
 printf "chained            "; ./seq2seq.sh ${main_dir}/chained/config.yaml --eval current/data/test.{mt,src,edits} 2>&1 | tail -n1 | sed "s/.*dev //"
 printf "chained-syn        "; ./seq2seq.sh ${main_dir}/chained_syn/config.yaml --eval current/data/test.{mt,src,edits} 2>&1 | tail -n1 | sed "s/.*dev //"
 printf "chained-syn-new    "; ./seq2seq.sh ${main_dir}/chained_syn_new/config.yaml --eval current/data/test.{mt,src,edits} 2>&1 | tail -n1 | sed "s/.*dev //"
 printf "chained-global     "; ./seq2seq.sh ${main_dir}/chained_global/config.yaml --eval current/data/test.{mt,src,edits} 2>&1 | tail -n1 | sed "s/.*dev //"
 printf "chained-global-syn "; ./seq2seq.sh ${main_dir}/chained_global_syn/config.yaml --eval current/data/test.{mt,src,edits} 2>&1 | tail -n1 | sed "s/.*dev //"
+
+echo "dev src->mt"
+printf "chained            ";./seq2seq.sh ${main_dir}/model.src.yaml --model-dir ${main_dir}/chained --eval current/data/dev.{src,mt} 2>&1 | tail -n1 | sed "s/.*dev //"
+printf "chained-syn        ";./seq2seq.sh ${main_dir}/model.src.yaml --model-dir ${main_dir}/chained_syn --eval current/data/dev.{src,mt} 2>&1 | tail -n1 | sed "s/.*dev //"
+printf "chained-syn-new    ";./seq2seq.sh ${main_dir}/model.src.yaml --model-dir ${main_dir}/chained_syn_new --eval current/data/dev.{src,mt} 2>&1 | tail -n1 | sed "s/.*dev //"
+printf "chained-global     ";./seq2seq.sh ${main_dir}/model.src.yaml --model-dir ${main_dir}/chained_global --eval current/data/dev.{src,mt} 2>&1 | tail -n1 | sed "s/.*dev //"
+printf "chained-global-syn ";./seq2seq.sh ${main_dir}/model.src.yaml --model-dir ${main_dir}/chained_global_syn --eval current/data/dev.{src,mt} 2>&1 | tail -n1 | sed "s/.*dev //"
+
+echo "dev src->pe"
+printf "chained            ";./seq2seq.sh ${main_dir}/model.src.yaml --model-dir ${main_dir}/chained --eval current/data/dev.{src,pe} 2>&1 | tail -n1 | sed "s/.*dev //"
+printf "chained-syn        ";./seq2seq.sh ${main_dir}/model.src.yaml --model-dir ${main_dir}/chained_syn --eval current/data/dev.{src,pe} 2>&1 | tail -n1 | sed "s/.*dev //"
+printf "chained-syn-new    ";./seq2seq.sh ${main_dir}/model.src.yaml --model-dir ${main_dir}/chained_syn_new --eval current/data/dev.{src,pe} 2>&1 | tail -n1 | sed "s/.*dev //"
+printf "chained-global     ";./seq2seq.sh ${main_dir}/model.src.yaml --model-dir ${main_dir}/chained_global --eval current/data/dev.{src,pe} 2>&1 | tail -n1 | sed "s/.*dev //"
+printf "chained-global-syn ";./seq2seq.sh ${main_dir}/model.src.yaml --model-dir ${main_dir}/chained_global_syn --eval current/data/dev.{src,pe} 2>&1 | tail -n1 | sed "s/.*dev //"
