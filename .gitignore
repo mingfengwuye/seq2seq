@@ -32,3 +32,5 @@ models/
 model/
 .spyderproject
 wsclient.cred
+*.svg
+*.png
