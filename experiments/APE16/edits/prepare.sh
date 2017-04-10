@@ -37,16 +37,10 @@ done
 scripts/prepare-data.py ${data_dir}/train.concat src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.concat \
 --vocab-size 30000
 
-# TODO: truecase data
+cat ${data_dir}/{4M,train.concat}.mt > ${data_dir}/train.all.mt
+cat ${data_dir}/{4M,train.concat}.pe > ${data_dir}/train.all.pe
+cat ${data_dir}/{4M,train.concat}.src > ${data_dir}/train.all.src
+cat ${data_dir}/{4M,train.concat}.edits > ${data_dir}/train.all.edits
 
-#scripts/reverse.py < ${data_dir}/train.mt > ${data_dir}/train.rev.mt
-#scripts/reverse.py < ${data_dir}/train.pe > ${data_dir}/train.rev.pe
-#scripts/reverse.py < ${data_dir}/train.edits > ${data_dir}/train.rev.edits
-#
-#cat ${data_dir}/{train,train.rev}.mt > ${data_dir}/train.concat.mt
-#cat ${data_dir}/{train,train.rev}.pe > ${data_dir}/train.concat.pe
-#cat ${data_dir}/{train,train.rev}.edits > ${data_dir}/train.concat.edits
-#
-#scripts/reverse.py < ${data_dir}/dev.mt > ${data_dir}/dev.rev.mt
-#scripts/reverse.py < ${data_dir}/dev.pe > ${data_dir}/dev.rev.pe
-#scripts/reverse.py < ${data_dir}/dev.edits > ${data_dir}/dev.rev.edits
+scripts/prepare-data.py ${data_dir}/train.all src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.all \
+--vocab-size 60000
