@@ -1,8 +1,8 @@
 
 dropout_rate: 0.5
-cell_size: 1024
-attn_size: 1024
-embedding_size: 512
+cell_size: 512
+attn_size: 512
+embedding_size: 256
 
 layers: 1
 bidir: True
@@ -15,7 +15,7 @@ weight_scale: 0.1
 data_dir: experiments/APE16/edits/data
 model_dir: experiments/APE16/edits/tests-chained/chained_all
 
-batch_size: 32
+batch_size: 64
 
 optimizer: 'sgd'
 learning_rate: 1.0
@@ -56,3 +56,5 @@ chaining_non_linearity: True
 chaining_bias: True
 chaining_loss_ratio: 0.5
 chaining_stop_gradient: False
+
+vocab_size: 30000
