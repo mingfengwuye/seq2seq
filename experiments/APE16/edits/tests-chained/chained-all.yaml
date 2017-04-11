@@ -8,7 +8,7 @@ layers: 1
 bidir: True
 use_lstm: True
 
-max_output_len: 45   # 99% coverage
+max_output_len: 50   # 99% coverage
 max_input_len: 39
 weight_scale: 0.1
 
@@ -17,9 +17,9 @@ model_dir: experiments/APE16/edits/tests-chained/chained_all
 
 batch_size: 64
 
-optimizer: 'sgd'
-learning_rate: 1.0
-learning_rate_decay_factor: 0.75
+optimizer: 'adam'
+learning_rate: 0.001
+learning_rate_decay_factor: 0.9
 decay_every_n_epoch: 0.25
 decay_after_n_epoch: 0
 
@@ -46,15 +46,13 @@ decoder:
     pred_edits: True
 
 train_prefix: train.all
-vocab_prefix: vocab.all
+vocab_prefix: vocab.all.30k
 
 chained_encoders: True
-chaining_strategy: map_attns   # share_states, share_outputs, concat_attns, concat_states, sum_attns, map_attns
+chaining_strategy: map_attns
 
 more_dropout: False
 chaining_non_linearity: True
 chaining_bias: True
 chaining_loss_ratio: 0.5
 chaining_stop_gradient: False
-
-vocab_size: 30000
