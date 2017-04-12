@@ -37,6 +37,7 @@ done
 scripts/prepare-data.py ${data_dir}/train.concat src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.concat \
 --vocab-size 30000
 
+# train.all dataset
 cat ${data_dir}/{4M,train.concat}.mt > ${data_dir}/train.all.mt
 cat ${data_dir}/{4M,train.concat}.pe > ${data_dir}/train.all.pe
 cat ${data_dir}/{4M,train.concat}.src > ${data_dir}/train.all.src
@@ -44,3 +45,22 @@ cat ${data_dir}/{4M,train.concat}.edits > ${data_dir}/train.all.edits
 
 scripts/prepare-data.py ${data_dir}/train.all src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.all \
 --vocab-size 60000
+
+# smaller vocab
+head -n30000 ${data_dir}/vocab.all.mt > ${data_dir}/vocab.all.30k.mt
+head -n30000 ${data_dir}/vocab.all.pe > ${data_dir}/vocab.all.30k.pe
+head -n30000 ${data_dir}/vocab.all.src > ${data_dir}/vocab.all.30k.src
+head -n30000 ${data_dir}/vocab.all.edits > ${data_dir}/vocab.all.30k.edits
+
+# train.100k dataset
+head -n100000 ${data_dir}/500K.mt > ${data_dir}/train.100k.mt
+head -n100000 ${data_dir}/500K.pe > ${data_dir}/train.100k.pe
+head -n100000 ${data_dir}/500K.src > ${data_dir}/train.100k.src
+head -n100000 ${data_dir}/500K.edits > ${data_dir}/train.100k.edits
+cat ${data_dir}/train.mt >> ${data_dir}/train.100k.mt
+cat ${data_dir}/train.pe >> ${data_dir}/train.100k.pe
+cat ${data_dir}/train.src >> ${data_dir}/train.100k.src
+cat ${data_dir}/train.edits >> ${data_dir}/train.100k.edits
+
+scripts/prepare-data.py ${data_dir}/train.100k src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.100k \
+--vocab-size 30000
