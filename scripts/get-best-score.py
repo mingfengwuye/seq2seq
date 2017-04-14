@@ -30,7 +30,10 @@ if __name__ == '__main__':
                 scores.setdefault(current_step, scores_)
 
         def key(d):
-            score = d.get(args.score.lower()) or d.get('score')
+            score = d.get(args.score.lower())
+            if score is None:
+                score = d.get('score')
+
             if args.score in ('ter', 'wer'):
                 score = -score
             return score
