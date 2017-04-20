@@ -8,12 +8,12 @@ layers: 1
 bidir: True
 use_lstm: True
 
-max_output_len: 34   # 95% coverage
-max_input_len: 34
+max_output_len: 43   # 95% coverage
+max_input_len: 36
 weight_scale: 0.1
 
-data_dir: experiments/APE17/edits/data
-model_dir: experiments/APE17/edits/global_mt_pe
+data_dir: experiments/APE17/edits/data_subwords
+model_dir: experiments/APE17/edits/multi_sub
 
 batch_size: 32
 
@@ -34,9 +34,18 @@ read_ahead: 10
 
 encoders:
   - name: mt
+    align_edits: True
+    attention_type: 'local'
+    attention_window_size: 0
+
+  - name: src
     attention_type: 'global'
 
 decoder:
-    name: pe
+    name: edits
+    pred_edits: True
+    aggregation_method: 'concat'
 
+train_prefix: train
+vocab_prefix: vocab
 dev_prefix: [train-dev]
