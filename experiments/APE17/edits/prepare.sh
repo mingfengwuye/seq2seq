@@ -14,4 +14,4 @@ if [ ! -f ${raw_data}/dev.edits ]; then
 fi
 
 scripts/prepare-data.py ${raw_data}/train src pe mt edits ${data_dir} --no-tokenize \
---dev-size 2000 --test-corpus ${raw_data}/dev --dev-prefix train-dev --test-prefix dev
+--dev-size 1000 --test-corpus ${raw_data}/dev --dev-prefix train-dev --test-prefix dev
