@@ -44,6 +44,7 @@ parser.add_argument('--remove-unk', action='store_const', const=True)
 parser.add_argument('--raw-output', action='store_const', const=True)
 parser.add_argument('--pred-edits', action='store_const', const=True)
 parser.add_argument('--model-dir')
+parser.add_argument('--batch-size', type=int)
 
 parser.add_argument('--align-encoder-id', type=int, default=0)
 
