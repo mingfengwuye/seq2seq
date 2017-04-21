@@ -199,7 +199,7 @@ def tercom_statistics(hypotheses, references, case_sensitive=True, **kwargs):
         subprocess.call(cmd, stdout=output, stderr=output)
 
     with open(filename + '.sum') as f:
-        fields = ['DEL', 'INS', 'SUB', 'SHIFT', 'WORD_SHIFT', 'ERRORS', 'REF_WORDS']
+        fields = ['DEL', 'INS', 'SUB', 'SHIFT', 'WORD_SHIFT', 'ERRORS', 'REF_WORDS', 'TER']
 
         stats = []
         for line in f:
@@ -221,4 +221,5 @@ def tercom_statistics(hypotheses, references, case_sensitive=True, **kwargs):
         total = {k: v / len(stats) for k, v in total.items()}
 
     os.remove(filename + '.sum')
+
     return total, stats

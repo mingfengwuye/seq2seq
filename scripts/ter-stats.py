@@ -18,4 +18,6 @@ if __name__ == '__main__':
         references = [line.strip() for line in trg_file]
 
         total, _ = tercom_statistics(hypotheses, references, not args.case_insensitive)
+
+        total['TER'] = total['ERRORS'] / total['REF_WORDS']
         print(' '.join('{}={:.2f}'.format(k, v) for k, v in sorted(total.items())))

@@ -24,3 +24,5 @@ scripts/prepare-data.py ${raw_data}/train src mt pe ${data_dir} --dev-corpus ${r
 scripts/extract-edits.py ${data_dir}/train.{mt,pe} > ${data_dir}/train.edits
 scripts/extract-edits.py ${data_dir}/train-dev.{mt,pe} > ${data_dir}/train-dev.edits
 scripts/extract-edits.py ${data_dir}/dev.{mt,pe} > ${data_dir}/dev.edits
+
+scripts/prepare-data.py ${raw_data}/train edits ${data_dir} --mode vocab
