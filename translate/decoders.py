@@ -37,13 +37,14 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
             encoder_inputs_ = encoder_inputs[i]
             encoder_input_length_ = encoder_input_length[i]
 
-            if encoder.use_lstm:
-                cell = BasicLSTMCell(encoder.cell_size, state_is_tuple=False)
-            else:
-                cell = GRUCell(encoder.cell_size)
-
-            if dropout is not None:
-                cell = DropoutWrapper(cell, input_keep_prob=dropout)
+            def cell():
+                if encoder.use_lstm:
+                    cell = BasicLSTMCell(encoder.cell_size, state_is_tuple=False)
+                else:
+                    cell = GRUCell(encoder.cell_size)
+                if dropout is not None:
+                    cell = DropoutWrapper(cell, input_keep_prob=dropout)
+                return cell
 
             embedding = embedding_variables[i]
 
@@ -70,11 +71,12 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
 
             if encoder.bidir:
                 encoder_outputs_, _, _ = multi_bidirectional_rnn_unsafe(
-                    cells=[(cell, cell)] * encoder.layers, **parameters)
+                    cells=[(cell(), cell()) for _ in range(encoder.layers)],
+                    **parameters)
                 encoder_state_ = encoder_outputs_[:, 0, encoder.cell_size:]
             else:
                 encoder_outputs_, encoder_state_ = multi_rnn_unsafe(
-                    cells=[cell] * encoder.layers, **parameters)
+                    cells=[cell()] * encoder.layers, **parameters)
                 encoder_state_ = encoder_outputs_[:, -1, :]   # FIXME
 
             encoder_outputs.append(encoder_outputs_)
