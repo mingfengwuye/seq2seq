@@ -53,13 +53,15 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, 
             encoder_input_length_ = encoder_input_length[i]
 
             # TODO: use state_is_tuple=True
-            if encoder.use_lstm:
-                cell = BasicLSTMCell(encoder.cell_size, state_is_tuple=False)
-            else:
-                cell = GRUCell(encoder.cell_size, initializer=orthogonal_initializer())
+            def cell():
+                if encoder.use_lstm:
+                    cell = BasicLSTMCell(encoder.cell_size, state_is_tuple=False)
+                else:
+                    cell = GRUCell(encoder.cell_size, initializer=orthogonal_initializer())
 
-            if dropout is not None:
-                cell = DropoutWrapper(cell, input_keep_prob=dropout)
+                if dropout is not None:
+                    cell = DropoutWrapper(cell, input_keep_prob=dropout)
+                return cell
 
             embedding = embedding_variables[i]
 
@@ -96,13 +98,13 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, dropout=None, 
 
             if encoder.bidir:
                 encoder_outputs_, _, _ = multi_bidirectional_rnn_unsafe(
-                    cells=[(cell, cell)] * encoder.layers, **parameters)
+                    cells=[(cell(), cell()) for _ in range(encoder.layers)], **parameters)
                 # Like Bahdanau et al., we use the first annotation h_1 of the backward encoder
                 encoder_state_ = encoder_outputs_[:, 0, encoder.cell_size:]
                 # TODO: if multiple layers, combine last states with a Maxout layer
             else:
                 encoder_outputs_, encoder_state_ = multi_rnn_unsafe(
-                    cells=[cell] * encoder.layers, **parameters)
+                    cells=[cell()] * encoder.layers, **parameters)
                 encoder_state_ = encoder_outputs_[:, -1, :]
 
             encoder_outputs.append(encoder_outputs_)
