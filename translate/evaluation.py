@@ -208,7 +208,7 @@ def tercom_statistics(hypotheses, references, case_sensitive=True, **kwargs):
                 continue
             try:
                 # values = np.array([float(x) for x in values[1:]])
-                values = dict(zip(fields, map(float, values[1:])))
+                values = dict(zip(fields, [float(x.replace(',', '.')) for x in values[1:]]))
             except ValueError:
                 continue
 

@@ -13,12 +13,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     with open(args.indices) as f:
-        indices = sorted(list(set([int(line) for line in f])))
+        indices = sorted(list(set([int(line) for line in f])), reverse=True)
 
     for i, line in enumerate(sys.stdin):
         if len(indices) == 0:
             break
 
-        if i == indices[0]:
-            indices.pop(0)
+        if i == indices[-1]:
+            indices.pop()
             print(line.rstrip('\r\n'))
