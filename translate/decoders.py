@@ -90,6 +90,7 @@ def compute_energy(hidden, state, attn_size, **kwargs):
     input_size = hidden.get_shape()[2].value
 
     y = linear_unsafe(state, attn_size, bias=True, scope='W_a')
+    # y = tf.layers.dense(state, attn_size, use_bias=True, name='W_a')
     y = tf.expand_dims(y, axis=1)
 
     k = get_variable_unsafe('U_a', [input_size, attn_size])

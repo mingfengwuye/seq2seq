@@ -31,3 +31,20 @@ fi
 cp ${raw_data}/{train,train-dev,dev}.{src,mt,pe,edits} ${data_dir}
 
 scripts/prepare-data.py ${raw_data}/train src pe mt edits ${data_dir} --mode vocab
+
+if [ ! -f ${raw_data}/mono.500k.edits ]; then
+    scripts/extract-edits.py ${raw_data}/mono.500k.{mt,pe} > ${raw_data}/mono.500k.edits
+fi
+
+cp ${raw_data}/mono.500k.{mt,src,pe,edits} ${data_dir}
+rename "s/mono.500k/train.concat/" ${data_dir}/mono.500k.*
+
+for i in {1..10}; do   # oversample PE data
+    cat ${data_dir}/train.mt >> ${data_dir}/train.concat.mt
+    cat ${data_dir}/train.pe >> ${data_dir}/train.concat.pe
+    cat ${data_dir}/train.src >> ${data_dir}/train.concat.src
+    cat ${data_dir}/train.edits >> ${data_dir}/train.concat.edits
+done
+
+scripts/prepare-data.py ${data_dir}/train.concat src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.concat \
+--vocab-size 30000
