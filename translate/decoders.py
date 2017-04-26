@@ -273,16 +273,21 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
     embed = get_embedding_function(decoder)
 
-    if decoder.use_lstm:
-        cell = BasicLSTMCell(decoder.cell_size, state_is_tuple=False)
-    else:
-        cell = GRUCell(decoder.cell_size)
+    def get_cell():
+        if decoder.use_lstm:
+            cell = BasicLSTMCell(decoder.cell_size, state_is_tuple=False)
+        else:
+            cell = GRUCell(decoder.cell_size)
 
-    if dropout is not None:
-        cell = DropoutWrapper(cell, input_keep_prob=dropout)
+        if dropout is not None:
+            cell = DropoutWrapper(cell, input_keep_prob=dropout)
+        return cell
 
     if decoder.layers > 1:
-        cell = MultiRNNCell([cell] * decoder.layers)
+        cell = MultiRNNCell([get_cell() for _ in range(decoder.layers)],
+                            state_is_tuple=False)
+    else:
+        cell = get_cell()
 
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
         attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,

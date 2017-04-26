@@ -9,7 +9,7 @@ description: |
 # SGD parameters
 learning_rate: 0.001           # initial learning rate
 sgd_learning_rate: 1.0
-learning_rate_decay_factor: null
+learning_rate_decay_factor: 1.0
 decay_every_n_epoch: null
 decay_after_n_epoch: 0         # start decaying learning rate after this many epochs
 decay_if_no_progress: null     # measure average loss over this many checkpoints, and decay if no progress
