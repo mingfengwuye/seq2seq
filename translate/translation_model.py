@@ -483,16 +483,18 @@ class TranslationModel:
 variable_mapping = {   # for back-compatibility with old models
 'encoder_mt/initial_state_fw:0': 'encoder_mt/forward_1/initial_state:0',
 'encoder_mt/initial_state_bw:0': 'encoder_mt/backward_1/initial_state:0',
-'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/basic_lstm_cell/weights:0': 'encoder_mt/forward_1/basic_lstm_cell/weights:0',
-'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/basic_lstm_cell/biases:0': 'encoder_mt/forward_1/basic_lstm_cell/biases:0',
-'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/basic_lstm_cell/weights:0': 'encoder_mt/backward_1/basic_lstm_cell/weights:0',
-'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/basic_lstm_cell/biases:0': 'encoder_mt/backward_1/basic_lstm_cell/biases:0',
+'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/layer_norm_basic_lstm_cell/weights:0': 'encoder_mt/forward_1/basic_lstm_cell/weights:0',
+'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/layer_norm_basic_lstm_cell/biases:0': 'encoder_mt/forward_1/basic_lstm_cell/biases:0',
+'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/layer_norm_basic_lstm_cell/weights:0': 'encoder_mt/backward_1/basic_lstm_cell/weights:0',
+'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/layer_norm_basic_lstm_cell/biases:0': 'encoder_mt/backward_1/basic_lstm_cell/biases:0',
 'decoder_edits/initial_state_projection/kernel:0': 'decoder_edits/initial_state_projection/Matrix:0',
 'decoder_edits/initial_state_projection/bias:0': 'decoder_edits/initial_state_projection/Bias:0',
 'decoder_edits/maxout/kernel:0': 'decoder_edits/maxout/Matrix:0',
 'decoder_edits/softmax0/kernel:0': 'decoder_edits/softmax0/Matrix:0',
 'decoder_edits/softmax1/kernel:0': 'decoder_edits/softmax1/Matrix:0',
-'decoder_edits/softmax1/bias:0': 'decoder_edits/softmax1/Bias:0'
+'decoder_edits/softmax1/bias:0': 'decoder_edits/softmax1/Bias:0',
+'decoder_edits/layer_norm_basic_lstm_cell/weights:0': 'decoder_edits/basic_lstm_cell/weights:0',
+'decoder_edits/layer_norm_basic_lstm_cell/biases:0': 'decoder_edits/basic_lstm_cell/biases:0',
 }
 
 

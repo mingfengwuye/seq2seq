@@ -59,17 +59,16 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
             encoder_input_length_ = encoder_input_length[i]
 
             def get_cell():
-                if encoder.use_lstm and encoder.layer_norm:
+                if encoder.use_lstm:
                     keep_prob = dropout if dropout else 1.0
-                    cell = LayerNormBasicLSTMCell(encoder.cell_size, dropout_keep_prob=keep_prob)
+                    cell = LayerNormBasicLSTMCell(encoder.cell_size, dropout_keep_prob=keep_prob,
+                                                  layer_norm=encoder.layer_norm)
                 else:
-                    if encoder.use_lstm:
-                        cell = BasicLSTMCell(encoder.cell_size)
-                    else:
-                        cell = GRUCell(encoder.cell_size)
+                    cell = GRUCell(encoder.cell_size)
 
                     if dropout is not None:
                         cell = DropoutWrapper(cell, input_keep_prob=dropout)
+
                 return cell
 
             embedding = embedding_variables[i]
@@ -317,17 +316,16 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     embed = get_embedding_function(decoder)
 
     def get_cell():
-        if decoder.use_lstm and decoder.layer_norm:
+        if decoder.use_lstm:
             keep_prob = dropout if dropout else 1.0
-            cell = LayerNormBasicLSTMCell(decoder.cell_size, dropout_keep_prob=keep_prob)
+            cell = LayerNormBasicLSTMCell(decoder.cell_size, dropout_keep_prob=keep_prob,
+                                          layer_norm=decoder.layer_norm)
         else:
-            if decoder.use_lstm:
-                cell = BasicLSTMCell(decoder.cell_size, state_is_tuple=True)
-            else:
-                cell = GRUCell(decoder.cell_size)
+            cell = GRUCell(decoder.cell_size)
 
             if dropout is not None:
                 cell = DropoutWrapper(cell, input_keep_prob=dropout)
+
         return cell
 
     if decoder.layers > 1:
