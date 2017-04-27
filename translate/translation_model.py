@@ -480,6 +480,22 @@ class TranslationModel:
         save_checkpoint(sess, self.saver, self.checkpoint_dir, self.global_step)
 
 
+variable_mapping = {   # for back-compatibility with old models
+'encoder_mt/initial_state_fw:0': 'encoder_mt/forward_1/initial_state:0',
+'encoder_mt/initial_state_bw:0': 'encoder_mt/backward_1/initial_state:0',
+'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/basic_lstm_cell/weights:0': 'encoder_mt/forward_1/basic_lstm_cell/weights:0',
+'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/basic_lstm_cell/biases:0': 'encoder_mt/forward_1/basic_lstm_cell/biases:0',
+'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/basic_lstm_cell/weights:0': 'encoder_mt/backward_1/basic_lstm_cell/weights:0',
+'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/basic_lstm_cell/biases:0': 'encoder_mt/backward_1/basic_lstm_cell/biases:0',
+'decoder_edits/initial_state_projection/kernel:0': 'decoder_edits/initial_state_projection/Matrix:0',
+'decoder_edits/initial_state_projection/bias:0': 'decoder_edits/initial_state_projection/Bias:0',
+'decoder_edits/maxout/kernel:0': 'decoder_edits/maxout/Matrix:0',
+'decoder_edits/softmax0/kernel:0': 'decoder_edits/softmax0/Matrix:0',
+'decoder_edits/softmax1/kernel:0': 'decoder_edits/softmax1/Matrix:0',
+'decoder_edits/softmax1/bias:0': 'decoder_edits/softmax1/Bias:0'
+}
+
+
 def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
     """
     if `filename` is None, we load last checkpoint, otherwise
@@ -498,20 +514,30 @@ def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
     if os.path.exists(var_file):
         with open(var_file, 'rb') as f:
             var_names = pickle.load(f)
-            variables = [var for var in tf.global_variables() if var.name in var_names]
+            variables = {}
+            if variable_mapping is not None:
+                for var in tf.global_variables():
+                    if var.name in var_names:
+                        variables[var.name] = var
+                    elif var.name in variable_mapping:
+                        mapped_name = variable_mapping[var.name]
+                        if mapped_name in var_names:
+                            variables[mapped_name] = var
+
     else:
-        variables = tf.global_variables()
+        variables = {var.name: var for var in tf.global_variables()}
 
     # remove variables from blacklist
-    variables = [var for var in variables if not any(prefix in var.name for prefix in blacklist)]
+    # variables = [var for var in variables if not any(prefix in var.name for prefix in blacklist)]
+    variables = {name[:-2]: var for name, var in variables.items() if not any(prefix in name for prefix in blacklist)}
 
     if filename is not None:
         utils.log('reading model parameters from {}'.format(filename))
         tf.train.Saver(variables).restore(sess, filename)
 
         utils.debug('retrieved parameters ({})'.format(len(variables)))
-        for var in variables:
-            utils.debug('  {} {}'.format(var.name, var.get_shape()))
+        for name, var in variables.items():
+            utils.debug('  {} {}'.format(name, var.get_shape()))
 
 
 def save_checkpoint(sess, saver, checkpoint_dir, step=None, name=None):

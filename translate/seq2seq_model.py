@@ -6,7 +6,6 @@ import itertools
 from translate import utils
 from translate import decoders
 from collections import namedtuple
-from translate.rnn import linear_unsafe
 
 
 class Seq2SeqModel(object):
@@ -86,9 +85,9 @@ class Seq2SeqModel(object):
                 **parameters
             )
 
-            xent_loss = decoders.sequence_loss(logits=outputs, targets=self.encoder_inputs[0],
-                                               weights=self.input_weights[0])
-            self.losses.append(xent_loss)
+            chaining_loss = decoders.sequence_loss(logits=outputs, targets=self.encoder_inputs[0],
+                                                   weights=self.input_weights[0])
+            self.losses.append(chaining_loss)
 
             if decoder.use_lstm:
                 size = states.get_shape()[2].value
@@ -110,7 +109,7 @@ class Seq2SeqModel(object):
                               encoder_input_length=self.encoder_input_length[:1],
                               encoder_inputs=self.encoder_inputs[:1], other_inputs=other_inputs)
         else:
-            xent_loss = None
+            chaining_loss = None
             parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length,
                               encoder_inputs=self.encoder_inputs)
@@ -163,15 +162,15 @@ class Seq2SeqModel(object):
             feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
             align_encoder_id=align_encoder_id, **parameters
         )
+        self.beam_output = decoders.softmax(self.outputs[:, 0, :])
+
         self.xent_loss = decoders.sequence_loss(logits=self.outputs, targets=self.targets[:, 1:],
                                                 weights=self.target_weights)
         self.losses.append(self.xent_loss)
 
         chaining_loss_ratio = kwargs.get('chaining_loss_ratio')
-        if xent_loss is not None and chaining_loss_ratio:
-            self.xent_loss += chaining_loss_ratio * xent_loss
-
-        self.beam_output = decoders.softmax(self.outputs[:, 0, :])
+        if chaining_loss is not None and chaining_loss_ratio:
+            self.xent_loss += chaining_loss_ratio * chaining_loss
 
         optimizers = self.get_optimizers(optimizer, learning_rate)
         if not decode_only:
@@ -313,15 +312,6 @@ class Seq2SeqModel(object):
             new_input = []
             new_beam_size = beam_size
 
-            input_len = encoder_inputs[0].shape[1] - 1
-            def is_valid(hypothesis):
-                h = itertools.takewhile(lambda x: x != utils.EOS_ID, hypothesis)
-                hyp_len = sum(1 for x in h if x in [utils.KEEP_ID, utils.SUB_ID, utils.DEL_ID])
-                if hyp_len > input_len:
-                    return False
-                else:
-                    return hyp_len == input_len or utils.EOS_ID not in hypothesis
-
             greedy_tokens = {}
 
             for flat_id, hyp_id, token_id in zip(flat_ids, hyp_ids, token_ids_):
@@ -329,17 +319,9 @@ class Seq2SeqModel(object):
                 score = scores_[flat_id]
 
                 if self.decoder.pred_edits:
-                    # if not is_valid(hypothesis):
-                    #     continue
-
                     # always follow greedy recommendation
                     op_id = min(token_id, len(utils._START_VOCAB))
                     greedy_tokens.setdefault(hyp_id, op_id)
-
-                    # print(greedy_tokens.get(hyp_id), op_id)
-
-                    # if op_id != greedy_tokens.get(hyp_id):
-                    #     continue
 
                 if token_id == utils.EOS_ID:
                     # hypothesis is finished, it is thus unnecessary to keep expanding it
@@ -361,9 +343,6 @@ class Seq2SeqModel(object):
                 if len(new_hypotheses) == beam_size:
                     break
 
-            # print(new_hypotheses)
-            # print(k, greedy_tokens)
-
             beam_size = new_beam_size
             hypotheses = new_hypotheses
             beam_data = [np.array(data_) for data_ in new_data]
@@ -378,16 +357,6 @@ class Seq2SeqModel(object):
 
         if self.len_normalization > 0:  # normalize score by length (to encourage longer sentences)
             scores /= [len(hypothesis) ** self.len_normalization for hypothesis in hypotheses]
-
-        # def pep_penalty(hypothesis):
-        #     penalty = sum(1 for token_id in hypothesis if token_id >= len(utils._START_VOCAB)
-        #                   and vocabs[1].reverse[token_id] not in src_words)
-        #     return penalty
-        #
-        # if self.decoder.pred_edits:
-        #     src_words = set(encoder_inputs[0][0])
-        #     src_words = set(vocabs[0].reverse[token_id] for token_id in src_words)
-        #     scores = np.array([score + pep_penalty(hyp) for score, hyp in zip(scores, hypotheses)])
 
         # sort best-list by score
         sorted_idx = np.argsort(scores)
@@ -415,12 +384,9 @@ class Seq2SeqModel(object):
 
         for *src_sentences, trg_sentence in data:
             for i, (encoder, src_sentence) in enumerate(zip(self.encoders, src_sentences)):
-                pad = utils.EOS_ID
-
                 # pad sequences so that all sequences in the same batch have the same length
                 src_sentence = src_sentence[:max_input_len[i]]
-                encoder_pad = [pad] * (1 + max_input_len[i] - len(src_sentence))
-
+                encoder_pad = [utils.EOS_ID] * (1 + max_input_len[i] - len(src_sentence))
                 inputs[i].append(src_sentence + encoder_pad)
 
             trg_sentence = trg_sentence[:max_output_len]
@@ -432,12 +398,7 @@ class Seq2SeqModel(object):
                 targets.append(trg_sentence)
 
         # convert lists to numpy arrays
-        inputs = [
-            np.array(inputs_, dtype=np.int32)
-            for ext, inputs_ in zip(self.encoder_names, inputs)
-        ]
-
-        # starts with BOS and ends with EOS
-        targets = np.array(targets)
+        inputs = [np.array(inputs_, dtype=np.int32) for ext, inputs_ in zip(self.encoder_names, inputs)]
+        targets = np.array(targets) # starts with BOS and ends with EOS
 
         return inputs, targets

@@ -1,9 +1,30 @@
 import tensorflow as tf
 import functools
-from tensorflow.contrib.rnn import BasicLSTMCell, DropoutWrapper
-from translate.rnn import get_variable_unsafe, linear_unsafe, multi_rnn_unsafe
-from translate.rnn import multi_bidirectional_rnn_unsafe, unsafe_decorator, MultiRNNCell, GRUCell
+from tensorflow.contrib.rnn import BasicLSTMCell, DropoutWrapper, LayerNormBasicLSTMCell
+from tensorflow.contrib.rnn import stack_bidirectional_dynamic_rnn, MultiRNNCell, LSTMStateTuple, GRUCell
 from translate import utils
+
+
+def unsafe_decorator(fun):
+    """
+    Wrapper that automatically handles the `reuse' parameter.
+    This is rather risky, as it can lead to reusing variables
+    by mistake.
+    """
+    def fun_(*args, **kwargs):
+        try:
+            return fun(*args, **kwargs)
+        except ValueError as e:
+            if 'reuse' in str(e):
+                with tf.variable_scope(tf.get_variable_scope(), reuse=True):
+                    return fun(*args, **kwargs)
+            else:
+                raise e
+
+    return fun_
+
+
+get_variable_unsafe = unsafe_decorator(tf.get_variable)
 
 
 def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=None, dropout=None, **kwargs):
@@ -37,19 +58,24 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
             encoder_inputs_ = encoder_inputs[i]
             encoder_input_length_ = encoder_input_length[i]
 
-            def cell():
-                if encoder.use_lstm:
-                    cell = BasicLSTMCell(encoder.cell_size, state_is_tuple=False)
+            def get_cell():
+                if encoder.use_lstm and encoder.layer_norm:
+                    keep_prob = dropout if dropout else 1.0
+                    cell = LayerNormBasicLSTMCell(encoder.cell_size, dropout_keep_prob=keep_prob)
                 else:
-                    cell = GRUCell(encoder.cell_size)
-                if dropout is not None:
-                    cell = DropoutWrapper(cell, input_keep_prob=dropout)
+                    if encoder.use_lstm:
+                        cell = BasicLSTMCell(encoder.cell_size)
+                    else:
+                        cell = GRUCell(encoder.cell_size)
+
+                    if dropout is not None:
+                        cell = DropoutWrapper(cell, input_keep_prob=dropout)
                 return cell
 
             embedding = embedding_variables[i]
 
             if embedding is not None:
-                batch_size = tf.shape(encoder_inputs_)[0]  # TODO: fix this time major stuff
+                batch_size = tf.shape(encoder_inputs_)[0]
                 time_steps = tf.shape(encoder_inputs_)[1]
 
                 flat_inputs = tf.reshape(encoder_inputs_, [tf.multiply(batch_size, time_steps)])
@@ -64,20 +90,38 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
             # (while Theano repeats last state)
             parameters = dict(
                 inputs=encoder_inputs_, sequence_length=encoder_input_length_,
-                dtype=tf.float32, swap_memory=encoder.swap_memory,
-                parallel_iterations=encoder.parallel_iterations,
-                trainable_initial_state=True
+                dtype=tf.float32, parallel_iterations=encoder.parallel_iterations,
             )
 
+            state_size = get_cell().state_size
+            if isinstance(state_size, LSTMStateTuple):
+                state_size = state_size.c + state_size.h
+
+            def get_initial_state(name='initial_state'):
+                initial_state = tf.get_variable(name, initializer=tf.zeros(state_size))
+                initial_state = tf.tile(tf.expand_dims(initial_state, axis=0), [batch_size, 1])
+                if isinstance(get_cell().state_size, LSTMStateTuple):
+                    return LSTMStateTuple(*tf.split(initial_state, 2, axis=1))
+                else:
+                    return initial_state
+
             if encoder.bidir:
-                encoder_outputs_, _, _ = multi_bidirectional_rnn_unsafe(
-                    cells=[(cell(), cell()) for _ in range(encoder.layers)],
-                    **parameters)
-                encoder_state_ = encoder_outputs_[:, 0, encoder.cell_size:]
+                encoder_outputs_, _, _ = stack_bidirectional_dynamic_rnn(
+                    cells_fw=[get_cell() for _ in range(encoder.layers)],
+                    cells_bw=[get_cell() for _ in range(encoder.layers)],
+                    initial_states_fw=[get_initial_state('initial_state_fw')] * encoder.layers,
+                    initial_states_bw=[get_initial_state('initial_state_bw')] * encoder.layers,
+                    **parameters
+                )
+                encoder_state_ = encoder_outputs_[:, 0, encoder.cell_size:]  # first backward output
             else:
-                encoder_outputs_, encoder_state_ = multi_rnn_unsafe(
-                    cells=[cell()] * encoder.layers, **parameters)
-                encoder_state_ = encoder_outputs_[:, -1, :]   # FIXME
+                if encoder.layers > 1:
+                    cell = MultiRNNCell([get_cell() for _ in range(encoder.layers)])
+                else:
+                    cell = get_cell()
+
+                encoder_outputs_, _ = tf.nn.dynamic_rnn(cell=cell, initial_state=get_initial_state(), **parameters)
+                encoder_state_ = encoder_outputs_[:, -1, :]  # FIXME
 
             encoder_outputs.append(encoder_outputs_)
             encoder_states.append(encoder_state_)
@@ -89,14 +133,13 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
 def compute_energy(hidden, state, attn_size, **kwargs):
     input_size = hidden.get_shape()[2].value
 
-    y = linear_unsafe(state, attn_size, bias=True, scope='W_a')
-    # y = tf.layers.dense(state, attn_size, use_bias=True, name='W_a')
+    y = tf.layers.dense(state, attn_size, use_bias=True, name='W_a')
     y = tf.expand_dims(y, axis=1)
 
-    k = get_variable_unsafe('U_a', [input_size, attn_size])
+    k = tf.get_variable('U_a', [input_size, attn_size])
     f = tf.einsum('ijk,kl->ijl', hidden, k)
 
-    v = get_variable_unsafe('v_a', [attn_size])
+    v = tf.get_variable('v_a', [attn_size])
     s = f + y
 
     return tf.reduce_sum(v * tf.tanh(s), [2])
@@ -162,8 +205,8 @@ def local_attention(state, hidden_states, encoder, encoder_input_length, pos=Non
 
         pos_ = pos
         if pos is None:
-            wp = get_variable_unsafe('Wp', [state_size, state_size])
-            vp = get_variable_unsafe('vp', [state_size, 1])
+            wp = tf.get_variable('Wp', [state_size, state_size])
+            vp = tf.get_variable('vp', [state_size, 1])
 
             pos = tf.nn.sigmoid(tf.matmul(tf.nn.tanh(tf.matmul(state, wp)), vp))
             pos = tf.floor(encoder_input_length * pos)
@@ -274,18 +317,21 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     embed = get_embedding_function(decoder)
 
     def get_cell():
-        if decoder.use_lstm:
-            cell = BasicLSTMCell(decoder.cell_size, state_is_tuple=False)
+        if decoder.use_lstm and decoder.layer_norm:
+            keep_prob = dropout if dropout else 1.0
+            cell = LayerNormBasicLSTMCell(decoder.cell_size, dropout_keep_prob=keep_prob)
         else:
-            cell = GRUCell(decoder.cell_size)
+            if decoder.use_lstm:
+                cell = BasicLSTMCell(decoder.cell_size, state_is_tuple=True)
+            else:
+                cell = GRUCell(decoder.cell_size)
 
-        if dropout is not None:
-            cell = DropoutWrapper(cell, input_keep_prob=dropout)
+            if dropout is not None:
+                cell = DropoutWrapper(cell, input_keep_prob=dropout)
         return cell
 
     if decoder.layers > 1:
-        cell = MultiRNNCell([get_cell() for _ in range(decoder.layers)],
-                            state_is_tuple=False)
+        cell = MultiRNNCell([get_cell() for _ in range(decoder.layers)])
     else:
         cell = get_cell()
 
@@ -298,12 +344,17 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         time_steps = input_shape[1]
 
         output_size = decoder.vocab_size
-        state_size = cell.state_size
+
+        state_size = get_cell().state_size
+        if isinstance(state_size, LSTMStateTuple):
+            state_size = state_size.c + state_size.h
 
         if dropout is not None:
             initial_state = tf.nn.dropout(initial_state, dropout)
 
-        state = tf.nn.tanh(linear_unsafe(initial_state, state_size, bias=True, scope='initial_state_projection'))
+        state = tf.layers.dense(initial_state, state_size, use_bias=True, name='initial_state_projection',
+                                activation=tf.nn.tanh)
+
         edit_pos = tf.zeros([batch_size], tf.float32)
 
         # used by beam-search decoder (by dict feeding)
@@ -333,11 +384,11 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
             # FIXME use `output` or `state` here?
             x = tf.concat([state, input_, context_vector], axis=1)
-            output_ = linear_unsafe(x, decoder.cell_size, bias=False, scope='maxout')
+            output_ = tf.layers.dense(x, decoder.cell_size, use_bias=False, name='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
-            output_ = linear_unsafe(output_, decoder.embedding_size, bias=False, scope='softmax0')
+            output_ = tf.layers.dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
             decoder_outputs = decoder_outputs.write(time, output_)
-            output_ = linear_unsafe(output_, output_size, bias=True, scope='softmax1')
+            output_ = tf.layers.dense(output_, output_size, use_bias=True, name='softmax1')
 
             proj_outputs = proj_outputs.write(time, output_)
 
@@ -363,14 +414,13 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
             x = tf.concat([input_, context_vector], 1)
 
-            # if decoder.name == 'edits':
-            #     x = tf.Print(x, [tf.shape(attention_states)], message='attns', first_n=1, summarize=10)
-            #     x = tf.Print(x, [tf.shape(x)], message='x', first_n=1)
-            #     x = tf.Print(x, [tf.shape(input_)], message='input', first_n=1)
-            #     x = tf.Print(x, [tf.shape(context_vector)], message='context_vector', first_n=1)
-            #     x = tf.Print(x, [tf.shape(state)], message='state', first_n=1)
+            if isinstance(cell.state_size, LSTMStateTuple):
+                state = LSTMStateTuple(*tf.split(state, 2, axis=1))
 
-            _, new_state = unsafe_decorator(cell)(x, state)
+            _, new_state = cell(x, state)
+
+            if isinstance(new_state, LSTMStateTuple):
+                new_state = tf.concat([new_state.c, new_state.h], axis=1)
 
             states = states.write(time, new_state)
 
