@@ -37,6 +37,7 @@ class Seq2SeqModel(object):
 
         self.feed_previous = tf.constant(feed_previous, dtype=tf.float32)
         self.feed_argmax = tf.constant(True, dtype=tf.bool)  # feed with argmax or sample
+        self.is_training = tf.placeholder(tf.bool, shape=())
 
         self.encoder_inputs = []
         self.encoder_input_length = []
@@ -70,7 +71,8 @@ class Seq2SeqModel(object):
             assert len(encoders) == 2
 
             parameters = dict(encoders=encoders[1:], decoder=encoders[0], dropout=self.dropout,
-                              encoder_input_length=self.encoder_input_length[1:], more_dropout=more_dropout)
+                              encoder_input_length=self.encoder_input_length[1:], more_dropout=more_dropout,
+                              is_training=self.is_training)
 
             attention_states, encoder_state = decoders.multi_encoder(self.encoder_inputs[1:], **parameters)
 
@@ -107,12 +109,13 @@ class Seq2SeqModel(object):
 
             parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length[:1],
-                              encoder_inputs=self.encoder_inputs[:1], other_inputs=other_inputs)
+                              encoder_inputs=self.encoder_inputs[:1], other_inputs=other_inputs,
+                              is_training=self.is_training)
         else:
             chaining_loss = None
             parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
                               encoder_input_length=self.encoder_input_length,
-                              encoder_inputs=self.encoder_inputs)
+                              encoder_inputs=self.encoder_inputs, is_training=self.is_training)
             states = None
             attns = None
             decoder_outputs = None
@@ -212,8 +215,7 @@ class Seq2SeqModel(object):
 
         encoder_inputs, targets = self.get_batch(data)
 
-        input_feed = {}
-        input_feed[self.targets] = targets
+        input_feed = {self.is_training: True, self.targets: targets}
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
@@ -240,7 +242,8 @@ class Seq2SeqModel(object):
         batch = self.get_batch(data, decoding=True)
         encoder_inputs, targets = batch
 
-        input_feed = {self.targets: targets, self.feed_previous: 1.0}
+        input_feed = {self.targets: targets, self.feed_previous: 1.0,
+                      self.is_training: False}
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
@@ -258,7 +261,7 @@ class Seq2SeqModel(object):
 
         data = [token_ids + [[]]]
         encoder_inputs, targets = self.get_batch(data, decoding=True)
-        input_feed = {}
+        input_feed = {self.is_training: False}
 
         for i in range(self.encoder_count):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
@@ -282,7 +285,7 @@ class Seq2SeqModel(object):
             targets = np.reshape(targets, [batch_size, 1])
             targets = np.concatenate([targets, np.ones(targets.shape) * utils.EOS_ID], axis=1)
 
-            input_feed = [{self.targets: targets} for _ in session]
+            input_feed = [{self.targets: targets, self.is_training: False} for _ in session]
 
             if beam_data is not None:
                 for feed, data_ in zip(input_feed, beam_data):
