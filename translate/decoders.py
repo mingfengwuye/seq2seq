@@ -27,7 +27,8 @@ def unsafe_decorator(fun):
 get_variable_unsafe = unsafe_decorator(tf.get_variable)
 
 
-def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=None, dropout=None, **kwargs):
+def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=None, dropout=None,
+                  is_training=None, **kwargs):
     """
     Build multiple encoders according to the configuration in `encoders`, reading from `encoder_inputs`.
     The result is a list of the outputs produced by those encoders (for each time-step), and their final state.
@@ -129,7 +130,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
     return encoder_outputs, encoder_state
 
 
-def compute_energy(hidden, state, attn_size, **kwargs):
+def compute_energy(hidden, state, attn_size, is_training=None, **kwargs):
     input_size = hidden.get_shape()[2].value
 
     y = tf.layers.dense(state, attn_size, use_bias=True, name='W_a')
@@ -144,13 +145,12 @@ def compute_energy(hidden, state, attn_size, **kwargs):
     return tf.reduce_sum(v * tf.tanh(s), [2])
 
 
-def global_attention(state, hidden_states, encoder, encoder_input_length, pos=None, scope=None,
-                     context=None, **kwargs):
+def global_attention(state, hidden_states, encoder, encoder_input_length, scope=None, context=None, **kwargs):
     with tf.variable_scope(scope or 'attention'):
         if context is not None and encoder.use_context:
             state = tf.concat([state, context], axis=1)
 
-        e = compute_energy(hidden_states, state, attn_size=encoder.attn_size, pos=pos)
+        e = compute_energy(hidden_states, state, attn_size=encoder.attn_size, **kwargs)
         e -= tf.reduce_max(e, axis=1, keep_dims=True)
 
         mask = tf.sequence_mask(tf.cast(encoder_input_length, tf.int32), tf.shape(hidden_states)[1],
@@ -229,7 +229,7 @@ def local_attention(state, hidden_states, encoder, encoder_input_length, pos=Non
 
             mask = tf.to_float(tf.equal(m, 0.0))
 
-            e = compute_energy(hidden_states, state, attn_size=encoder.attn_size, pos=pos_)
+            e = compute_energy(hidden_states, state, attn_size=encoder.attn_size, pos=pos_, **kwargs)
 
             weights = softmax(e, mask=mask)
 
@@ -261,7 +261,7 @@ def attention(encoder, **kwargs):
 
 
 def multi_attention(state, hidden_states, encoders, encoder_input_length, pos=None, aggregation_method='sum',
-                    **kwargs):
+                    is_training=None, **kwargs):
     attns = []
     weights = []
 
@@ -293,7 +293,7 @@ def get_embedding_function(decoder):
 
 
 def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
-                      dropout=None, feed_previous=0.0, align_encoder_id=0, **kwargs):
+                      dropout=None, feed_previous=0.0, align_encoder_id=0, is_training=None, **kwargs):
     """
     :param targets: tensor of shape (output_length, batch_size)
     :param initial_state: initial state of the decoder (usually the final state of the encoder),
@@ -319,7 +319,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         if decoder.use_lstm:
             keep_prob = dropout if dropout and decoder.lstm_dropout else 1.0
             cell = LayerNormBasicLSTMCell(decoder.cell_size, dropout_keep_prob=keep_prob,
-                                          layer_norm=decoder.layer_norm)
+                                          layer_norm=decoder.layer_norm) # FIXME: is_training
         else:
             cell = GRUCell(decoder.cell_size)
 
@@ -336,7 +336,8 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
         attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
                                        encoder_input_length=encoder_input_length,
-                                       aggregation_method=decoder.aggregation_method)
+                                       aggregation_method=decoder.aggregation_method,
+                                       is_training=is_training)
         input_shape = tf.shape(decoder_inputs)
         batch_size = input_shape[0]
         time_steps = input_shape[1]
