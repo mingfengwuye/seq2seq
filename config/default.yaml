@@ -49,6 +49,7 @@ use_lstm: False          # use LSTM units instead of GRU units
 character_level: False   # input sequence is at the character level
 weight_scale: null       # if not null, initialize all weights to a normal distribution with this stdev
 layer_norm: False        # apply layer norm to the LSTMs
+lstm_dropout: False      # apply dropout to the LSTMs
 
 # data
 data_dir: data           # directory containing the training data

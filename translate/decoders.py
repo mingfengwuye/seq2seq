@@ -60,14 +60,14 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
 
             def get_cell():
                 if encoder.use_lstm:
-                    keep_prob = dropout if dropout else 1.0
+                    keep_prob = dropout if dropout and encoder.lstm_dropout else 1.0
                     cell = LayerNormBasicLSTMCell(encoder.cell_size, dropout_keep_prob=keep_prob,
                                                   layer_norm=encoder.layer_norm)
                 else:
                     cell = GRUCell(encoder.cell_size)
 
-                    if dropout is not None:
-                        cell = DropoutWrapper(cell, input_keep_prob=dropout)
+                if dropout is not None and not (encoder.use_lstm and encoder.lstm_dropout):
+                    cell = DropoutWrapper(cell, input_keep_prob=dropout)
 
                 return cell
 
@@ -317,14 +317,14 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
     def get_cell():
         if decoder.use_lstm:
-            keep_prob = dropout if dropout else 1.0
+            keep_prob = dropout if dropout and decoder.lstm_dropout else 1.0
             cell = LayerNormBasicLSTMCell(decoder.cell_size, dropout_keep_prob=keep_prob,
                                           layer_norm=decoder.layer_norm)
         else:
             cell = GRUCell(decoder.cell_size)
 
-            if dropout is not None:
-                cell = DropoutWrapper(cell, input_keep_prob=dropout)
+        if dropout is not None and not (decoder.use_lstm and decoder.lstm_dropout):
+            cell = DropoutWrapper(cell, input_keep_prob=dropout)
 
         return cell
 
