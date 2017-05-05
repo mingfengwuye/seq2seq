@@ -16,9 +16,10 @@ batch_size: 32
 dev_prefix: dev
 
 optimizer: 'adam'
+learning_rate: 0.001
 
 sgd_after_n_epoch: 20
-learning_rate: 0.2
+sgd_learning_rate: 0.2
 learning_rate_decay_factor: 0.9
 decay_every_n_epoch: 1
 decay_after_n_epoch: 21

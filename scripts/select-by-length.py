@@ -22,36 +22,27 @@ if __name__ == '__main__':
         lengths = list(enumerate(lengths))
 
     n = 0
+    l = len(lengths)
 
-    indices = []
-
-    while n < args.n and len(lengths) > 0:
+    while n < args.n and l > 0:
         length = ref_lengths[n % len(ref_lengths)]
-        n += 1
 
         def key(i):
             return abs(length - lengths[i][1])
 
-        indices_ = random.sample(range(len(lengths)), k=args.m)
+        indices = random.sample(range(l), k=args.m)
 
         if args.k > 1:
-            indices_ = sorted(indices_, key=key)[:args.k]
+            indices = sorted(indices, key=key)[:args.k]
         else:
-            indices_ = [min(indices_, key=key)]
+            indices = [min(indices, key=key)]
 
-        indices += indices_
+        for i in indices:
+            sys.stdout.write(str(lengths[i][0]) + '\n')
 
-        for i in sorted(indices_, reverse=True):
-            del lengths[i]
+        #sys.stdout.flush()
 
-    indices = sorted(list(set(indices)), reverse=True)
-
-    with open(args.sentences) as f:
-        for i, line in enumerate(f):
-            if len(indices) == 0:
-                break
-
-            if i == indices[-1]:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-                indices.pop()
+        for i in indices:
+            lengths[i], lengths[l - 1] = lengths[l - 1], lengths[i]
+            l -= 1
+            n += 1

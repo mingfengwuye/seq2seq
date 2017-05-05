@@ -23,15 +23,16 @@ if __name__ == '__main__':
         vectors = list(enumerate(vectors))
 
     n = 0
+    l = len(vectors)
 
-    while n < args.n and len(vectors) > 0:
+    while n < args.n and l > 0:
         vector = ref_vectors[n % len(ref_vectors)]
         n += 1
 
         def key(i):
             return np.sum((vector - vectors[i][1]) ** 2)
 
-        indices = random.sample(range(len(vectors)), k=args.m)
+        indices = random.sample(range(l), k=args.m)
 
         if args.k > 1:
             indices = sorted(indices, key=key)[:args.k]
@@ -40,7 +41,9 @@ if __name__ == '__main__':
 
         for i in indices:
             sys.stdout.write(str(vectors[i][0]) + '\n')
-        sys.stdout.flush()
 
-        for i in sorted(indices, reverse=True):
-            del vectors[i]
+        #sys.stdout.flush()
+
+        for i in indices:
+            vectors[i], vectors[l - 1] = vectors[l - 1], vectors[i]
+            l -= 1

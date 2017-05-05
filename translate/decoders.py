@@ -28,7 +28,7 @@ get_variable_unsafe = unsafe_decorator(tf.get_variable)
 
 
 def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=None, dropout=None,
-                  is_training=None, **kwargs):
+                  **kwargs):
     """
     Build multiple encoders according to the configuration in `encoders`, reading from `encoder_inputs`.
     The result is a list of the outputs produced by those encoders (for each time-step), and their final state.
@@ -130,7 +130,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
     return encoder_outputs, encoder_state
 
 
-def compute_energy(hidden, state, attn_size, is_training=None, **kwargs):
+def compute_energy(hidden, state, attn_size, **kwargs):
     input_size = hidden.get_shape()[2].value
 
     y = tf.layers.dense(state, attn_size, use_bias=True, name='W_a')
@@ -236,7 +236,6 @@ def local_attention(state, hidden_states, encoder, encoder_input_length, pos=Non
             sigma = encoder.attention_window_size / 2
             numerator = -tf.pow((idx - pos), tf.convert_to_tensor(2, dtype=tf.float32))
             div = tf.truediv(numerator, 2 * sigma ** 2)
-            # div = tf.truediv(numerator, sigma ** 2)
             weights *= tf.exp(div)  # result of the truncated normal distribution
             # normalize to keep a probability distribution
             # weights /= (tf.reduce_sum(weights, axis=1, keep_dims=True) + 10e-12)
@@ -261,7 +260,7 @@ def attention(encoder, **kwargs):
 
 
 def multi_attention(state, hidden_states, encoders, encoder_input_length, pos=None, aggregation_method='sum',
-                    is_training=None, **kwargs):
+                    **kwargs):
     attns = []
     weights = []
 
@@ -293,7 +292,7 @@ def get_embedding_function(decoder):
 
 
 def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
-                      dropout=None, feed_previous=0.0, align_encoder_id=0, is_training=None, **kwargs):
+                      dropout=None, feed_previous=0.0, align_encoder_id=0, **kwargs):
     """
     :param targets: tensor of shape (output_length, batch_size)
     :param initial_state: initial state of the decoder (usually the final state of the encoder),
@@ -336,8 +335,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
         attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
                                        encoder_input_length=encoder_input_length,
-                                       aggregation_method=decoder.aggregation_method,
-                                       is_training=is_training)
+                                       aggregation_method=decoder.aggregation_method)
         input_shape = tf.shape(decoder_inputs)
         batch_size = input_shape[0]
         time_steps = input_shape[1]
@@ -377,6 +375,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             pos = [edit_pos if encoder.align_edits else None for encoder in encoders]
 
             context_vector, new_weights = attention_(state, pos=pos)
+
             attns = attns.write(time, context_vector)
 
             weights = weights.write(time, new_weights[align_encoder_id])
@@ -386,6 +385,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             output_ = tf.layers.dense(x, decoder.cell_size, use_bias=False, name='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
             output_ = tf.layers.dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
+
             decoder_outputs = decoder_outputs.write(time, output_)
             output_ = tf.layers.dense(output_, output_size, use_bias=True, name='softmax1')
 
@@ -481,7 +481,7 @@ def softmax(logits, dim=-1, mask=None):
     if mask is not None:
         e *= mask
 
-    return e / (tf.reduce_sum(e, axis=dim, keep_dims=True) + 10e-12)
+    return e / tf.clip_by_value(tf.reduce_sum(e, axis=dim, keep_dims=True), 10e-37, 10e+37)
 
 
 def get_weights(sequence, eos_id, time_major=False, include_first_eos=True):
