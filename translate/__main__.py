@@ -91,7 +91,7 @@ def main(args=None):
     # also copy default config
     config_path = os.path.join(config.model_dir, 'default.yaml')
     if not os.path.exists(config_path):
-        shutil.copy(args.config, config_path)
+        shutil.copy('config/default.yaml', config_path)
 
     # copy source code to model directory
     tar_path =  os.path.join(config.model_dir, 'code.tar.gz')
@@ -122,7 +122,7 @@ def main(args=None):
     model_parameters = [
         'cell_size', 'layers', 'vocab_size', 'embedding_size', 'use_lstm', 'attention_window_size', 'character_level',
         'bidir', 'swap_memory', 'parallel_iterations', 'attn_size', 'pred_edits', 'attention_type', 'use_context',
-        'aggregation_method', 'chained_encoders', 'align_edits', 'layer_norm', 'lstm_dropout', 'batch_norm'
+        'aggregation_method', 'chained_encoders', 'align_edits', 'layer_norm', 'lstm_dropout'
     ]
 
     if isinstance(config.dev_prefix, str):

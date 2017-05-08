@@ -288,8 +288,6 @@ class TranslationModel:
                 for i, (sources, hypothesis, reference) in enumerate(zip(src_sentences, hypothesis_iter,
                                                                          trg_sentences)):
                     hypothesis, raw = hypothesis
-                    #if self.pred_edits:
-                    #    reference = utils.reverse_edits(sources[0].split(), reference.split())
 
                     if self.pred_edits:
                         if self.pred_characters:

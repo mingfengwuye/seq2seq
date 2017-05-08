@@ -99,7 +99,7 @@ def corpus_bleu(hypotheses, references, smoothing=False, order=4, **kwargs):
         sum(math.log(score) if score > 0 else float('-inf') for score in scores) / order
     )
 
-    bp = min(1, math.exp(1 - ref_length / hyp_length))
+    bp = min(1, math.exp(1 - ref_length / hyp_length)) if hyp_length > 0 else 0.0
     bleu = 100 * bp * score
 
     return bleu, 'penalty={:.3f} ratio={:.3f}'.format(bp, hyp_length / ref_length)
