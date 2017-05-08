@@ -285,8 +285,14 @@ class TranslationModel:
                 for i, (sources, hypothesis, reference) in enumerate(zip(src_sentences, hypothesis_iter,
                                                                          trg_sentences)):
                     hypothesis, raw = hypothesis
+
                     if self.pred_edits:
-                        reference = utils.reverse_edits(sources[0], reference)
+                        if self.pred_characters:
+                            reference = ' '.join('<SPACE>' if c == ' ' else c for c in reference)
+                            reference = utils.reverse_edits(sources[0], reference)
+                            reference = ''.join(reference.split()).replace('<SPACE>', ' ')
+                        else:
+                            reference = utils.reverse_edits(sources[0], reference)
 
                     hypotheses.append(hypothesis)
                     references.append(reference.strip().replace('@@ ', ''))
