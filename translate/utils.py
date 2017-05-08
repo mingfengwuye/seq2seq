@@ -75,14 +75,14 @@ class AttrDict(dict):
         return self.__dict__.get(item)
 
 def reverse_edits(source, edits, fix=True, strict=False):
-    src_words = source.split()
+    src_words = source
     target = []
 
     i = 0
 
     consistent = True
 
-    for edit in edits.split():
+    for edit in edits:
         if strict and not consistent:
             break
 
@@ -107,7 +107,7 @@ def reverse_edits(source, edits, fix=True, strict=False):
     if fix:
         target += src_words[i:]
 
-    return ' '.join(target)
+    return target
 
 
 def initialize_vocabulary(vocabulary_path):

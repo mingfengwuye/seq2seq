@@ -8,21 +8,21 @@ layers: 1
 bidir: True
 use_lstm: True
 
-max_output_len: 45   # 99% coverage
-max_input_len: 36
+max_output_len: 50   # 99% coverage
+max_input_len: 39
 weight_scale: 0.1
 
-data_dir: experiments/APE16/edits/data
-model_dir: experiments/APE16/edits/forced
+data_dir: experiments/APE17/edits/data
+model_dir: experiments/APE17/edits/noisy/global_syn
 
 batch_size: 32
 
 optimizer: 'sgd'
-#learning_rate: 0.0003
 learning_rate: 1.0
-learning_rate_decay_factor: 0.95
-decay_every_n_epoch: 1
-decay_after_n_epoch: 3
+sgd_learning_rate: 1.0
+learning_rate_decay_factor: 0.8
+decay_every_n_epoch: 0.5
+decay_after_n_epoch: 1
 
 steps_per_checkpoint: 400
 steps_per_eval: 400
@@ -36,9 +36,12 @@ read_ahead: 10
 encoders:
   - name: mt
     align_edits: True
-    attention_type: 'local'
-    attention_window_size: 0
+    attention_type: 'global'
 
 decoder:
     name: edits
     pred_edits: True
+
+train_prefix: train.concat
+vocab_prefix: vocab.concat
+dev_prefix: [train-dev]

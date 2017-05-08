@@ -1,28 +1,28 @@
 
 dropout_rate: 0.5
-cell_size: 128
-attn_size: 128
-embedding_size: 128
+cell_size: 256
+attn_size: 256
+embedding_size: 256
 
 layers: 1
 bidir: True
 use_lstm: True
 
-max_output_len: 45   # 99% coverage
-max_input_len: 36
+max_output_len: 50   # 99% coverage
+max_input_len: 45
 weight_scale: 0.1
 
-data_dir: experiments/APE16/edits/data
-model_dir: experiments/APE16/edits/forced
+data_dir: experiments/APE17/edits/data
+model_dir: experiments/APE17/edits/noisy/forced_noisy
 
 batch_size: 32
 
 optimizer: 'sgd'
-#learning_rate: 0.0003
 learning_rate: 1.0
-learning_rate_decay_factor: 0.95
-decay_every_n_epoch: 1
-decay_after_n_epoch: 3
+sgd_learning_rate: 1.0
+learning_rate_decay_factor: 0.8
+decay_every_n_epoch: 0.5
+decay_after_n_epoch: 1
 
 steps_per_checkpoint: 400
 steps_per_eval: 400
@@ -42,3 +42,7 @@ encoders:
 decoder:
     name: edits
     pred_edits: True
+
+dev_prefix: [train-dev]
+train_prefix: train.noisy
+vocab_prefix: vocab.noisy

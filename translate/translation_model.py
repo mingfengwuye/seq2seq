@@ -156,7 +156,10 @@ class TranslationModel:
                     trg_tokens = [token for token in trg_tokens if token != utils._UNK]
 
                 if self.pred_edits:
-                    trg_tokens = utils.reverse_edits(src_tokens[0], ' '.join(trg_tokens)).split()
+                    if self.pred_characters:
+                        trg_tokens = utils.reverse_edits(list(src_tokens[0].strip()), trg_tokens)
+                    else:
+                        trg_tokens = utils.reverse_edits(src_tokens[0].split(), trg_tokens)
 
                 if self.pred_characters:
                     yield ''.join(trg_tokens).replace('<SPACE>', ' '), raw
@@ -285,8 +288,16 @@ class TranslationModel:
                 for i, (sources, hypothesis, reference) in enumerate(zip(src_sentences, hypothesis_iter,
                                                                          trg_sentences)):
                     hypothesis, raw = hypothesis
+                    #if self.pred_edits:
+                    #    reference = utils.reverse_edits(sources[0].split(), reference.split())
+
                     if self.pred_edits:
-                        reference = utils.reverse_edits(sources[0], reference)
+                        if self.pred_characters:
+                            reference = utils.reverse_edits(list(sources[0].strip()), reference.split())
+                            reference = ''.join(reference).replace('<SPACE>', ' ')
+                        else:
+                            reference = utils.reverse_edits(sources[0].split(), reference.split())
+                            reference = ' '.join(reference)
 
                     hypotheses.append(hypothesis)
                     references.append(reference.strip().replace('@@ ', ''))

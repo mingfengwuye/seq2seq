@@ -344,7 +344,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
         output_size = decoder.vocab_size
 
-        state_size = get_cell().state_size
+        state_size = cell.state_size   # FIXME multi-layer decoder
         if isinstance(state_size, LSTMStateTuple):
             state_size = state_size.c + state_size.h
 

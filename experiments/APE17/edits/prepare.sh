@@ -48,3 +48,20 @@ done
 
 scripts/prepare-data.py ${data_dir}/train.concat src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.concat \
 --vocab-size 30000
+
+if [ ! -f ${raw_data}/mono.noisy.500k.edits ]; then
+    scripts/extract-edits.py ${raw_data}/mono.noisy.500k.{mt,pe} > ${raw_data}/mono.noisy.500k.edits
+fi
+
+cp ${raw_data}/mono.noisy.500k.{mt,pe,edits} ${data_dir}
+rename "s/mono.noisy.500k/train.noisy/" ${data_dir}/mono.noisy.500k.*
+
+for i in {1..10}; do   # oversample PE data
+    cat ${data_dir}/train.mt >> ${data_dir}/train.noisy.mt
+    cat ${data_dir}/train.pe >> ${data_dir}/train.noisy.pe
+    cat ${data_dir}/train.src >> ${data_dir}/train.noisy.src
+    cat ${data_dir}/train.edits >> ${data_dir}/train.noisy.edits
+done
+
+scripts/prepare-data.py ${data_dir}/train.noisy pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.noisy \
+--vocab-size 30000

@@ -12,7 +12,7 @@ max_output_len: 47
 max_input_len: 47
 weight_scale: 0.1
 
-data_dir: experiments/APE17/trans/data_suwbords
+data_dir: experiments/APE17/trans/data_subwords
 model_dir: experiments/APE17/trans/global_pe_mt_sub
 
 batch_size: 32
