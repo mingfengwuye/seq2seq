@@ -44,7 +44,6 @@ bidir: True              # use bidirectional encoders
 attention_type: global   # global, local, none, last_state, average
 attention_window_size: 0 # window size for local attention mechanism
 edit_window_size: null
-vocab_size: 0            # number of symbols of each encoder and decoder (0: size of vocab files)
 use_lstm: False          # use LSTM units instead of GRU units
 character_level: False   # input sequence is at the character level
 weight_scale: null       # if not null, initialize all weights to a normal distribution with this stdev

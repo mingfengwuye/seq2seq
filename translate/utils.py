@@ -38,6 +38,9 @@ class FinishedTrainingException(Exception):
     def __init__(self):
         debug('finished training')
 
+class CheckpointException(Exception):
+    pass
+
 
 @contextmanager
 def open_files(names, mode='r'):
@@ -153,7 +156,7 @@ def sentence_to_token_ids(sentence, vocabulary, character_level=False):
     return [vocabulary.get(w, UNK_ID) for w in sentence]
 
 
-def get_filenames(data_dir, model_dir, extensions, train_prefix, dev_prefix, vocab_prefix, **kwargs):
+def get_filenames(data_dir, model_dir, extensions, train_prefix, dev_prefix, vocab_prefix, name=None, **kwargs):
     """
     Get a bunch of file prefixes and extensions, and output the list of filenames to be used
     by the model.
@@ -175,7 +178,8 @@ def get_filenames(data_dir, model_dir, extensions, train_prefix, dev_prefix, voc
     vocab_path = os.path.join(data_dir, vocab_prefix)
     vocab_src = ['{}.{}'.format(vocab_path, ext) for ext in extensions]
 
-    vocab_path = os.path.join(model_dir, 'data', 'vocab')
+    data = 'data' if name is None else 'data_{}'.format(name)
+    vocab_path = os.path.join(model_dir, data, 'vocab')
     vocab = ['{}.{}'.format(vocab_path, ext) for ext in extensions]
     os.makedirs(os.path.dirname(vocab_path), exist_ok=True)
 

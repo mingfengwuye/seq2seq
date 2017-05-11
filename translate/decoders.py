@@ -98,7 +98,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                 state_size = state_size.c + state_size.h
 
             def get_initial_state(name='initial_state'):
-                initial_state = tf.get_variable(name, initializer=tf.zeros(state_size))
+                initial_state = get_variable_unsafe(name, initializer=tf.zeros(state_size))
                 initial_state = tf.tile(tf.expand_dims(initial_state, axis=0), [batch_size, 1])
                 if isinstance(get_cell().state_size, LSTMStateTuple):
                     return LSTMStateTuple(*tf.split(initial_state, 2, axis=1))
@@ -106,7 +106,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                     return initial_state
 
             if encoder.bidir:
-                encoder_outputs_, _, _ = stack_bidirectional_dynamic_rnn(
+                encoder_outputs_, _, _ = unsafe_decorator(stack_bidirectional_dynamic_rnn)(
                     cells_fw=[get_cell() for _ in range(encoder.layers)],
                     cells_bw=[get_cell() for _ in range(encoder.layers)],
                     initial_states_fw=[get_initial_state('initial_state_fw')] * encoder.layers,
@@ -120,7 +120,8 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                 else:
                     cell = get_cell()
 
-                encoder_outputs_, _ = tf.nn.dynamic_rnn(cell=cell, initial_state=get_initial_state(), **parameters)
+                encoder_outputs_, _ = unsafe_decorator(tf.nn.dynamic_rnn)(cell=cell, initial_state=get_initial_state(),
+                                                                          **parameters)
                 encoder_state_ = encoder_outputs_[:, -1, :]  # FIXME
 
             encoder_outputs.append(encoder_outputs_)
@@ -136,10 +137,10 @@ def compute_energy(hidden, state, attn_size, **kwargs):
     y = tf.layers.dense(state, attn_size, use_bias=True, name='W_a')
     y = tf.expand_dims(y, axis=1)
 
-    k = tf.get_variable('U_a', [input_size, attn_size])
+    k = get_variable_unsafe('U_a', [input_size, attn_size])
     f = tf.einsum('ijk,kl->ijl', hidden, k)
 
-    v = tf.get_variable('v_a', [attn_size])
+    v = get_variable_unsafe('v_a', [attn_size])
     s = f + y
 
     return tf.reduce_sum(v * tf.tanh(s), [2])
@@ -204,8 +205,8 @@ def local_attention(state, hidden_states, encoder, encoder_input_length, pos=Non
 
         pos_ = pos
         if pos is None:
-            wp = tf.get_variable('Wp', [state_size, state_size])
-            vp = tf.get_variable('vp', [state_size, 1])
+            wp = get_variable_unsafe('Wp', [state_size, state_size])
+            vp = get_variable_unsafe('vp', [state_size, 1])
 
             pos = tf.nn.sigmoid(tf.matmul(tf.nn.tanh(tf.matmul(state, wp)), vp))
             pos = tf.floor(encoder_input_length * pos)

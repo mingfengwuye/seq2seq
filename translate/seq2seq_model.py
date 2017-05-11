@@ -146,7 +146,7 @@ class Seq2SeqModel(object):
 
                 shape = [x.get_shape()[-1], self.attention_states[0].get_shape()[-1]]
 
-                w = tf.get_variable("map_attns/Matrix", shape=shape)
+                w = tf.get_variable("map_attns/matrix", shape=shape)
                 b = tf.get_variable("map_attns/bias", shape=shape[-1:])
 
                 x = tf.einsum('ijk,kl->ijl', x, w) + b

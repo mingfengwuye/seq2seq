@@ -1,6 +1,7 @@
 import tensorflow as tf
 import os
 import pickle
+import re
 import time
 import sys
 import math
@@ -12,13 +13,14 @@ from translate.seq2seq_model import Seq2SeqModel
 class TranslationModel:
     def __init__(self, encoders, decoder, checkpoint_dir, learning_rate, learning_rate_decay_factor,
                  batch_size, keep_best=1, max_input_len=None, max_output_len=None, dev_prefix=None,
-                 score_function='corpus_scores', **kwargs):
+                 score_function='corpus_scores', name=None, **kwargs):
 
         self.batch_size = batch_size
         self.src_ext = [encoder.get('ext') or encoder.name for encoder in encoders]
         self.trg_ext = decoder.get('ext') or decoder.name
         self.pred_edits = decoder.pred_edits
         self.dev_prefix = dev_prefix
+        self.name = name
 
         self.extensions = self.src_ext + [self.trg_ext]
 
@@ -37,15 +39,14 @@ class TranslationModel:
         with tf.device('/cpu:0'):
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
-        self.filenames = utils.get_filenames(extensions=self.extensions, dev_prefix=dev_prefix,
+        self.filenames = utils.get_filenames(extensions=self.extensions, dev_prefix=dev_prefix, name=name,
                                              **kwargs)
         # TODO: check that filenames exist
         utils.debug('reading vocabularies')
         self.read_vocab()
 
         for encoder_or_decoder, vocab in zip(encoders + [decoder], self.vocabs):
-            if encoder_or_decoder.vocab_size <= 0 and vocab is not None:
-                encoder_or_decoder.vocab_size = len(vocab.reverse)
+            encoder_or_decoder.vocab_size = len(vocab.reverse)
 
         utils.debug('creating model')
         self.seq2seq_model = Seq2SeqModel(encoders, decoder, self.learning_rate, self.global_step,
@@ -54,10 +55,11 @@ class TranslationModel:
         self.batch_iterator = None
         self.dev_batches = None
         self.train_size = None
-        self.use_sgd = False
         self.saver = None
         self.keep_best = keep_best
         self.checkpoint_dir = checkpoint_dir
+
+        self.training = utils.AttrDict()  # used to keep track of training
 
         try:
             self.reversed_scores = getattr(evaluation, score_function).reversed  # the lower the better
@@ -92,9 +94,6 @@ class TranslationModel:
             for ext, vocab_path in zip(self.extensions, self.filenames.vocab)
         ]
         *self.src_vocab, self.trg_vocab = self.vocabs
-
-    def train_step(self, sess):
-        return self.seq2seq_model.step(sess, next(self.batch_iterator), update_model=True, use_sgd=self.use_sgd)
 
     def eval_step(self, sess):
         # compute perplexity on dev set
@@ -320,95 +319,119 @@ class TranslationModel:
             if score_summary:
                 score_info.append(score_summary)
 
+            if self.name is not None:
+                score_info.insert(0, self.name)
+
             utils.log(' '.join(map(str, score_info)))
             scores.append(score)
 
         return scores
 
-    def train(self, sess, beam_size, steps_per_checkpoint, steps_per_eval=None, eval_output=None, max_steps=0,
-              max_epochs=0, eval_burn_in=0, decay_if_no_progress=None, decay_after_n_epoch=None,
-              decay_every_n_epoch=None, sgd_after_n_epoch=None, sgd_learning_rate=None, **kwargs):
-        utils.log('reading training and development data')
+    def train(self, sess, **kwargs):
+        self.init_training(sess=sess, **kwargs)
 
+        utils.log('starting training')
+        while True:
+            try:
+                self.train_step(sess=sess, **kwargs)
+            except utils.CheckpointException:
+                self.save(sess)
+                step, score = self.training.scores[-1]
+                self.manage_best_checkpoints(step, score)
+
+    def init_training(self, sess, sgd_after_n_epoch=None, **kwargs):
+        utils.log('reading training and development data')
         self.read_data(**kwargs)
-        # those parameters are used to track the progress of each task
-        loss, time_, steps = 0, 0, 0
-        previous_losses = []
         global_step = self.global_step.eval(sess)
-        last_decay = global_step
 
         epoch = self.batch_size * global_step // self.train_size
         if sgd_after_n_epoch is not None and epoch >= sgd_after_n_epoch:  # already switched to SGD
-            self.use_sgd = True
+            self.training.use_sgd = True
+        else:
+            self.training.use_sgd = False
 
         for _ in range(global_step):  # read all the data up to this step
             next(self.batch_iterator)
 
-        utils.log('starting training')
-        while True:
-            start_time = time.time()
-            res = self.train_step(sess)
-            loss += res.loss
+        # those parameters are used to track the progress of training
+        self.training.time = 0
+        self.training.steps = 0
+        self.training.loss = 0
+        self.training.losses = []
+        self.training.last_decay = global_step
+        self.training.scores = []
 
-            time_ += time.time() - start_time
-            steps += 1
-            global_step = self.global_step.eval(sess)
+    def train_step(self, sess, beam_size, steps_per_checkpoint, model_dir, steps_per_eval=None, eval_output=None,
+                   max_steps=0, max_epochs=0, eval_burn_in=0, decay_if_no_progress=None, decay_after_n_epoch=None,
+                   decay_every_n_epoch=None, sgd_after_n_epoch=None, sgd_learning_rate=None, **kwargs):
+        start_time = time.time()
+        res = self.seq2seq_model.step(sess, next(self.batch_iterator), update_model=True,
+                                      use_sgd=self.training.use_sgd)
+        self.training.loss += res.loss
 
-            epoch = self.batch_size * global_step // self.train_size
+        self.training.time += time.time() - start_time
+        self.training.steps += 1
+        global_step = self.global_step.eval(sess)
 
-            if decay_after_n_epoch is not None and epoch >= decay_after_n_epoch:
-                if decay_every_n_epoch is not None and (self.batch_size * (global_step - last_decay)
-                                                        >= decay_every_n_epoch * self.train_size):
+        epoch = self.batch_size * global_step // self.train_size
+
+        if decay_after_n_epoch is not None and epoch >= decay_after_n_epoch:
+            if decay_every_n_epoch is not None and (self.batch_size * (global_step - self.training.last_decay)
+                                                    >= decay_every_n_epoch * self.train_size):
+                sess.run(self.learning_rate_decay_op)
+                utils.debug('  decaying learning rate to: {:.4f}'.format(self.learning_rate.eval()))
+                self.training.last_decay = global_step
+
+        if sgd_after_n_epoch is not None and epoch >= sgd_after_n_epoch:
+            if not self.training.use_sgd:
+                utils.debug('epoch {}, starting to use SGD'.format(epoch + 1))
+                self.training.use_sgd = True
+                if sgd_learning_rate is not None:
+                    sess.run(self.learning_rate.assign(sgd_learning_rate))
+                self.training.last_decay = global_step  # reset learning rate decay
+
+        if steps_per_checkpoint and global_step % steps_per_checkpoint == 0:
+            loss = self.training.loss / self.training.steps
+            step_time = self.training.time / self.training.steps
+
+            summary = 'step {} epoch {} learning rate {:.4f} step-time {:.4f} loss {:.4f}'.format(
+                global_step, epoch + 1, self.learning_rate.eval(), step_time, loss)
+            if self.name is not None:
+                summary = '{} {}'.format(self.name, summary)
+            utils.log(summary)
+
+            if decay_if_no_progress and len(self.training.losses) >= decay_if_no_progress:
+                if loss >= max(self.training.losses[:decay_if_no_progress]):
                     sess.run(self.learning_rate_decay_op)
-                    utils.debug('  decaying learning rate to: {:.4f}'.format(self.learning_rate.eval()))
-                    last_decay = global_step
 
-            if sgd_after_n_epoch is not None and epoch >= sgd_after_n_epoch:
-                if not self.use_sgd:
-                    utils.debug('epoch {}, starting to use SGD'.format(epoch + 1))
-                    self.use_sgd = True
-                    if sgd_learning_rate is not None:
-                        sess.run(self.learning_rate.assign(sgd_learning_rate))
-                    last_decay = global_step  # reset learning rate decay
+            self.training.losses.append(loss)
+            self.training.loss, self.training.time, self.training.steps = 0, 0, 0
+            self.eval_step(sess)
 
-            if steps_per_checkpoint and global_step % steps_per_checkpoint == 0:
-                loss = loss / steps
-                step_time = time_ / steps
+        if steps_per_eval and global_step % steps_per_eval == 0 and 0 <= eval_burn_in <= global_step:
 
-                utils.log('step {} epoch {} learning rate {:.4f} step-time {:.4f} loss {:.4f}'.format(
-                    global_step, epoch + 1, self.learning_rate.eval(), step_time, loss)
-                )
+            eval_dir = 'eval' if self.name is None else 'eval {}'.format(self.name)
+            eval_output = os.path.join(model_dir, eval_dir)
 
-                if decay_if_no_progress and len(previous_losses) >= decay_if_no_progress:
-                    if loss >= max(previous_losses[:decay_if_no_progress]):
-                        sess.run(self.learning_rate_decay_op)
+            os.makedirs(eval_output, exist_ok=True)
 
-                previous_losses.append(loss)
-                loss, time_, steps = 0, 0, 0
+            # if there are several dev files, we define several output files
+            output = [
+                os.path.join(eval_output, '{}.{}.out'.format(prefix, global_step))
+                for prefix in self.dev_prefix
+            ]
 
-                self.eval_step(sess)
-                self.save(sess)
+            # kwargs_ = {**kwargs, 'output': output}
+            kwargs_ = dict(kwargs)
+            kwargs_['output'] = output
+            score, *_ = self.evaluate(sess, beam_size, on_dev=True, **kwargs_)
+            self.training.scores.append((global_step, score))
 
-            if steps_per_eval and global_step % steps_per_eval == 0 and 0 <= eval_burn_in <= global_step:
-                if eval_output is None:
-                    output = None
-                else:
-                    os.makedirs(eval_output, exist_ok=True)
+        if 0 < max_steps <= global_step or 0 < max_epochs <= epoch:
+            raise utils.FinishedTrainingException
+        elif steps_per_checkpoint and global_step % steps_per_checkpoint == 0:
+            raise utils.CheckpointException
 
-                    # if there are several dev files, we define several output files
-                    output = [
-                        os.path.join(eval_output, '{}.{}.out'.format(prefix, global_step))
-                        for prefix in self.dev_prefix
-                    ]
-
-                # kwargs_ = {**kwargs, 'output': output}
-                kwargs_ = dict(kwargs)
-                kwargs_['output'] = output
-                score, *_ = self.evaluate(sess, beam_size, on_dev=True, **kwargs_)
-                self.manage_best_checkpoints(global_step, score)
-
-            if 0 < max_steps <= global_step or 0 < max_epochs <= epoch:
-                raise utils.FinishedTrainingException
 
     def manage_best_checkpoints(self, step, score):
         score_filename = os.path.join(self.checkpoint_dir, 'scores.txt')
@@ -489,21 +512,15 @@ class TranslationModel:
         save_checkpoint(sess, self.saver, self.checkpoint_dir, self.global_step)
 
 
-variable_mapping = {   # for back-compatibility with old models
-'encoder_mt/initial_state_fw:0': 'encoder_mt/forward_1/initial_state:0',
-'encoder_mt/initial_state_bw:0': 'encoder_mt/backward_1/initial_state:0',
-'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/layer_norm_basic_lstm_cell/weights:0': 'encoder_mt/forward_1/basic_lstm_cell/weights:0',
-'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/layer_norm_basic_lstm_cell/biases:0': 'encoder_mt/forward_1/basic_lstm_cell/biases:0',
-'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/layer_norm_basic_lstm_cell/weights:0': 'encoder_mt/backward_1/basic_lstm_cell/weights:0',
-'encoder_mt/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/layer_norm_basic_lstm_cell/biases:0': 'encoder_mt/backward_1/basic_lstm_cell/biases:0',
-'decoder_edits/initial_state_projection/kernel:0': 'decoder_edits/initial_state_projection/Matrix:0',
-'decoder_edits/initial_state_projection/bias:0': 'decoder_edits/initial_state_projection/Bias:0',
-'decoder_edits/maxout/kernel:0': 'decoder_edits/maxout/Matrix:0',
-'decoder_edits/softmax0/kernel:0': 'decoder_edits/softmax0/Matrix:0',
-'decoder_edits/softmax1/kernel:0': 'decoder_edits/softmax1/Matrix:0',
-'decoder_edits/softmax1/bias:0': 'decoder_edits/softmax1/Bias:0',
-'decoder_edits/layer_norm_basic_lstm_cell/weights:0': 'decoder_edits/basic_lstm_cell/weights:0',
-'decoder_edits/layer_norm_basic_lstm_cell/biases:0': 'decoder_edits/basic_lstm_cell/biases:0',
+variable_mapping = {
+r'encoder_(.*?)/forward_1/initial_state': r'encoder_\1/initial_state_fw',
+r'encoder_(.*?)/backward_1/initial_state': r'encoder_\1/initial_state_bw',
+r'encoder_(.*?)/forward_1/basic_lstm_cell': r'encoder_\1/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/layer_norm_basic_lstm_cell',
+r'encoder_(.*?)/backward_1/basic_lstm_cell': r'encoder_\1/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/layer_norm_basic_lstm_cell',
+r'decoder_(.*?)/basic_lstm_cell': r'decoder_\1/layer_norm_basic_lstm_cell',
+r'Matrix': r'kernel',
+r'Bias': r'bias',
+r'map_attns/Matrix': r'map_attns/matrix'
 }
 
 
@@ -522,19 +539,26 @@ def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
 
     var_file = os.path.join(checkpoint_dir, 'vars.pkl')
 
+    def get_variable_by_name(name):
+        for var in tf.global_variables():
+            if var.name == name:
+                return var
+        return None
+
     if os.path.exists(var_file):
         with open(var_file, 'rb') as f:
             var_names = pickle.load(f)
-            variables = {}
-            if variable_mapping is not None:
-                for var in tf.global_variables():
-                    if var.name in var_names:
-                        variables[var.name] = var
-                    elif var.name in variable_mapping:
-                        mapped_name = variable_mapping[var.name]
-                        if mapped_name in var_names:
-                            variables[mapped_name] = var
 
+        variables = {}
+
+        if variable_mapping is not None:
+            for var_name in var_names:
+                new_var_name = var_name
+
+                for key, value in variable_mapping.items():
+                    new_var_name = re.sub(key, value, new_var_name)
+
+                variables[var_name] = get_variable_by_name(new_var_name)
     else:
         variables = {var.name: var for var in tf.global_variables()}
 

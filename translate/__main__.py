@@ -12,6 +12,7 @@ from pprint import pformat
 from operator import itemgetter
 from translate import utils
 from translate.translation_model import TranslationModel
+from translate.multitask_model import MultiTaskModel
 
 parser = argparse.ArgumentParser()
 parser.add_argument('config', help='load a configuration file in the YAML format')
@@ -117,29 +118,30 @@ def main(args=None):
     except:
         pass
 
-    # list of encoder and decoder parameter names (each encoder and decoder can have a different value
-    # for those parameters)
-    model_parameters = [
-        'cell_size', 'layers', 'vocab_size', 'embedding_size', 'use_lstm', 'attention_window_size', 'character_level',
-        'bidir', 'swap_memory', 'parallel_iterations', 'attn_size', 'pred_edits', 'attention_type', 'use_context',
-        'aggregation_method', 'chained_encoders', 'align_edits', 'layer_norm', 'lstm_dropout'
-    ]
-
-    if isinstance(config.dev_prefix, str):
-        config.dev_prefix = [config.dev_prefix]
-
-    # convert dicts to AttrDicts for convenience
-    config.encoders = [utils.AttrDict(encoder) for encoder in config.encoders]
-    config.decoder = utils.AttrDict(config.decoder)
-
-    for encoder_or_decoder in config.encoders + [config.decoder]:
-        for parameter in model_parameters:
-            encoder_or_decoder.setdefault(parameter, config.get(parameter))
-
     # log parameters
     utils.debug('program arguments')
     for k, v in sorted(config.items(), key=itemgetter(0)):
         utils.debug('  {:<20} {}'.format(k, pformat(v)))
+
+    if isinstance(config.dev_prefix, str):
+        config.dev_prefix = [config.dev_prefix]
+
+    if config.tasks is not None:
+        config.tasks = [utils.AttrDict(task) for task in config.tasks]
+        tasks = config.tasks
+    else:
+        tasks = [config]
+
+    for task in tasks:
+        for parameter, value in config.items():
+            task.setdefault(parameter, value)
+
+        task.encoders = [utils.AttrDict(encoder) for encoder in task.encoders]
+        task.decoder = utils.AttrDict(task.decoder)
+
+        for encoder_or_decoder in task.encoders + [task.decoder]:
+            for parameter, value in task.items():
+                encoder_or_decoder.setdefault(parameter, value)
 
     device = None
     if config.no_gpu:
@@ -151,13 +153,19 @@ def main(args=None):
     utils.log('using device: {}'.format(device))
 
     with tf.device(device):
-        checkpoint_dir = os.path.join(config.model_dir, 'checkpoints')
+        config.checkpoint_dir = os.path.join(config.model_dir, 'checkpoints')
 
         initializer = tf.random_normal_initializer(stddev=config.weight_scale) if config.weight_scale else None
         tf.get_variable_scope().set_initializer(initializer)
 
-        decode_only = args.decode is not None or args.eval or args.align  # exempt from creating gradient ops
-        model = TranslationModel(name='main', checkpoint_dir=checkpoint_dir, decode_only=decode_only, **config)
+        config.decode_only = args.decode is not None or args.eval or args.align  # exempt from creating gradient ops
+
+        # if config.tasks is not None and len(config.tasks) > 1:
+        #     model = MultiTaskModel(name='multi', **config)
+        # else:
+        #     model = TranslationModel(name='main', **config)
+        config.tasks = tasks
+        model = MultiTaskModel(**config)
 
     # count parameters
     utils.log('model parameters ({})'.format(len(tf.global_variables())))
@@ -177,7 +185,7 @@ def main(args=None):
     tf_config.gpu_options.per_process_gpu_memory_fraction = config.mem_fraction
 
     with tf.Session(config=tf_config) as sess:
-        best_checkpoint = os.path.join(checkpoint_dir, 'best')
+        best_checkpoint = os.path.join(config.checkpoint_dir, 'best')
 
         if config.ensemble and (args.eval or args.decode is not None):
             # create one session for each model in the ensemble
@@ -203,9 +211,8 @@ def main(args=None):
         elif args.align:
             model.align(sess, **config)
         elif args.train:
-            eval_output = os.path.join(config.model_dir, 'eval')
             try:
-                model.train(sess, eval_output=eval_output, **config)
+                model.train(sess=sess, **config)
             except (KeyboardInterrupt, utils.FinishedTrainingException):
                 utils.log('exiting...')
                 model.save(sess)
