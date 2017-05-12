@@ -49,7 +49,7 @@ class TranslationModel:
             encoder_or_decoder.vocab_size = len(vocab.reverse)
 
         utils.debug('creating model')
-        self.seq2seq_model = Seq2SeqModel(encoders, decoder, self.learning_rate, self.global_step,
+        self.seq2seq_model = Seq2SeqModel(encoders, decoder, self.learning_rate, self.global_step, name=name,
                                           max_input_len=max_input_len, max_output_len=max_output_len, **kwargs)
 
         self.batch_iterator = None
@@ -454,6 +454,7 @@ class TranslationModel:
 
         if any(lower(score_, score) for score_, _ in best_scores) or not best_scores:
             # if this checkpoint is in the top, save it under a special name
+
             prefix = 'translate-{}'.format(step)
             dest_prefix = 'best-{}'.format(step)
 
@@ -524,7 +525,7 @@ variable_mapping = {   # for backward compatibility with old models
 
 def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
     """
-    if `filename` is None, we load latest checkpoint, otherwise
+    if `filename` is None, we load last checkpoint, otherwise
       we ignore `checkpoint_dir` and load the given checkpoint file.
     """
     if filename is None:
@@ -546,6 +547,8 @@ def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
     if os.path.exists(var_file):
         with open(var_file, 'rb') as f:
             var_names = pickle.load(f)
+            import ipdb; ipdb.set_trace()
+            pass
 
         variables = {}
 
@@ -561,6 +564,7 @@ def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
         variables = {var.name: var for var in tf.global_variables()}
 
     # remove variables from blacklist
+    # variables = [var for var in variables if not any(prefix in var.name for prefix in blacklist)]
     variables = {name[:-2]: var for name, var in variables.items() if not any(prefix in name for prefix in blacklist)}
 
     if filename is not None:

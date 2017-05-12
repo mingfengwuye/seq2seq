@@ -282,16 +282,6 @@ def multi_attention(state, hidden_states, encoders, encoder_input_length, pos=No
     return context_vector, weights
 
 
-def get_embedding_function(decoder):
-    embedding_shape = [decoder.vocab_size, decoder.embedding_size]
-    with tf.device('/cpu:0'):
-        embedding = get_variable('embedding_{}'.format(decoder.name), shape=embedding_shape)
-
-    def embed(input_):
-        return tf.nn.embedding_lookup(embedding, input_)
-    return embed
-
-
 def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
                       dropout=None, feed_previous=0.0, align_encoder_id=0, **kwargs):
     """
@@ -313,7 +303,12 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     # TODO: dropout instead of keep probability
     assert decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'   # because of maxout
 
-    embed = get_embedding_function(decoder)
+    embedding_shape = [decoder.vocab_size, decoder.embedding_size]
+    with tf.device('/cpu:0'):
+        embedding = get_variable('embedding_{}'.format(decoder.name), shape=embedding_shape)
+
+    def embed(input_):
+        return tf.nn.embedding_lookup(embedding, input_)
 
     def get_cell():
         if decoder.use_lstm:
@@ -386,9 +381,13 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             output_ = dense(x, decoder.cell_size, use_bias=False, name='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
             output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
-
             decoder_outputs = decoder_outputs.write(time, output_)
-            output_ = dense(output_, output_size, use_bias=True, name='softmax1')
+
+            if decoder.tie_embeddings:
+                bias = get_variable('softmax1/bias', shape=[decoder.vocab_size])
+                output_ = tf.matmul(output_, tf.transpose(embedding)) + bias
+            else:
+                output_ = dense(output_, output_size, use_bias=True, name='softmax1')
 
             proj_outputs = proj_outputs.write(time, output_)
 

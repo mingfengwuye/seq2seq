@@ -18,9 +18,8 @@ model_dir: models/debug
 batch_size: 32
 dev_prefix: dev
 
-#optimizer: 'sgd'
-optimizer: 'sgd'
-learning_rate: 1.0
+optimizer: 'adam'
+learning_rate: 0.001
 #sgd_learning_rate: 0.2
 #sgd_after_n_epoch: 4
 #ecay_after_n_epoch: 2

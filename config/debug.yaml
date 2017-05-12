@@ -1,10 +1,10 @@
 label: 'debug'
 description: "small BTEC config"
 
-dropout_rate: 0.0
-cell_size: 128
-attn_size: 128
-embedding_size: 64
+dropout_rate: 0.5
+cell_size: 256
+attn_size: 256
+embedding_size: 128
 
 layers: 1
 bidir: True
@@ -18,14 +18,14 @@ model_dir: models/debug
 batch_size: 32
 dev_prefix: dev
 
-#optimizer: 'sgd'
 optimizer: 'adam'
 learning_rate: 0.001
-#sgd_learning_rate: 0.2
-#sgd_after_n_epoch: 4
-#ecay_after_n_epoch: 2
-#decay_every_n_epoch: 1
-#learning_rate_decay_factor: 0.5
+
+sgd_after_n_epoch: 20
+sgd_learning_rate: 0.2
+learning_rate_decay_factor: 0.9
+decay_every_n_epoch: 1
+decay_after_n_epoch: 21
 
 steps_per_checkpoint: 500
 steps_per_eval: 500
@@ -40,3 +40,5 @@ encoders:
 
 decoder:
     name: en
+
+tie_embeddings: True

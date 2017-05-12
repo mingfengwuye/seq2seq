@@ -13,9 +13,10 @@ class Seq2SeqModel(object):
                  freeze_variables=None, max_output_len=50, feed_previous=0.0,
                  optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
                  chained_encoders=False, chaining_strategy=None, more_dropout=False, align_encoder_id=0,
-                 **kwargs):
+                 name=None, **kwargs):
         self.encoders = encoders
         self.decoder = decoder
+        self.name = name
 
         self.learning_rate = learning_rate
         self.global_step = global_step
@@ -201,7 +202,8 @@ class Seq2SeqModel(object):
 
         update_ops = []
         for opt in opts:
-            update_op = opt.apply_gradients(zip(clipped_gradients, params), global_step=global_step)
+            with tf.variable_scope('gradients' if self.name is None else 'gradients_{}'.format(self.name)):
+                update_op = opt.apply_gradients(zip(clipped_gradients, params), global_step=global_step)
             update_ops.append(update_op)
 
         return update_ops

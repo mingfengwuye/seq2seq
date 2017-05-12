@@ -160,12 +160,10 @@ def main(args=None):
 
         config.decode_only = args.decode is not None or args.eval or args.align  # exempt from creating gradient ops
 
-        # if config.tasks is not None and len(config.tasks) > 1:
-        #     model = MultiTaskModel(name='multi', **config)
-        # else:
-        #     model = TranslationModel(name='main', **config)
-        config.tasks = tasks
-        model = MultiTaskModel(**config)
+        if config.tasks is not None and len(config.tasks) > 1:
+            model = MultiTaskModel(**config)
+        else:
+            model = TranslationModel(**config)
 
     # count parameters
     utils.log('model parameters ({})'.format(len(tf.global_variables())))
@@ -173,7 +171,7 @@ def main(args=None):
     for var in tf.global_variables():
         utils.log('  {} {}'.format(var.name, var.get_shape()))
 
-        if 'Adam' not in var.name and 'Adadelta' not in var.name:
+        if not var.name.startswith('gradients'):
             v = 1
             for d in var.get_shape():
                 v *= d.value
