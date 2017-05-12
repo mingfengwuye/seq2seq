@@ -160,7 +160,7 @@ def main(args=None):
 
         config.decode_only = args.decode is not None or args.eval or args.align  # exempt from creating gradient ops
 
-        if config.tasks is not None and len(config.tasks) > 1:
+        if config.tasks is not None:
             model = MultiTaskModel(**config)
         else:
             model = TranslationModel(**config)

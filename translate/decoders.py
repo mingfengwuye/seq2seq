@@ -1,6 +1,6 @@
 import tensorflow as tf
 import functools
-from tensorflow.contrib.rnn import BasicLSTMCell, DropoutWrapper, LayerNormBasicLSTMCell
+from tensorflow.contrib.rnn import BasicLSTMCell, DropoutWrapper, LayerNormBasicLSTMCell, RNNCell
 from tensorflow.contrib.rnn import stack_bidirectional_dynamic_rnn, MultiRNNCell, LSTMStateTuple, GRUCell
 from translate import utils
 
@@ -25,6 +25,35 @@ def auto_reuse(fun):
 
 get_variable = auto_reuse(tf.get_variable)
 dense = auto_reuse(tf.layers.dense)
+
+
+class LSTMCell(RNNCell):
+    def __init__(self, *args, layer_norm=False, **kwargs):
+        self.cell = LayerNormBasicLSTMCell(*args, layer_norm=False, **kwargs)
+
+    @property
+    def state_size(self):
+        return 2 * self.cell._num_units
+
+    @property
+    def output_size(self):
+        return self.cell._num_units
+
+    def __call__(self, inputs, state, scope=None):
+        state = tf.split(value=state, num_or_size_splits=2, axis=1)
+        new_h, new_state = self.cell(inputs, state, scope=scope)
+        return new_h, tf.concat(new_state, 1)
+
+
+class MyMultiRNNCell(MultiRNNCell):
+    def __init__(self, *args, **kwargs):
+        super(MyMultiRNNCell, self).__init__(*args, **kwargs)
+    @property
+    def state_size(self):
+        return sum(super(MyMultiRNNCell, self).state_size)
+
+    def __call__(self, inputs, state, scope=None):
+        pass
 
 
 def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=None, dropout=None,
@@ -59,13 +88,13 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
             encoder_inputs_ = encoder_inputs[i]
             encoder_input_length_ = encoder_input_length[i]
 
-            def get_cell():
+            def get_cell(reuse=False):
                 if encoder.use_lstm:
                     keep_prob = dropout if dropout and encoder.lstm_dropout else 1.0
-                    cell = LayerNormBasicLSTMCell(encoder.cell_size, dropout_keep_prob=keep_prob,
-                                                  layer_norm=encoder.layer_norm)
+                    cell = LSTMCell(encoder.cell_size, dropout_keep_prob=keep_prob, layer_norm=encoder.layer_norm,
+                                    reuse=reuse)
                 else:
-                    cell = GRUCell(encoder.cell_size)
+                    cell = GRUCell(encoder.cell_size, reuse=reuse)
 
                 if dropout is not None and not (encoder.use_lstm and encoder.lstm_dropout):
                     cell = DropoutWrapper(cell, input_keep_prob=dropout)
@@ -99,20 +128,21 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
 
             def get_initial_state(name='initial_state'):
                 initial_state = get_variable(name, initializer=tf.zeros(state_size))
-                initial_state = tf.tile(tf.expand_dims(initial_state, axis=0), [batch_size, 1])
-                if isinstance(get_cell().state_size, LSTMStateTuple):
-                    return LSTMStateTuple(*tf.split(initial_state, 2, axis=1))
-                else:
-                    return initial_state
+                return tf.tile(tf.expand_dims(initial_state, axis=0), [batch_size, 1])
 
             if encoder.bidir:
-                encoder_outputs_, _, _ = auto_reuse(stack_bidirectional_dynamic_rnn)(
-                    cells_fw=[get_cell() for _ in range(encoder.layers)],
-                    cells_bw=[get_cell() for _ in range(encoder.layers)],
+                rnn = lambda reuse: stack_bidirectional_dynamic_rnn(
+                    cells_fw=[get_cell(reuse=reuse) for _ in range(encoder.layers)],
+                    cells_bw=[get_cell(reuse=reuse) for _ in range(encoder.layers)],
                     initial_states_fw=[get_initial_state('initial_state_fw')] * encoder.layers,
                     initial_states_bw=[get_initial_state('initial_state_bw')] * encoder.layers,
-                    **parameters
-                )
+                    **parameters)[0]
+
+                try:
+                    encoder_outputs_ = rnn(reuse=False)
+                except ValueError:   # Multi-task scenario where we're reusing the same RNN parameters
+                    encoder_outputs_ = rnn(reuse=True)
+
                 encoder_state_ = encoder_outputs_[:, 0, encoder.cell_size:]  # first backward output
             else:
                 if encoder.layers > 1:
@@ -120,7 +150,8 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                 else:
                     cell = get_cell()
 
-                encoder_outputs_, _ = auto_reuse(tf.nn.dynamic_rnn)(cell=cell, initial_state=get_initial_state(),
+                initial_state = (get_initial_state(),) * encoder.layers
+                encoder_outputs_, _ = auto_reuse(tf.nn.dynamic_rnn)(cell=cell, initial_state=initial_state,
                                                                     **parameters)
                 encoder_state_ = encoder_outputs_[:, -1, :]  # FIXME
 
@@ -310,13 +341,12 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     def embed(input_):
         return tf.nn.embedding_lookup(embedding, input_)
 
-    def get_cell():
+    def get_cell(reuse=False):
         if decoder.use_lstm:
             keep_prob = dropout if dropout and decoder.lstm_dropout else 1.0
-            cell = LayerNormBasicLSTMCell(decoder.cell_size, dropout_keep_prob=keep_prob,
-                                          layer_norm=decoder.layer_norm) # FIXME: is_training
+            cell = LSTMCell(decoder.cell_size, dropout_keep_prob=keep_prob, layer_norm=decoder.layer_norm, reuse=reuse)
         else:
-            cell = GRUCell(decoder.cell_size)
+            cell = GRUCell(decoder.cell_size, reuse=reuse)
 
         if dropout is not None and not (decoder.use_lstm and decoder.lstm_dropout):
             cell = DropoutWrapper(cell, input_keep_prob=dropout)
@@ -339,14 +369,12 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         output_size = decoder.vocab_size
 
         state_size = cell.state_size   # FIXME multi-layer decoder
-        if isinstance(state_size, LSTMStateTuple):
-            state_size = state_size.c + state_size.h
 
         if dropout is not None:
             initial_state = tf.nn.dropout(initial_state, dropout)
 
-        state = dense(initial_state, state_size, use_bias=True, name='initial_state_projection',
-                                activation=tf.nn.tanh)
+        import ipdb; ipdb.set_trace()
+        state = dense(initial_state, state_size, use_bias=True, name='initial_state_projection', activation=tf.nn.tanh)
 
         edit_pos = tf.zeros([batch_size], tf.float32)
 
@@ -413,13 +441,10 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
             x = tf.concat([input_, context_vector], 1)
 
-            if isinstance(cell.state_size, LSTMStateTuple):
-                state = LSTMStateTuple(*tf.split(state, 2, axis=1))
-
-            _, new_state = auto_reuse(cell)(x, state)
-
-            if isinstance(new_state, LSTMStateTuple):
-                new_state = tf.concat([new_state.c, new_state.h], axis=1)
+            try:
+                _, new_state = cell(x, state)
+            except ValueError:  # auto_reuse doesn't work with LSTM cells
+                _, new_state = get_cell(reuse=True)(x, state)
 
             states = states.write(time, new_state)
 

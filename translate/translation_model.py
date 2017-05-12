@@ -547,8 +547,6 @@ def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
     if os.path.exists(var_file):
         with open(var_file, 'rb') as f:
             var_names = pickle.load(f)
-            import ipdb; ipdb.set_trace()
-            pass
 
         variables = {}
 
