@@ -77,6 +77,7 @@ class AttrDict(dict):
     def __getattr__(self, item):
         return self.__dict__.get(item)
 
+
 def reverse_edits(source, edits, fix=True, strict=False):
     src_words = source
     target = []

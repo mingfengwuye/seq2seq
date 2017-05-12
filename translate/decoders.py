@@ -5,7 +5,7 @@ from tensorflow.contrib.rnn import stack_bidirectional_dynamic_rnn, MultiRNNCell
 from translate import utils
 
 
-def unsafe_decorator(fun):
+def auto_reuse(fun):
     """
     Wrapper that automatically handles the `reuse' parameter.
     This is rather risky, as it can lead to reusing variables
@@ -20,11 +20,11 @@ def unsafe_decorator(fun):
                     return fun(*args, **kwargs)
             else:
                 raise e
-
     return fun_
 
 
-get_variable_unsafe = unsafe_decorator(tf.get_variable)
+get_variable = auto_reuse(tf.get_variable)
+dense = auto_reuse(tf.layers.dense)
 
 
 def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=None, dropout=None,
@@ -51,7 +51,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
         # inputs are token ids, which need to be mapped to vectors (embeddings)
         embedding_shape = [encoder.vocab_size, encoder.embedding_size]
         with tf.device('/cpu:0'):
-            embedding = get_variable_unsafe('embedding_{}'.format(encoder.name), shape=embedding_shape)
+            embedding = get_variable('embedding_{}'.format(encoder.name), shape=embedding_shape)
         embedding_variables.append(embedding)
 
     for i, encoder in enumerate(encoders):
@@ -98,7 +98,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                 state_size = state_size.c + state_size.h
 
             def get_initial_state(name='initial_state'):
-                initial_state = get_variable_unsafe(name, initializer=tf.zeros(state_size))
+                initial_state = get_variable(name, initializer=tf.zeros(state_size))
                 initial_state = tf.tile(tf.expand_dims(initial_state, axis=0), [batch_size, 1])
                 if isinstance(get_cell().state_size, LSTMStateTuple):
                     return LSTMStateTuple(*tf.split(initial_state, 2, axis=1))
@@ -106,7 +106,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                     return initial_state
 
             if encoder.bidir:
-                encoder_outputs_, _, _ = unsafe_decorator(stack_bidirectional_dynamic_rnn)(
+                encoder_outputs_, _, _ = auto_reuse(stack_bidirectional_dynamic_rnn)(
                     cells_fw=[get_cell() for _ in range(encoder.layers)],
                     cells_bw=[get_cell() for _ in range(encoder.layers)],
                     initial_states_fw=[get_initial_state('initial_state_fw')] * encoder.layers,
@@ -120,8 +120,8 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                 else:
                     cell = get_cell()
 
-                encoder_outputs_, _ = unsafe_decorator(tf.nn.dynamic_rnn)(cell=cell, initial_state=get_initial_state(),
-                                                                          **parameters)
+                encoder_outputs_, _ = auto_reuse(tf.nn.dynamic_rnn)(cell=cell, initial_state=get_initial_state(),
+                                                                    **parameters)
                 encoder_state_ = encoder_outputs_[:, -1, :]  # FIXME
 
             encoder_outputs.append(encoder_outputs_)
@@ -134,13 +134,13 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
 def compute_energy(hidden, state, attn_size, **kwargs):
     input_size = hidden.get_shape()[2].value
 
-    y = tf.layers.dense(state, attn_size, use_bias=True, name='W_a')
+    y = dense(state, attn_size, use_bias=True, name='W_a')
     y = tf.expand_dims(y, axis=1)
 
-    k = get_variable_unsafe('U_a', [input_size, attn_size])
+    k = get_variable('U_a', [input_size, attn_size])
     f = tf.einsum('ijk,kl->ijl', hidden, k)
 
-    v = get_variable_unsafe('v_a', [attn_size])
+    v = get_variable('v_a', [attn_size])
     s = f + y
 
     return tf.reduce_sum(v * tf.tanh(s), [2])
@@ -205,8 +205,8 @@ def local_attention(state, hidden_states, encoder, encoder_input_length, pos=Non
 
         pos_ = pos
         if pos is None:
-            wp = get_variable_unsafe('Wp', [state_size, state_size])
-            vp = get_variable_unsafe('vp', [state_size, 1])
+            wp = get_variable('Wp', [state_size, state_size])
+            vp = get_variable('vp', [state_size, 1])
 
             pos = tf.nn.sigmoid(tf.matmul(tf.nn.tanh(tf.matmul(state, wp)), vp))
             pos = tf.floor(encoder_input_length * pos)
@@ -285,7 +285,7 @@ def multi_attention(state, hidden_states, encoders, encoder_input_length, pos=No
 def get_embedding_function(decoder):
     embedding_shape = [decoder.vocab_size, decoder.embedding_size]
     with tf.device('/cpu:0'):
-        embedding = get_variable_unsafe('embedding_{}'.format(decoder.name), shape=embedding_shape)
+        embedding = get_variable('embedding_{}'.format(decoder.name), shape=embedding_shape)
 
     def embed(input_):
         return tf.nn.embedding_lookup(embedding, input_)
@@ -350,7 +350,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         if dropout is not None:
             initial_state = tf.nn.dropout(initial_state, dropout)
 
-        state = tf.layers.dense(initial_state, state_size, use_bias=True, name='initial_state_projection',
+        state = dense(initial_state, state_size, use_bias=True, name='initial_state_projection',
                                 activation=tf.nn.tanh)
 
         edit_pos = tf.zeros([batch_size], tf.float32)
@@ -383,12 +383,12 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
             # FIXME use `output` or `state` here?
             x = tf.concat([state, input_, context_vector], axis=1)
-            output_ = tf.layers.dense(x, decoder.cell_size, use_bias=False, name='maxout')
+            output_ = dense(x, decoder.cell_size, use_bias=False, name='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
-            output_ = tf.layers.dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
+            output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
 
             decoder_outputs = decoder_outputs.write(time, output_)
-            output_ = tf.layers.dense(output_, output_size, use_bias=True, name='softmax1')
+            output_ = dense(output_, output_size, use_bias=True, name='softmax1')
 
             proj_outputs = proj_outputs.write(time, output_)
 
@@ -417,7 +417,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             if isinstance(cell.state_size, LSTMStateTuple):
                 state = LSTMStateTuple(*tf.split(state, 2, axis=1))
 
-            _, new_state = cell(x, state)
+            _, new_state = auto_reuse(cell)(x, state)
 
             if isinstance(new_state, LSTMStateTuple):
                 new_state = tf.concat([new_state.c, new_state.h], axis=1)

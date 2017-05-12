@@ -17,7 +17,7 @@ sgd_after_n_epoch: null        # use SGD optimizer after this many epochs (inste
 
 # batch iteration parameters
 batch_mode: 'standard'   # standard, random, or strict
-shuffle_data: True       # shuffle dataset at each new epoch
+shuffle: True            # shuffle dataset at each new epoch
 read_ahead: 10           # number of batches to read ahead and sort
 
 # training parameters

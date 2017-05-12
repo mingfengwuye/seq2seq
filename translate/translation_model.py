@@ -340,18 +340,19 @@ class TranslationModel:
                 self.manage_best_checkpoints(step, score)
 
     def init_training(self, sess, sgd_after_n_epoch=None, **kwargs):
-        utils.log('reading training and development data')
         self.read_data(**kwargs)
-        global_step = self.global_step.eval(sess)
 
+        global_step = self.global_step.eval(sess)
         epoch = self.batch_size * global_step // self.train_size
         if sgd_after_n_epoch is not None and epoch >= sgd_after_n_epoch:  # already switched to SGD
             self.training.use_sgd = True
         else:
             self.training.use_sgd = False
 
-        for _ in range(global_step):  # read all the data up to this step
-            next(self.batch_iterator)
+        if kwargs.get('batch_mode') != 'random' and not kwargs.get('shuffle'):
+            # read all the data up to this step (only if the batch iteration method is deterministic)
+            for _ in range(global_step):
+                next(self.batch_iterator)
 
         # those parameters are used to track the progress of training
         self.training.time = 0
@@ -410,7 +411,7 @@ class TranslationModel:
 
         if steps_per_eval and global_step % steps_per_eval == 0 and 0 <= eval_burn_in <= global_step:
 
-            eval_dir = 'eval' if self.name is None else 'eval {}'.format(self.name)
+            eval_dir = 'eval' if self.name is None else 'eval_{}'.format(self.name)
             eval_output = os.path.join(model_dir, eval_dir)
 
             os.makedirs(eval_output, exist_ok=True)
@@ -421,7 +422,6 @@ class TranslationModel:
                 for prefix in self.dev_prefix
             ]
 
-            # kwargs_ = {**kwargs, 'output': output}
             kwargs_ = dict(kwargs)
             kwargs_['output'] = output
             score, *_ = self.evaluate(sess, beam_size, on_dev=True, **kwargs_)
@@ -431,7 +431,6 @@ class TranslationModel:
             raise utils.FinishedTrainingException
         elif steps_per_checkpoint and global_step % steps_per_checkpoint == 0:
             raise utils.CheckpointException
-
 
     def manage_best_checkpoints(self, step, score):
         score_filename = os.path.join(self.checkpoint_dir, 'scores.txt')
@@ -455,7 +454,6 @@ class TranslationModel:
 
         if any(lower(score_, score) for score_, _ in best_scores) or not best_scores:
             # if this checkpoint is in the top, save it under a special name
-
             prefix = 'translate-{}'.format(step)
             dest_prefix = 'best-{}'.format(step)
 
@@ -512,21 +510,21 @@ class TranslationModel:
         save_checkpoint(sess, self.saver, self.checkpoint_dir, self.global_step)
 
 
-variable_mapping = {
-r'encoder_(.*?)/forward_1/initial_state': r'encoder_\1/initial_state_fw',
-r'encoder_(.*?)/backward_1/initial_state': r'encoder_\1/initial_state_bw',
-r'encoder_(.*?)/forward_1/basic_lstm_cell': r'encoder_\1/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/layer_norm_basic_lstm_cell',
-r'encoder_(.*?)/backward_1/basic_lstm_cell': r'encoder_\1/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/layer_norm_basic_lstm_cell',
-r'decoder_(.*?)/basic_lstm_cell': r'decoder_\1/layer_norm_basic_lstm_cell',
-r'Matrix': r'kernel',
-r'Bias': r'bias',
-r'map_attns/Matrix': r'map_attns/matrix'
+variable_mapping = {   # for backward compatibility with old models
+    r'encoder_(.*?)/forward_1/initial_state': r'encoder_\1/initial_state_fw',
+    r'encoder_(.*?)/backward_1/initial_state': r'encoder_\1/initial_state_bw',
+    r'encoder_(.*?)/forward_1/basic_lstm_cell': r'encoder_\1/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/layer_norm_basic_lstm_cell',
+    r'encoder_(.*?)/backward_1/basic_lstm_cell': r'encoder_\1/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/layer_norm_basic_lstm_cell',
+    r'decoder_(.*?)/basic_lstm_cell': r'decoder_\1/layer_norm_basic_lstm_cell',
+    r'Matrix': r'kernel',
+    r'Bias': r'bias',
+    r'map_attns/Matrix': r'map_attns/matrix'
 }
 
 
 def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
     """
-    if `filename` is None, we load last checkpoint, otherwise
+    if `filename` is None, we load latest checkpoint, otherwise
       we ignore `checkpoint_dir` and load the given checkpoint file.
     """
     if filename is None:
@@ -563,7 +561,6 @@ def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
         variables = {var.name: var for var in tf.global_variables()}
 
     # remove variables from blacklist
-    # variables = [var for var in variables if not any(prefix in var.name for prefix in blacklist)]
     variables = {name[:-2]: var for name, var in variables.items() if not any(prefix in name for prefix in blacklist)}
 
     if filename is not None:
