@@ -6,8 +6,9 @@ import re
 
 parser = argparse.ArgumentParser()
 parser.add_argument('log_file')
-parser.add_argument('--dev-prefix', default='dev')
+parser.add_argument('--dev-prefix')
 parser.add_argument('--score', default='ter', choices=('ter', 'bleu', 'wer'))
+parser.add_argument('--task-name')
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -23,6 +24,13 @@ if __name__ == '__main__':
                 current_step = int(m.group(1))
                 max_step = max(max_step, current_step)
                 continue
+
+            if args.task_name is not None:
+                if not re.search(args.task_name, line):
+                    continue
+            if args.dev_prefix is not None:
+                if not re.search(args.task_name, line):
+                    continue
 
             m = re.findall('(\w+)=(\d+.\d+)', line)
             if m:
