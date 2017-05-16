@@ -109,7 +109,8 @@ class TranslationModel:
     def decode_sentence(self, sess, sentence_tuple, beam_size=1, remove_unk=False, early_stopping=True):
         return next(self.decode_batch(sess, [sentence_tuple], beam_size, remove_unk, early_stopping))
 
-    def decode_batch(self, sess, sentence_tuples, batch_size, beam_size=1, remove_unk=False, early_stopping=True):
+    def decode_batch(self, sess, sentence_tuples, batch_size, beam_size=1, remove_unk=False, early_stopping=True,
+                     fix_edits=True):
         beam_search = beam_size > 1 or isinstance(sess, list)
 
         if beam_search:
@@ -156,9 +157,9 @@ class TranslationModel:
 
                 if self.pred_edits:
                     if self.pred_characters:
-                        trg_tokens = utils.reverse_edits(list(src_tokens[0].strip()), trg_tokens)
+                        trg_tokens = utils.reverse_edits(list(src_tokens[0].strip()), trg_tokens, fix=fix_edits)
                     else:
-                        trg_tokens = utils.reverse_edits(src_tokens[0].split(), trg_tokens)
+                        trg_tokens = utils.reverse_edits(src_tokens[0].split(), trg_tokens, fix=fix_edits)
 
                 if self.pred_characters:
                     yield ''.join(trg_tokens).replace('<SPACE>', ' '), raw
@@ -241,7 +242,7 @@ class TranslationModel:
                 output_file.close()
 
     def evaluate(self, sess, beam_size, score_function, on_dev=True, output=None, remove_unk=False, max_dev_size=None,
-                 script_dir='scripts', early_stopping=True, raw_output=False, **kwargs):
+                 script_dir='scripts', early_stopping=True, raw_output=False, fix_edits=True, **kwargs):
         """
         :param score_function: name of the scoring function used to score and rank models
           (typically 'bleu_score')
@@ -283,17 +284,18 @@ class TranslationModel:
                 src_sentences = list(zip(*src_sentences))
 
                 hypothesis_iter = self.decode_batch(sess, lines, self.batch_size, beam_size=beam_size,
-                                                    early_stopping=early_stopping, remove_unk=remove_unk)
+                                                    early_stopping=early_stopping, remove_unk=remove_unk,
+                                                    fix_edits=fix_edits)
                 for i, (sources, hypothesis, reference) in enumerate(zip(src_sentences, hypothesis_iter,
                                                                          trg_sentences)):
                     hypothesis, raw = hypothesis
 
                     if self.pred_edits:
                         if self.pred_characters:
-                            reference = utils.reverse_edits(list(sources[0].strip()), reference.split())
+                            reference = utils.reverse_edits(list(sources[0].strip()), reference.split(), fix=fix_edits)
                             reference = ''.join(reference).replace('<SPACE>', ' ')
                         else:
-                            reference = utils.reverse_edits(sources[0].split(), reference.split())
+                            reference = utils.reverse_edits(sources[0].split(), reference.split(), fix=fix_edits)
                             reference = ' '.join(reference)
 
                     hypotheses.append(hypothesis)
@@ -557,7 +559,9 @@ def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
                 for key, value in variable_mapping.items():
                     new_var_name = re.sub(key, value, new_var_name)
 
-                variables[var_name] = get_variable_by_name(new_var_name)
+                variable = get_variable_by_name(new_var_name)
+                if variable is not None:
+                    variables[var_name] = variable
     else:
         variables = {var.name: var for var in tf.global_variables()}
 

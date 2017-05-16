@@ -42,3 +42,6 @@ encoders:
 decoder:
     name: edits
     pred_edits: True
+    layers: 1
+
+tie_embeddings: True

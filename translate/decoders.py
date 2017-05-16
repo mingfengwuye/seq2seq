@@ -309,7 +309,7 @@ def multi_attention(state, hidden_states, encoders, encoder_input_length, pos=No
 
 
 def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
-                      dropout=None, feed_previous=0.0, align_encoder_id=0, **kwargs):
+                      dropout=None, feed_previous=0.0, align_encoder_id=0, encoder_inputs=None, **kwargs):
     """
     :param targets: tensor of shape (output_length, batch_size)
     :param initial_state: initial state of the decoder (usually the final state of the encoder),
@@ -405,16 +405,17 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
             weights = weights.write(time, new_weights[align_encoder_id])
 
-            # FIXME use `output` or `state` here?
-            x = tf.concat([state, input_, context_vector], axis=1)
-            output_ = dense(x, decoder.cell_size, use_bias=False, name='maxout')
+            #output_ = state
+            output_ = tf.concat([state, input_, context_vector], axis=1)
+            output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
             output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
             decoder_outputs = decoder_outputs.write(time, output_)
 
             if decoder.tie_embeddings:
-                bias = get_variable('softmax1/bias', shape=[decoder.vocab_size])
-                output_ = tf.matmul(output_, tf.transpose(embedding)) + bias
+                with tf.device('/cpu:0'):
+                    bias = get_variable('softmax1/bias', shape=[decoder.vocab_size])
+                    output_ = tf.matmul(output_, tf.transpose(embedding)) + bias
             else:
                 output_ = dense(output_, output_size, use_bias=True, name='softmax1')
 
@@ -433,14 +434,28 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
                 is_sub = tf.equal(sample, utils.SUB_ID)
                 is_del = tf.equal(sample, utils.DEL_ID)
 
+                j = tf.gather_nd(encoder_inputs[align_encoder_id],
+                                 tf.stack([tf.range(batch_size), tf.to_int32(edit_pos)], axis=1))
+                m = tf.to_int32(is_keep)
+                #word_sample = tf.to_int32(m * j + (1 - m) * tf.to_int32(sample))
+                word_sample = None
+
                 i = tf.logical_or(is_keep, is_sub)
                 i = tf.logical_or(i, is_del)
                 i = tf.to_float(i)
                 edit_pos += i
+                edit_pos = tf.minimum(edit_pos, tf.to_float(encoder_input_length[align_encoder_id]) - 1)
+            else:
+                word_sample = None
 
             input_ = embed(sample)
 
-            x = tf.concat([input_, context_vector], 1)
+            if word_sample is None:
+                word_input = input_
+            else:
+                word_input = embed(word_sample)
+
+            x = tf.concat([word_input, context_vector], 1)
 
             try:
                 _, new_state = cell(x, state)
