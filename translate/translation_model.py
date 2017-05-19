@@ -6,6 +6,7 @@ import time
 import sys
 import math
 import shutil
+from collections import OrderedDict
 from translate import utils, evaluation
 from translate.seq2seq_model import Seq2SeqModel
 
@@ -16,9 +17,15 @@ class TranslationModel:
                  score_function='corpus_scores', name=None, **kwargs):
 
         self.batch_size = batch_size
-        self.src_ext = [encoder.get('ext') or encoder.name for encoder in encoders]
-        self.trg_ext = decoder.get('ext') or decoder.name
+        self.src_ext = [encoder.ext or encoder.name for encoder in encoders]
+        self.trg_ext = decoder.ext or decoder.name
+        self.ref_ext = decoder.ref_ext
         self.pred_edits = decoder.pred_edits
+
+        self.pred_ext = decoder.pred_ext or decoder.pred_name
+        if self.pred_ext is not None:
+            self.src_ext.append(self.pred_ext)
+
         self.dev_prefix = dev_prefix
         self.name = name
 
@@ -27,11 +34,13 @@ class TranslationModel:
         self.max_input_len = max_input_len
         self.max_output_len = max_output_len
 
-        encoders_and_decoder = encoders + [decoder]
-        self.character_level = [encoder_or_decoder.character_level for encoder_or_decoder in encoders_and_decoder]
-        self.pred_characters = self.character_level[-1]
-        if self.pred_edits:
-            self.character_level[-1] = False
+        #encoders_and_decoder = encoders + [decoder]
+        self.character_level = None   # FIXME
+
+        #self.character_level = [encoder_or_decoder.character_level for encoder_or_decoder in encoders_and_decoder]
+        #self.pred_characters = self.character_level[-1]
+        #if self.pred_edits:
+        #    self.character_level[-1] = False
 
         self.learning_rate = tf.Variable(learning_rate, trainable=False, name='learning_rate', dtype=tf.float32)
         self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate * learning_rate_decay_factor)
@@ -40,7 +49,7 @@ class TranslationModel:
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
         self.filenames = utils.get_filenames(extensions=self.extensions, dev_prefix=dev_prefix, name=name,
-                                             **kwargs)
+                                             ref_ext=decoder.ref_ext, **kwargs)
         # TODO: check that filenames exist
         utils.debug('reading vocabularies')
         self.read_vocab()
@@ -123,10 +132,14 @@ class TranslationModel:
             batches = [sentence_tuples[i * batch_size:(i + 1) * batch_size] for i in range(batch_count)]
 
         def map_to_ids(sentence_tuple):
+            # token_ids = [
+            #     utils.sentence_to_token_ids(sentence, vocab.vocab, character_level=char_level)
+            #     if vocab is not None else sentence  # when `sentence` is not a sentence but a vector...
+            #     for vocab, sentence, char_level in zip(self.vocabs, sentence_tuple, self.character_level)
+            # ]
             token_ids = [
-                utils.sentence_to_token_ids(sentence, vocab.vocab, character_level=char_level)
-                if vocab is not None else sentence  # when `sentence` is not a sentence but a vector...
-                for vocab, sentence, char_level in zip(self.vocabs, sentence_tuple, self.character_level)
+                utils.sentence_to_token_ids(sentence, vocab.vocab)
+                for vocab, sentence in zip(self.vocabs, sentence_tuple)
             ]
             return token_ids
 
@@ -139,7 +152,7 @@ class TranslationModel:
                                                                         vocabs=self.vocabs)
                 batch_token_ids = [hypotheses[0]]  # first hypothesis is the highest scoring one
             else:
-               batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
+               batch_token_ids, = self.seq2seq_model.greedy_decoding(sess, token_ids)
 
 
             for src_tokens, trg_token_ids in zip(batch, batch_token_ids):
@@ -156,25 +169,28 @@ class TranslationModel:
                     trg_tokens = [token for token in trg_tokens if token != utils._UNK]
 
                 if self.pred_edits:
-                    if self.pred_characters:
-                        trg_tokens = utils.reverse_edits(list(src_tokens[0].strip()), trg_tokens, fix=fix_edits)
-                    else:
-                        trg_tokens = utils.reverse_edits(src_tokens[0].split(), trg_tokens, fix=fix_edits)
+                    #if self.pred_characters:
+                    #    trg_tokens = utils.reverse_edits(list(src_tokens[0].strip()), trg_tokens, fix=fix_edits)
+                    #else:
+                    trg_tokens = utils.reverse_edits(src_tokens[0].split(), trg_tokens, fix=fix_edits)
 
-                if self.pred_characters:
-                    yield ''.join(trg_tokens).replace('<SPACE>', ' '), raw
-                else:
-                    yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
+                #if self.pred_characters:
+                #    yield ''.join(trg_tokens).replace('<SPACE>', ' '), raw
+                #else:
+                yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
 
     def align(self, sess, output=None, align_encoder_id=0, **kwargs):
         if len(self.filenames.test) != len(self.extensions):
             raise Exception('wrong number of input files')
 
         for line_id, lines in enumerate(utils.read_lines(self.filenames.test, self.extensions)):
+            # token_ids = [
+            #    utils.sentence_to_token_ids(sentence, vocab.vocab, character_level=char_level)
+            #    if vocab is not None else sentence
+            #    for vocab, sentence, char_level in zip(self.vocabs, lines, self.character_level)
+            # ]
             token_ids = [
-                utils.sentence_to_token_ids(sentence, vocab.vocab, character_level=char_level)
-                if vocab is not None else sentence
-                for vocab, sentence, char_level in zip(self.vocabs, lines, self.character_level)
+                utils.sentence_to_token_ids(sentence, vocab.vocab) for vocab, sentence in zip(self.vocabs, lines)
             ]
 
             _, weights = self.seq2seq_model.step(sess, data=[token_ids], forward_only=True, align=True,
@@ -256,7 +272,12 @@ class TranslationModel:
         utils.log('starting decoding')
         assert on_dev or len(self.filenames.test) == len(self.extensions)
 
-        filenames = self.filenames.dev if on_dev else [self.filenames.test]
+        if on_dev:
+            filenames = self.filenames.dev
+            if self.ref_ext:   # surrogate extension for BLEU eval (useful in the pred_edits settings)
+                filenames = [filenames_[:-2] + [filenames_[-1]] for filenames_ in filenames]
+        else:
+            filenames = [self.filenames.test]
 
         # convert `output` into a list, for zip
         if isinstance(output, str):
@@ -289,14 +310,6 @@ class TranslationModel:
                 for i, (sources, hypothesis, reference) in enumerate(zip(src_sentences, hypothesis_iter,
                                                                          trg_sentences)):
                     hypothesis, raw = hypothesis
-
-                    if self.pred_edits:
-                        if self.pred_characters:
-                            reference = utils.reverse_edits(list(sources[0].strip()), reference.split(), fix=fix_edits)
-                            reference = ''.join(reference).replace('<SPACE>', ' ')
-                        else:
-                            reference = utils.reverse_edits(sources[0].split(), reference.split(), fix=fix_edits)
-                            reference = ' '.join(reference)
 
                     hypotheses.append(hypothesis)
                     references.append(reference.strip().replace('@@ ', ''))
@@ -513,16 +526,16 @@ class TranslationModel:
         save_checkpoint(sess, self.saver, self.checkpoint_dir, self.global_step)
 
 
-variable_mapping = {   # for backward compatibility with old models
-    r'encoder_(.*?)/forward_1/initial_state': r'encoder_\1/initial_state_fw',
-    r'encoder_(.*?)/backward_1/initial_state': r'encoder_\1/initial_state_bw',
-    r'encoder_(.*?)/forward_1/basic_lstm_cell': r'encoder_\1/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/layer_norm_basic_lstm_cell',
-    r'encoder_(.*?)/backward_1/basic_lstm_cell': r'encoder_\1/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/layer_norm_basic_lstm_cell',
-    r'decoder_(.*?)/basic_lstm_cell': r'decoder_\1/layer_norm_basic_lstm_cell',
-    r'Matrix': r'kernel',
-    r'Bias': r'bias',
-    r'map_attns/Matrix': r'map_attns/matrix'
-}
+variable_mapping = [   # for backward compatibility with old models
+    (r'encoder_(.*?)/forward_1/initial_state', r'encoder_\1/initial_state_fw'),
+    (r'encoder_(.*?)/backward_1/initial_state', r'encoder_\1/initial_state_bw'),
+    (r'encoder_(.*?)/forward_1/basic_lstm_cell', r'encoder_\1/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/layer_norm_basic_lstm_cell'),
+    (r'encoder_(.*?)/backward_1/basic_lstm_cell', r'encoder_\1/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/layer_norm_basic_lstm_cell'),
+    (r'decoder_(.*?)/basic_lstm_cell', r'decoder_\1/layer_norm_basic_lstm_cell'),
+    (r'map_attns/Matrix', r'map_attns/matrix'),
+    (r'Matrix', r'kernel'),
+    (r'Bias', r'bias'),
+]
 
 
 def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
@@ -556,7 +569,7 @@ def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
             for var_name in var_names:
                 new_var_name = var_name
 
-                for key, value in variable_mapping.items():
+                for key, value in variable_mapping:
                     new_var_name = re.sub(key, value, new_var_name)
 
                 variable = get_variable_by_name(new_var_name)

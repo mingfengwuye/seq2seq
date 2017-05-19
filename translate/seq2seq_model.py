@@ -1,7 +1,6 @@
 import numpy as np
 import tensorflow as tf
 import re
-import itertools
 
 from translate import utils
 from translate import decoders
@@ -10,20 +9,15 @@ from collections import namedtuple
 
 class Seq2SeqModel(object):
     def __init__(self, encoders, decoder, learning_rate, global_step, max_gradient_norm, dropout_rate=0.0,
-                 freeze_variables=None, max_output_len=50, feed_previous=0.0,
-                 optimizer='sgd', max_input_len=None, decode_only=False, len_normalization=1.0,
-                 chained_encoders=False, chaining_strategy=None, more_dropout=False, align_encoder_id=0,
-                 name=None, **kwargs):
+                 freeze_variables=None, max_output_len=50, feed_previous=0.0, optimizer='sgd', max_input_len=None,
+                 decode_only=False, len_normalization=1.0, chained_encoders=False, name=None, **kwargs):
         self.encoders = encoders
         self.decoder = decoder
         self.name = name
 
         self.learning_rate = learning_rate
         self.global_step = global_step
-
         self.encoder_count = len(encoders)
-        self.trg_vocab_size = decoder.vocab_size
-        self.trg_cell_size = decoder.cell_size
 
         self.max_output_len = max_output_len
         self.max_input_len = max_input_len
@@ -43,139 +37,30 @@ class Seq2SeqModel(object):
         self.encoder_input_length = []
         self.input_weights = []
 
-        self.extensions = [encoder.name for encoder in encoders] + [decoder.name]
         self.encoder_names = [encoder.name for encoder in encoders]
-        self.decoder_name = decoder.name
-        self.extensions = self.encoder_names + [self.decoder_name]
-        self.freeze_variables = freeze_variables or []
-        self.max_gradient_norm = max_gradient_norm
+        if decoder.pred_name is not None:
+            self.encoder_names.append(decoder.pred_name)
 
-        for encoder in self.encoders:
-            placeholder = tf.placeholder(tf.int32, shape=[None, None], name='encoder_{}'.format(encoder.name))
-
+        for encoder_name in self.encoder_names:
+            placeholder = tf.placeholder(tf.int32, shape=[None, None], name='encoder_{}'.format(encoder_name))
             self.encoder_inputs.append(placeholder)
-            weights = decoders.get_weights(placeholder, utils.EOS_ID, time_major=False, include_first_eos=True)
-            self.input_weights.append(weights)
-            self.encoder_input_length.append(tf.to_int32(tf.reduce_sum(weights, axis=1)))
 
         # starts with BOS, and ends with EOS
         self.targets = tf.placeholder(tf.int32, shape=[None, None], name='target_{}'.format(self.decoder.name))
-        self.decoder_inputs = self.targets[:,:-1]
 
-        self.target_weights = decoders.get_weights(self.targets[:,1:], utils.EOS_ID, time_major=False,
-                                                   include_first_eos=True)
+        architecture = decoders.chained_encoders if chained_encoders else decoders.encoder_decoder
+        tensors = architecture(encoders, decoder, self.dropout, self.encoder_inputs, self.targets, self.feed_previous,
+                               **kwargs)
+        (self.xent_loss, self.outputs, self.encoder_state, self.attention_states, self.attention_weights,
+         self.beam_tensors) = tensors
 
-        self.losses = []
-
-        if chained_encoders:
-            assert len(encoders) == 2
-
-            parameters = dict(encoders=encoders[1:], decoder=encoders[0], dropout=self.dropout,
-                              encoder_input_length=self.encoder_input_length[1:], more_dropout=more_dropout)
-
-            attention_states, encoder_state = decoders.multi_encoder(self.encoder_inputs[1:], **parameters)
-
-            decoder_inputs = self.encoder_inputs[0][:,:-1]
-            batch_size = tf.shape(decoder_inputs)[0]
-
-            pad = tf.ones(shape=tf.stack([batch_size, 1]), dtype=tf.int32) * utils.BOS_ID
-            decoder_inputs = tf.concat([pad, decoder_inputs], axis=1)
-
-            outputs, _, _, states, attns, _ = decoders.attention_decoder(
-                attention_states=attention_states, initial_state=encoder_state, decoder_inputs=decoder_inputs,
-                **parameters
-            )
-
-            chaining_loss = decoders.sequence_loss(logits=outputs, targets=self.encoder_inputs[0],
-                                                   weights=self.input_weights[0])
-            self.losses.append(chaining_loss)
-
-            if decoder.use_lstm:
-                size = states.get_shape()[2].value
-                decoder_outputs = states[:,:,size // 2:]
-            else:
-                decoder_outputs = states
-
-            if chaining_strategy == 'share_states':
-                other_inputs = states
-            elif chaining_strategy == 'share_outputs':
-                other_inputs = decoder_outputs
-            else:
-                other_inputs = None
-
-            if other_inputs is not None and kwargs.get('chaining_stop_gradient'):
-                other_inputs = tf.stop_gradient(other_inputs)
-
-            parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=self.dropout,
-                              encoder_input_length=self.encoder_input_length[:1],
-                              encoder_inputs=self.encoder_inputs[:1], other_inputs=other_inputs)
-        else:
-            chaining_loss = None
-            parameters = dict(encoders=encoders, decoder=decoder, dropout=self.dropout,
-                              encoder_input_length=self.encoder_input_length,
-                              encoder_inputs=self.encoder_inputs)
-            states = None
-            attns = None
-            decoder_outputs = None
-
-        self.attention_states, self.encoder_state = decoders.multi_encoder(**parameters)
-
-        if chained_encoders:
-            if self.dropout is not None and more_dropout:
-                attns = tf.nn.dropout(attns, keep_prob=self.dropout)
-                states = tf.nn.dropout(states, keep_prob=self.dropout)
-                decoder_outputs = tf.nn.dropout(decoder_outputs, keep_prob=self.dropout)
-
-            if kwargs.get('chaining_stop_gradient'):
-                attns = tf.stop_gradient(attns)
-                states = tf.stop_gradient(states)
-                decoder_outputs = tf.stop_gradient(decoder_outputs)
-
-            if chaining_strategy == 'concat_attns':
-                self.attention_states[0] = tf.concat([self.attention_states[0], attns], axis=2)
-            elif chaining_strategy == 'concat_states':
-                self.attention_states[0] = tf.concat([self.attention_states[0], states], axis=2)
-            elif chaining_strategy == 'sum_attns':
-                self.attention_states[0] += attns
-            elif chaining_strategy in ('map_attns', 'map_states', 'map_outputs'):
-                if chaining_strategy == 'map_attns':
-                    x = attns
-                elif chaining_strategy == 'map_outputs':
-                    x = decoder_outputs
-                else:
-                    x = states
-
-                shape = [x.get_shape()[-1], self.attention_states[0].get_shape()[-1]]
-
-                w = tf.get_variable("map_attns/matrix", shape=shape)
-                b = tf.get_variable("map_attns/bias", shape=shape[-1:])
-
-                x = tf.einsum('ijk,kl->ijl', x, w) + b
-                if kwargs.get('chaining_non_linearity'):
-                    x = tf.nn.tanh(x)
-                    if self.dropout is not None and more_dropout:
-                        x = tf.nn.dropout(x, keep_prob=self.dropout)
-
-                self.attention_states[0] += x
-
-        self.outputs, self.attention_weights, _, _, _, self.beam_tensors = decoders.attention_decoder(
-            attention_states=self.attention_states, initial_state=self.encoder_state,
-            feed_previous=self.feed_previous, decoder_inputs=self.decoder_inputs,
-            align_encoder_id=align_encoder_id, **parameters
-        )
-        self.beam_output = decoders.softmax(self.outputs[:, 0, :])
-
-        self.xent_loss = decoders.sequence_loss(logits=self.outputs, targets=self.targets[:, 1:],
-                                                weights=self.target_weights)
-        self.losses.append(self.xent_loss)
-
-        chaining_loss_ratio = kwargs.get('chaining_loss_ratio')
-        if chaining_loss is not None and chaining_loss_ratio:
-            self.xent_loss += chaining_loss_ratio * chaining_loss
+        #self.beam_outputs = [decoders.softmax(outputs_[:, 0, :]) for outputs_ in self.outputs]
+        self.beam_outputs = decoders.softmax(self.outputs[0][:, 0, :])
 
         optimizers = self.get_optimizers(optimizer, learning_rate)
         if not decode_only:
-            self.update_op, self.sgd_update_op = self.get_update_op(self.xent_loss, optimizers, self.global_step)
+            self.update_op, self.sgd_update_op = self.get_update_op(self.xent_loss, optimizers, self.global_step,
+                                                                    max_gradient_norm, freeze_variables)
 
     @staticmethod
     def get_optimizers(optimizer_name, learning_rate):
@@ -191,19 +76,23 @@ class Seq2SeqModel(object):
 
         return opt, sgd_opt
 
-    def get_update_op(self, loss, opts, global_step=None):
+    def get_update_op(self, loss, opts, global_step=None, max_gradient_norm=None, freeze_variables=None):
+        freeze_variables = freeze_variables or []
+
         # compute gradient only for variables that are not frozen
         frozen_parameters = [var.name for var in tf.trainable_variables()
-                             if any(re.match(var_, var.name) for var_ in self.freeze_variables)]
+                             if any(re.match(var_, var.name) for var_ in freeze_variables)]
         params = [var for var in tf.trainable_variables() if var.name not in frozen_parameters]
 
         gradients = tf.gradients(loss, params)
-        clipped_gradients, _ = tf.clip_by_global_norm(gradients, self.max_gradient_norm)
+
+        if max_gradient_norm:
+            gradients, _ = tf.clip_by_global_norm(gradients, max_gradient_norm)
 
         update_ops = []
         for opt in opts:
             with tf.variable_scope('gradients' if self.name is None else 'gradients_{}'.format(self.name)):
-                update_op = opt.apply_gradients(zip(clipped_gradients, params), global_step=global_step)
+                update_op = opt.apply_gradients(zip(gradients, params), global_step=global_step)
             update_ops.append(update_op)
 
         return update_ops
@@ -219,7 +108,7 @@ class Seq2SeqModel(object):
         for i in range(self.encoder_count):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
 
-        output_feed = {'loss': self.losses[-1]}
+        output_feed = {'loss': self.xent_loss}
         if update_model:
             output_feed['updates'] = self.sgd_update_op if use_sgd else self.update_op
         if align:
@@ -247,7 +136,7 @@ class Seq2SeqModel(object):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
 
         outputs = session.run(self.outputs, input_feed)
-        return np.argmax(outputs, axis=2)
+        return [np.argmax(outputs_, axis=2) for outputs_ in outputs]
 
     def beam_search_decoding(self, session, token_ids, beam_size, early_stopping=True, vocabs=None):
         if not isinstance(session, list):
@@ -304,8 +193,8 @@ class Seq2SeqModel(object):
             scores_ = scores_.flatten()
             flat_ids = np.argsort(scores_)
 
-            token_ids_ = flat_ids % self.trg_vocab_size
-            hyp_ids = flat_ids // self.trg_vocab_size
+            token_ids_ = flat_ids % self.decoder.vocab_size
+            hyp_ids = flat_ids // self.decoder.vocab_size
 
             new_hypotheses = []
             new_scores = []

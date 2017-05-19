@@ -2,7 +2,7 @@
 dropout_rate: 0.5
 cell_size: 128
 attn_size: 128
-embedding_size: 128
+embedding_size: 64
 
 layers: 1
 bidir: True
@@ -13,7 +13,7 @@ max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data_new
-model_dir: experiments/APE16/edits/baseline
+model_dir: experiments/APE16/edits/baseline_small
 
 batch_size: 32
 
@@ -22,7 +22,7 @@ optimizer: 'sgd'
 learning_rate: 1.0
 learning_rate_decay_factor: 0.95
 decay_every_n_epoch: 1
-decay_after_n_epoch: 3
+decay_after_n_epoch: 5
 
 steps_per_checkpoint: 400
 steps_per_eval: 400
@@ -43,6 +43,16 @@ encoders:
 decoder:
     name: de
     ext: edits
+    cell_size: 64
+    embedding_size: 64
+    layers: 1
+    #pred_name: edits
+    #pred_ext: edits
+    #tie_embeddings: True
     pred_edits: True
-
-tie_embeddings: True
+    #pred_ext: edits
+    #pred_name: edits
+    pred_state: True
+    pred_input: 'ops'
+    no_del_update: True
+    tie_embeddings: True

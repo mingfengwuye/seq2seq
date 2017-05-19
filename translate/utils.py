@@ -157,7 +157,8 @@ def sentence_to_token_ids(sentence, vocabulary, character_level=False):
     return [vocabulary.get(w, UNK_ID) for w in sentence]
 
 
-def get_filenames(data_dir, model_dir, extensions, train_prefix, dev_prefix, vocab_prefix, name=None, **kwargs):
+def get_filenames(data_dir, model_dir, extensions, train_prefix, dev_prefix, vocab_prefix, name=None,
+                  ref_ext=None, **kwargs):
     """
     Get a bunch of file prefixes and extensions, and output the list of filenames to be used
     by the model.
@@ -174,7 +175,11 @@ def get_filenames(data_dir, model_dir, extensions, train_prefix, dev_prefix, voc
     dev_path = [os.path.join(data_dir, prefix) for prefix in dev_prefix]
 
     train = ['{}.{}'.format(train_path, ext) for ext in extensions]
-    dev = [['{}.{}'.format(path, ext) for ext in extensions] for path in dev_path]
+
+    dev_extensions = list(extensions)
+    if ref_ext is not None and ref_ext != extensions[-1]:
+        dev_extensions.append(ref_ext)
+    dev = [['{}.{}'.format(path, ext) for ext in dev_extensions] for path in dev_path]
 
     vocab_path = os.path.join(data_dir, vocab_prefix)
     vocab_src = ['{}.{}'.format(vocab_path, ext) for ext in extensions]

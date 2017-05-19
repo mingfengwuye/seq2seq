@@ -11,35 +11,41 @@ parser.add_argument('--subs', action='store_true')
 parser.add_argument('--ops-only', action='store_true')
 parser.add_argument('--words-only', action='store_true')
 parser.add_argument('--char-level', action='store_true')
-
-@functools.lru_cache(maxsize=1024)
-def levenshtein(src, trg, subs=False):
-    if len(src) == 0:
-        return len(trg), [('insert', w) for w in trg]
-    elif len(trg) == 0:
-        return len(src), ['delete' for _ in src]
-
-    insert = levenshtein(src, trg[1:], subs=subs)
-    delete = levenshtein(src[1:], trg, subs=subs)
-
-    res = [
-        (1 + insert[0], [('insert', trg[0])] + insert[1]),
-        (1 + delete[0], ['delete'] + delete[1])
-    ]
-
-    if src[0] == trg[0]:
-        keep = levenshtein(src[1:], trg[1:], subs=subs)
-        res.append((keep[0], ['keep'] + keep[1]))
-    elif subs:
-        keep = levenshtein(src[1:], trg[1:], subs=subs)
-        res.append((1 + keep[0], [('sub', trg[0])] + keep[1]))
-
-    return min(res, key=lambda p: p[0])
+parser.add_argument('--sub-cost', type=float, default=1.0)
+parser.add_argument('--del-cost', type=float, default=1.0)
+parser.add_argument('--ins-cost', type=float, default=1.0)
+parser.add_argument('--cache-size', type=int, default=512)
 
 
 if __name__ == '__main__':
     args = parser.parse_args()
     assert not args.words_only or not args.ops_only
+
+    @functools.lru_cache(maxsize=args.cache_size)
+    def levenshtein(src, trg, sub_cost=1.0, del_cost=1.0, ins_cost=1.0):
+        params = {'sub_cost': sub_cost, 'del_cost': del_cost, 'ins_cost': ins_cost}
+
+        if len(src) == 0:
+            return len(trg), [('insert', w) for w in trg]
+        elif len(trg) == 0:
+            return len(src), ['delete' for _ in src]
+
+        insert = levenshtein(src, trg[1:], **params)
+        delete = levenshtein(src[1:], trg, **params)
+
+        res = [
+            (ins_cost + insert[0], [('insert', trg[0])] + insert[1]),
+            (del_cost + delete[0], ['delete'] + delete[1])
+        ]
+
+        if src[0] == trg[0]:
+            keep = levenshtein(src[1:], trg[1:], **params)
+            res.append((keep[0], [('keep', trg[0])] + keep[1]))
+        else:
+            keep = levenshtein(src[1:], trg[1:], **params)
+            res.append((sub_cost + keep[0], [('sub', trg[0])] + keep[1]))
+
+        return min(res, key=lambda p: p[0])
 
     sys.setrecursionlimit(10000)
 
@@ -52,20 +58,24 @@ if __name__ == '__main__':
                 src_words = tuple(src_line.split())
                 trg_words = tuple(trg_line.split())
 
-            _, ops = levenshtein(src_words, trg_words, subs=args.subs)
+            if not args.subs:
+                args.sub_cost = float('inf')
+
+            try:
+                _, ops = levenshtein(src_words, trg_words, sub_cost=args.sub_cost,
+                                     del_cost=args.del_cost, ins_cost=args.ins_cost)
+            except KeyboardInterrupt:
+                sys.exit()
 
             edits = []
             for op in ops:
-                if op == 'keep':
+                if op == 'delete':
+                    edit = '<DEL>'
+                elif op[0] == 'keep':
                     if args.words_only:
-                        edit = '<NONE>'
+                        edit = op[1]
                     else:
                         edit = '<KEEP>'
-                elif op == 'delete':
-                    if args.words_only:
-                        edit = '<NONE>'
-                    else:
-                        edit = '<DEL>'
                 elif op[0] == 'insert':
                     if args.words_only:
                         edit = op[1]
