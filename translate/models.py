@@ -329,7 +329,9 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     assert decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'   # because of maxout
 
     embedding_shape = [decoder.vocab_size, decoder.embedding_size]
-    with tf.device('/cpu:0'):
+
+    device = None if decoder.tie_embeddings else '/cpu:0'
+    with tf.device(device):
         embedding = get_variable('embedding_{}'.format(decoder.name), shape=embedding_shape)
 
     # if decoder.pred_edits:
@@ -993,11 +995,13 @@ def dual_decoder(decoder_inputs, initial_state, attention_states, encoders, deco
     assert len(decoders) == 2   # we don't support more than two decoders
     assert decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'   # because of maxout
 
-    with tf.device('/cpu:0'):
-        embeddings = [
-            get_variable('embedding_{}'.format(decoder_.name), shape=[decoder_.vocab_size, decoder_.embedding_size])
-            for decoder_ in decoders
-        ]
+    embeddings = []
+    for decoder_ in decoders:
+        device = None if decoder_.tie_embeddings else '/cpu:0'
+        with tf.device(device):
+            embedding = get_variable('embedding_{}'.format(decoder_.name),
+                                     shape=[decoder_.vocab_size, decoder_.embedding_size])
+        embeddings.append(embedding)
 
     def embed(input_, encoder_id):
         return tf.nn.embedding_lookup(embeddings[encoder_id], input_)

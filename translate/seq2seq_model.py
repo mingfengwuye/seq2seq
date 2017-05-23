@@ -3,7 +3,7 @@ import tensorflow as tf
 import re
 
 from translate import utils
-from translate import decoders as models
+from translate import models
 from collections import namedtuple
 
 
