@@ -8,6 +8,7 @@ import random
 import math
 import wave
 import shutil
+import collections
 
 from collections import namedtuple
 from contextlib import contextmanager
@@ -33,6 +34,7 @@ DEL_ID = 4
 INS_ID = 5
 SUB_ID = 6
 NONE_ID = 7
+
 
 class FinishedTrainingException(Exception):
     def __init__(self):
@@ -79,34 +81,43 @@ class AttrDict(dict):
 
 
 def reverse_edits(source, edits, fix=True, strict=False):
+    if len(edits) == 1:    # transform list of edits as a list of (op, word) tuples
+        edits = edits[0]
+        for i, edit in enumerate(edits):
+            if edit in (_KEEP, _DEL, _INS, _SUB):
+                edit = (edit, edit)
+            elif edit.startswith(_INS + '_'):
+                edit = (_INS, edit[len(_INS + '_'):])
+            elif edit.startswith(_SUB + '_'):
+                edit = (_SUB, edit[len(_SUB + '_'):])
+            else:
+                edit = (_INS, edit)
+
+            edits[i] = edit
+    else:
+        edits = zip(*edits)
+
     src_words = source
     target = []
-
+    consistent = True
     i = 0
 
-    consistent = True
-
-    for edit in edits:
+    for op, word in edits:
         if strict and not consistent:
             break
-
-        if edit in (_DEL, _KEEP, _SUB) or edit.startswith(_SUB + '_'):
+        if op in (_DEL, _KEEP, _SUB):
             if i >= len(src_words):
                 consistent = False
                 continue
 
-            if edit == _KEEP:
+            if op == _KEEP:
                 target.append(src_words[i])
-            elif edit == _SUB:
-                target.append(edit)
-            elif edit.startswith(_SUB + '_'):
-                target.append(edit[len(_SUB + '_'):])
+            elif op == _SUB:
+                target.append(word)
 
             i += 1
-        elif edit.startswith(_INS + '_'):
-            target.append(edit[len(_INS + '_'):])
-        else:
-            target.append(edit)
+        else:   # op is INS
+            target.append(word)
 
     if fix:
         target += src_words[i:]
@@ -208,7 +219,7 @@ def read_dataset(paths, extensions, vocabs, max_size=None, character_level=None,
     data_set = []
 
     line_reader = read_lines(paths, extensions)
-    character_level = character_level or [False] * len(extensions)
+    character_level = character_level or {}
 
     for counter, inputs in enumerate(line_reader, 1):
         if max_size and counter > max_size:
@@ -216,20 +227,18 @@ def read_dataset(paths, extensions, vocabs, max_size=None, character_level=None,
         if counter % 100000 == 0:
             log("  reading data line {}".format(counter))
 
-        inputs = [
-            sentence_to_token_ids(input_, vocab.vocab, character_level=char_level)
-            if vocab is not None and isinstance(input_, str)
-            else input_
-            for input_, vocab, ext, char_level in zip(inputs, vocabs, extensions, character_level)
+        lines = [
+            sentence_to_token_ids(input_, vocab.vocab, character_level=character_level.get(ext, False))
+            for input_, vocab, ext in zip(inputs, vocabs, extensions)
         ]
 
-        if not all(inputs):  # skip empty inputs
+        if not all(lines):  # skip empty inputs
             continue
         # skip lines that are too long
-        if max_seq_len and any(len(inputs_) > max_len for inputs_, max_len in zip(inputs, max_seq_len)):
+        if max_seq_len and any(len(line) > max_seq_len[ext] for line, ext in zip(lines, extensions)):
             continue
 
-        data_set.append(inputs)  # TODO: filter too long
+        data_set.append(lines)
 
     debug('files: {}'.format(' '.join(paths)))
     debug('size: {}'.format(len(data_set)))
@@ -337,13 +346,9 @@ def get_batches(data, batch_size, batches=0, allow_smaller=True):
 
 
 def read_lines(paths, extensions):
-    if not paths:  # read from stdin (only works with one encoder with text input)
-        assert len(extensions) == 1
-        paths = [None]
-
     iterators = [
-        sys.stdin if filename is None else open(filename)
-        for ext, filename in zip(extensions, paths,)
+        sys.stdin if paths is None else open(filename)
+        for ext, filename in zip(extensions, paths)
     ]
 
     return zip(*iterators)

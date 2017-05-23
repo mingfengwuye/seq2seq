@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 import argparse
-import functools
 import sys
+import numpy as np
 
 parser = argparse.ArgumentParser()
 parser.add_argument('source')
@@ -17,37 +17,53 @@ parser.add_argument('--ins-cost', type=float, default=1.0)
 parser.add_argument('--cache-size', type=int, default=512)
 
 
+def levenshtein(src, trg, sub_cost=1.0, del_cost=1.0, ins_cost=1.0):
+    KEEP, SUB, INS, DEL = range(4)
+    op_names = 'keep', 'sub', 'insert', 'delete'
+
+    costs = np.zeros((len(trg) + 1, len(src) + 1))
+    ops = np.zeros((len(trg) + 1, len(src) + 1), dtype=np.int32)
+
+    costs[0] = range(len(src) + 1)
+    costs[:,0] = range(len(trg) + 1)
+    ops[0] = DEL
+    ops[:,0] = INS
+
+    for i in range(1, len(trg) + 1):
+        for j in range(1, len(src) + 1):
+            c, op = (sub_cost, SUB) if trg[i - 1] != src[j - 1] else (0, KEEP)
+
+            costs[i,j], ops[i,j] = min([
+                (costs[i - 1, j] + ins_cost, INS),
+                (costs[i, j - 1] + del_cost, DEL),
+                (costs[i - 1, j - 1] + c, op),
+            ], key=lambda p: p[0])
+
+    # backtracking
+    i, j = len(trg), len(src)
+    cost = costs[i, j]
+
+    res = []
+
+    while i > 0 or j > 0:
+        op = ops[i, j]
+        op_name = op_names[op]
+
+        if op == DEL:
+            res.append(op_name)
+            j -= 1
+        else:
+            res.append((op_name, trg[i - 1]))
+            i -= 1
+            if op != INS:
+                j -= 1
+
+    return cost, res[::-1]
+
+
 if __name__ == '__main__':
     args = parser.parse_args()
     assert not args.words_only or not args.ops_only
-
-    @functools.lru_cache(maxsize=args.cache_size)
-    def levenshtein(src, trg, sub_cost=1.0, del_cost=1.0, ins_cost=1.0):
-        params = {'sub_cost': sub_cost, 'del_cost': del_cost, 'ins_cost': ins_cost}
-
-        if len(src) == 0:
-            return len(trg), [('insert', w) for w in trg]
-        elif len(trg) == 0:
-            return len(src), ['delete' for _ in src]
-
-        insert = levenshtein(src, trg[1:], **params)
-        delete = levenshtein(src[1:], trg, **params)
-
-        res = [
-            (ins_cost + insert[0], [('insert', trg[0])] + insert[1]),
-            (del_cost + delete[0], ['delete'] + delete[1])
-        ]
-
-        if src[0] == trg[0]:
-            keep = levenshtein(src[1:], trg[1:], **params)
-            res.append((keep[0], [('keep', trg[0])] + keep[1]))
-        else:
-            keep = levenshtein(src[1:], trg[1:], **params)
-            res.append((sub_cost + keep[0], [('sub', trg[0])] + keep[1]))
-
-        return min(res, key=lambda p: p[0])
-
-    sys.setrecursionlimit(10000)
 
     with open(args.source) as src_file, open(args.target) as trg_file:
         for src_line, trg_line in zip(src_file, trg_file):
@@ -60,6 +76,7 @@ if __name__ == '__main__':
 
             if not args.subs:
                 args.sub_cost = float('inf')
+
 
             try:
                 _, ops = levenshtein(src_words, trg_words, sub_cost=args.sub_cost,

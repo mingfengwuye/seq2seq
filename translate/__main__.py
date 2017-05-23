@@ -50,7 +50,6 @@ parser.add_argument('--no-fix', action='store_const', dest='fix_edits', const=Fa
 
 parser.add_argument('--align-encoder-id', type=int, default=0)
 
-
 def main(args=None):
     args = parser.parse_args(args)
 
@@ -138,9 +137,9 @@ def main(args=None):
             task.setdefault(parameter, value)
 
         task.encoders = [utils.AttrDict(encoder) for encoder in task.encoders]
-        task.decoder = utils.AttrDict(task.decoder)
+        task.decoders = [utils.AttrDict(decoder) for decoder in task.decoders]
 
-        for encoder_or_decoder in task.encoders + [task.decoder]:
+        for encoder_or_decoder in task.encoders + task.decoders:
             for parameter, value in task.items():
                 encoder_or_decoder.setdefault(parameter, value)
 

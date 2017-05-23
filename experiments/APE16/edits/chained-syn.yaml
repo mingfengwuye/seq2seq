@@ -8,8 +8,6 @@ layers: 1
 bidir: True
 use_lstm: True
 
-max_output_len: 50   # 99% coverage
-max_input_len: 40
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data
@@ -38,14 +36,18 @@ encoders:
     align_edits: False
     attention_type: 'global'
     attention_window_size: 0
+    max_len: 40
 
   - name: src
     attention_type: 'global'
+    max_len: 40
 
-decoder:
-    name: pe
-    pred_edits: False
-    layers: 2
+decoders:
+  - name: edits
+    max_len: 50
+
+pred_edits: True
+ref_ext: pe
 
 train_prefix: train.concat
 vocab_prefix: vocab.concat

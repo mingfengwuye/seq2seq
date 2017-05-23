@@ -8,8 +8,6 @@ layers: 1
 bidir: True
 use_lstm: True
 
-max_output_len: 45   # 99% coverage
-max_input_len: 36
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data
@@ -38,8 +36,11 @@ encoders:
     align_edits: True
     attention_type: 'local'
     attention_window_size: 0
+    max_len: 36
 
-decoder:
-    name: edits
-    layers: 1
-    tie_embeddings: False
+decoders:
+  - name: edits
+    max_len: 45
+
+ref_ext: pe
+pred_edits: True
