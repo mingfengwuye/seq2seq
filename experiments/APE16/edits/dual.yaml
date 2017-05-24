@@ -2,7 +2,7 @@
 dropout_rate: 0.5
 cell_size: 128
 attn_size: 128
-embedding_size: 128
+embedding_size: 64
 
 layers: 1
 bidir: True
@@ -40,13 +40,25 @@ encoders:
     max_len: 36
 
 max_len: 39
-decoders:
+decoders:   # first decoder is the main one
   - name: ops
     ext: edits.ops
+
+    embedding_size: 32
+
+    skip_update: True
+    op_loss_ratio: 2.0
+    op_loss_strategy: random
+    ignore_dels: True
+    force_keep: True
+    input_aggregation: only_words   # only_words, only_ops, concat, sum
+    #output_aggregation: concat
+    output_aggregation: only_words
+
   - name: de
     ext: edits.words
 
-ref_ext: pe
+ref_ext: pe    # BLEU eval with respect to this reference
 pred_edits: True
 dual_output: True
 tie_embeddings: True

@@ -155,6 +155,7 @@ class TranslationModel:
                     # first output is ops, second output is words
                     raw = ' '.join('_'.join(tokens) for tokens in zip(*trg_tokens))
                     trg_tokens = utils.reverse_edits(src_tokens[0].split(), trg_tokens, fix=fix_edits)
+                    trg_tokens = [token for token in trg_tokens if token not in utils._START_VOCAB]
                 else:
                     trg_tokens = trg_tokens[0]
                     raw = ' '.join(trg_tokens[0])
