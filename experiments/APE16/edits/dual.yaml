@@ -52,7 +52,6 @@ decoders:   # first decoder is the main one
     ignore_dels: True
     force_keep: True
     input_aggregation: only_words   # only_words, only_ops, concat, sum
-    #output_aggregation: concat
     output_aggregation: only_words
 
   - name: de
@@ -62,17 +61,3 @@ ref_ext: pe    # BLEU eval with respect to this reference
 pred_edits: True
 dual_output: True
 tie_embeddings: True
-
-#    cell_size: 64
-#    embedding_size: 64
-#    layers: 1
-#    #pred_name: edits
-#    #pred_ext: edits
-#    #tie_embeddings: True
-#    pred_edits: True
-#    #pred_ext: edits
-#    #pred_name: edits
-#    pred_state: True
-#    pred_input: 'ops'
-#    no_del_update: True
-#    tie_embeddings: True
