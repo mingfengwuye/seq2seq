@@ -11,19 +11,19 @@ use_lstm: True
 weight_scale: 0.1
 
 data_dir: experiments/APE16/edits/data_dual_nosub
-model_dir: experiments/APE16/edits/dual
+model_dir: experiments/APE16/edits/dual_syn
 
 batch_size: 32
 
-optimizer: 'sgd'
-#learning_rate: 0.0003
-learning_rate: 1.0
-learning_rate_decay_factor: 0.95
-decay_every_n_epoch: 1
-decay_after_n_epoch: 5
+optimizer: 'adam'
+learning_rate: 0.0003
+#learning_rate: 1.0
+#learning_rate_decay_factor: 0.95
+#decay_every_n_epoch: 1
+#decay_after_n_epoch: 5
 
-steps_per_checkpoint: 200
-steps_per_eval: 200
+steps_per_checkpoint: 400
+steps_per_eval: 400
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
@@ -37,22 +37,22 @@ encoders:
     align_edits: True
     attention_type: 'local'
     attention_window_size: 0
-    max_len: 36
+    max_len: 41
 
-max_len: 39
+max_len: 50
 decoders:   # first decoder is the main one
   - name: ops
     ext: edits.ops
 
-    embedding_size: 32
+    embedding_size: 64
 
     skip_update: True
     op_loss_ratio: 2.0
-    op_loss_strategy: random
+    op_loss_strategy: sum
     ignore_dels: True
     force_keep: True
-    input_aggregation: only_words   # only_words, only_ops, concat, sum
-    output_aggregation: only_words
+    input_aggregation: concat   # only_words, only_ops, concat, sum
+    output_aggregation: concat
 
   - name: de
     ext: edits.words
@@ -61,3 +61,5 @@ ref_ext: pe    # BLEU eval with respect to this reference
 pred_edits: True
 dual_output: True
 tie_embeddings: True
+train_prefix: train.concat
+vocab_prefix: vocab.concat

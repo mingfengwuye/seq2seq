@@ -87,7 +87,10 @@ if __name__ == '__main__':
             edits = []
             for op in ops:
                 if op == 'delete':
-                    edit = '<DEL>'
+                    if args.words_only:
+                        edit = '<NONE>'
+                    else:
+                        edit = '<DEL>'
                 elif op[0] == 'keep':
                     if args.words_only:
                         edit = op[1]
