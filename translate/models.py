@@ -409,10 +409,16 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             attns = attns.write(time, context_vector)
             weights = weights.write(time, new_weights[align_encoder_id])
 
-            output_ = tf.concat([state, input_, context_vector], axis=1)
+            output_ = tf.concat([state, context_vector], axis=1)
+            # if decoder.pred_edits:
+            #     output_ = tf.concat([state, context_vector], axis=1)
+            # else:
+            #     output_ = tf.concat([state, input_, context_vector], axis=1)
 
-            output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
-            output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
+            if decoder.maxout:
+                output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
+                output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
+
             output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
             decoder_outputs = decoder_outputs.write(time, output_)
 
@@ -459,11 +465,13 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
                 edit_pos = tf.minimum(edit_pos, tf.to_float(encoder_input_length[align_encoder_id]) - 1)
                 input_ = embed(sample)
 
-                x = tf.concat([input_, context_vector], 1)
+                #x = tf.concat([input_, context_vector], 1)
+                x = input_
                 new_state = get_next_state(x, state)
             else:
                 input_ = embed(sample)
-                x = tf.concat([input_, context_vector], 1)
+                #x = tf.concat([input_, context_vector], 1)
+                x = input_
                 new_state = get_next_state(x, state)
 
             states = states.write(time, new_state)
@@ -817,18 +825,15 @@ def dual_decoder(decoder_inputs, initial_state, attention_states, encoders, deco
         else:
             return tf.concat(inputs_, axis=1)
 
-    # first symbol is BOS
-    embedded_inputs = [embed(inputs_.read(0), i) for i, inputs_ in enumerate(inputs)]
-    initial_input = aggregate_inputs(embedded_inputs, method=main_decoder.input_aggregation)
-
-    def _time_step(time, input_, state, proj_outputs, states, weights, edit_pos, attns):
+    def _time_step(time, state, proj_outputs, states, weights, edit_pos, attns):
         pos = [edit_pos if encoder.align_edits else None for encoder in encoders]
 
         with tf.variable_scope('decoder_{}'.format(main_decoder.name)):
             context_vector, new_weights = attention_(state, pos=pos)
             attns = attns.write(time, context_vector)
             weights = weights.write(time, new_weights[align_encoder_id])
-            output_ = tf.concat([state, input_, context_vector], axis=1)
+
+            output_ = tf.concat([state, context_vector], axis=1)
             output_ = dense(output_, main_decoder.cell_size, use_bias=False, name='maxout')
             output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, main_decoder.cell_size // 2, 2])), axis=2)
             #output_ = dense(output_, main_decoder.embedding_size, use_bias=False, name='softmax0')
@@ -888,15 +893,12 @@ def dual_decoder(decoder_inputs, initial_state, attention_states, encoders, deco
 
         output_aggregation = main_decoder.output_aggregation or main_decoder.input_aggregation
         input_ = aggregate_inputs(embedded_inputs, method=output_aggregation)
-        new_input_ = aggregate_inputs(embedded_inputs, method=main_decoder.input_aggregation)
-
-        x = tf.concat([input_, context_vector], axis=1)
 
         with tf.variable_scope('decoder_{}'.format(main_decoder.name)):
             try:
-                _, new_state = get_cell()(x, state)
+                _, new_state = get_cell()(input_, state)
             except ValueError:  # auto_reuse doesn't work with LSTM cells
-                _, new_state = get_cell(reuse=True)(x, state)
+                _, new_state = get_cell(reuse=True)(input_, state)
 
         if main_decoder.skip_update:  # when generated op is DEL, the generated word
             # isn't useful to the language model, so we don't update the LSTM's state
@@ -908,12 +910,12 @@ def dual_decoder(decoder_inputs, initial_state, attention_states, encoders, deco
 
         states = states.write(time, new_state)
 
-        return time + 1, new_input_, new_state, proj_outputs, states, weights, edit_pos, attns
+        return time + 1, new_state, proj_outputs, states, weights, edit_pos, attns
 
-    _, _, new_state, proj_outputs, states, weights, new_edit_pos, attns = tf.while_loop(
+    _, new_state, proj_outputs, states, weights, new_edit_pos, attns = tf.while_loop(
         cond=lambda time, *_: time < time_steps,
         body=_time_step,
-        loop_vars=(time, initial_input, state, proj_outputs, weights, states, edit_pos, attns),
+        loop_vars=(time, state, proj_outputs, weights, states, edit_pos, attns),
         parallel_iterations=main_decoder.parallel_iterations,
         swap_memory=main_decoder.swap_memory)
 
