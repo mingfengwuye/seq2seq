@@ -51,7 +51,7 @@ decoders:   # first decoder is the main one
     op_loss_strategy: random
     ignore_dels: True
     force_keep: True
-    input_aggregation: only_words   # only_words, only_ops, concat, sum
+    #input_aggregation: only_words   # only_words, only_ops, concat, sum
     output_aggregation: only_words
 
   - name: de

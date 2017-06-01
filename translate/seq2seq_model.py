@@ -173,7 +173,7 @@ class Seq2SeqModel(object):
 
         beam_data = None
 
-        for k in range(self.max_output_len):
+        for k in range(self.max_output_len[0]):
             batch_size = targets.shape[0]
             targets = np.reshape(targets, [batch_size, 1])
             targets = np.concatenate([targets, np.ones(targets.shape) * utils.EOS_ID], axis=1)
@@ -195,12 +195,13 @@ class Seq2SeqModel(object):
             beam_data, proba = list(zip(*res))
 
             proba = [np.maximum(proba_, 1e-10) for proba_ in proba]
+
             scores_ = scores[:, None] - np.average([np.log(proba_) for proba_ in proba], axis=0)
             scores_ = scores_.flatten()
             flat_ids = np.argsort(scores_)
 
-            token_ids_ = flat_ids % self.decoder.vocab_size
-            hyp_ids = flat_ids // self.decoder.vocab_size
+            token_ids_ = flat_ids % self.decoders[0].vocab_size
+            hyp_ids = flat_ids // self.decoders[0].vocab_size
 
             new_hypotheses = []
             new_scores = []
@@ -214,7 +215,7 @@ class Seq2SeqModel(object):
                 hypothesis = hypotheses[hyp_id] + [token_id]
                 score = scores_[flat_id]
 
-                if self.decoder.pred_edits:
+                if self.decoders[0].pred_edits:
                     # always follow greedy recommendation
                     op_id = min(token_id, len(utils._START_VOCAB))
                     greedy_tokens.setdefault(hyp_id, op_id)
@@ -258,6 +259,7 @@ class Seq2SeqModel(object):
         sorted_idx = np.argsort(scores)
         hypotheses = np.array(hypotheses)[sorted_idx].tolist()
         scores = scores[sorted_idx].tolist()
+
         return hypotheses, scores
 
     def get_batch(self, data, decoding=False):

@@ -133,11 +133,10 @@ class TranslationModel:
             if beam_search:
                 hypotheses, _ = self.seq2seq_model.beam_search_decoding(sess, token_ids[0], beam_size,
                                                                         early_stopping=early_stopping)
-                batch_token_ids = [hypotheses[0]]  # first hypothesis is the highest scoring one
+                batch_token_ids = [[hypotheses[0]]]  # first hypothesis is the highest scoring one
             else:
                 batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
-
-            batch_token_ids = zip(*batch_token_ids)
+                batch_token_ids = zip(*batch_token_ids)
 
             for src_tokens, trg_token_ids in zip(batch, batch_token_ids):
                 trg_tokens = []
@@ -456,23 +455,22 @@ class TranslationModel:
         def full_path(filename):
             return os.path.join(self.checkpoint_dir, filename)
 
-        lower = lambda x, y: y < x if self.reversed_scores else lambda x, y: x < y
+        lower = (lambda x, y: y < x) if self.reversed_scores else (lambda x, y: x < y)
 
         if any(lower(score_, score) for score_, _ in best_scores) or not best_scores:
             # if this checkpoint is in the top, save it under a special name
 
-            prefix = 'translate-{}'.format(step)
-            dest_prefix = 'best-{}'.format(step)
+            prefix = 'translate-{}.'.format(step)
+            dest_prefix = 'best-{}.'.format(step)
 
             for filename in os.listdir(self.checkpoint_dir):
                 if filename.startswith(prefix):
                     dest_filename = filename.replace(prefix, dest_prefix)
                     shutil.copy(full_path(filename), full_path(dest_filename))
 
-                    # FIXME (wrong `best`)
                     # also copy to `best` if this checkpoint is the absolute best
                     if all(lower(score_, score) for score_, _ in best_scores):
-                        dest_filename = filename.replace(prefix, 'best')
+                        dest_filename = filename.replace(prefix, 'best.')
                         shutil.copy(full_path(filename), full_path(dest_filename))
 
             best_scores = sorted(best_scores + [(score, step)], reverse=not self.reversed_scores)

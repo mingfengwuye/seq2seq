@@ -50,6 +50,7 @@ weight_scale: null       # if not null, initialize all weights to a normal distr
 layer_norm: False        # apply layer norm to the LSTMs
 lstm_dropout: False      # apply dropout to the LSTMs
 tie_embeddings: False
+maxout: True             # TODO
 
 # data
 data_dir: data           # directory containing the training data
