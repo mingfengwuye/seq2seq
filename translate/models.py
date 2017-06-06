@@ -390,6 +390,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         edit_pos = tf.squeeze(edit_pos, axis=1)
 
         time = tf.constant(0, dtype=tf.int32, name='time')
+
         proj_outputs = tf.TensorArray(dtype=tf.float32, size=time_steps, clear_after_read=False)
         decoder_outputs = tf.TensorArray(dtype=tf.float32, size=time_steps)
 
@@ -413,7 +414,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             # if decoder.pred_edits:
             #     output_ = tf.concat([state, context_vector], axis=1)
             # else:
-            #     output_ = tf.concat([state, input_, context_vector], axis=1)
+            output_ = tf.concat([state, input_, context_vector], axis=1)
 
             if decoder.maxout:
                 output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
@@ -465,10 +466,11 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
                 edit_pos = tf.minimum(edit_pos, tf.to_float(encoder_input_length[align_encoder_id]) - 1)
                 input_ = embed(sample)
 
-                #x = tf.concat([input_, context_vector], 1)
-                x = input_
+                x = tf.concat([input_, context_vector], 1)
+                # x = input_
                 new_state = get_next_state(x, state)
             else:
+                edit_pos += 1
                 input_ = embed(sample)
                 #x = tf.concat([input_, context_vector], 1)
                 x = input_
@@ -502,6 +504,124 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         attns = tf.transpose(attns, perm=(1, 0, 2))
 
         return proj_outputs, weights, decoder_outputs, states, attns, beam_tensors
+
+
+
+def simple_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
+                   dropout=None, feed_previous=0.0, align_encoder_id=0, **kwargs):
+    device = None if decoder.tie_embeddings else '/cpu:0'
+    with tf.device(device):
+        embedding_shape = [decoder.vocab_size, decoder.embedding_size]
+        embedding = get_variable('embedding_{}'.format(decoder.name), shape=embedding_shape)
+
+    def embed(input_):
+        return tf.nn.embedding_lookup(embedding, input_)
+
+    def get_cell(reuse=False):
+        cells = []
+
+        for _ in range(decoder.layers):
+            if decoder.use_lstm:
+                keep_prob = dropout if dropout and decoder.lstm_dropout else 1.0
+                cell = LayerNormBasicLSTMCell(decoder.cell_size, dropout_keep_prob=keep_prob,
+                                              layer_norm=decoder.layer_norm, reuse=reuse)
+                cell = CellWrapper(cell)
+            else:
+                cell = GRUCell(decoder.cell_size, reuse=reuse)
+
+            if dropout is not None and not (decoder.use_lstm and decoder.lstm_dropout):
+                cell = DropoutWrapper(cell, input_keep_prob=dropout)
+
+            cells.append(cell)
+
+        if len(cells) == 1:
+            return cells[0]
+        else:
+            return CellWrapper(MultiRNNCell(cells))
+
+    with tf.variable_scope('decoder_{}'.format(decoder.name)):
+        attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
+                                       encoder_input_length=encoder_input_length,
+                                       aggregation_method=decoder.aggregation_method)
+        input_shape = tf.shape(decoder_inputs)
+        batch_size = input_shape[0]
+        time_steps = input_shape[1]
+        state_size = get_cell().state_size
+
+        if dropout is not None:
+            initial_state = tf.nn.dropout(initial_state, dropout)
+
+        state = dense(initial_state, state_size, use_bias=True, name='initial_state_projection', activation=tf.nn.tanh)
+        time = tf.constant(0, dtype=tf.int32, name='time')
+
+        proj_outputs = tf.TensorArray(dtype=tf.float32, size=time_steps, clear_after_read=False)
+
+        inputs = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False).unstack(
+                                tf.cast(tf.transpose(decoder_inputs, perm=(1, 0)), tf.int64))
+
+        def _time_step(time, state, proj_outputs):
+
+            argmax = lambda: tf.argmax(proj_outputs.read(time - 1), axis=1)
+            target = lambda: inputs.read(time)
+
+            sample = tf.cond(tf.logical_or(tf.equal(time, 0), tf.random_uniform([]) >= feed_previous),
+                             target, argmax)
+
+            sample.set_shape([None])
+            sample = tf.stop_gradient(sample)
+            input_ = embed(sample)
+
+            def get_next_state(x, state, scope=None):
+                def fun():
+                    try:
+                        _, new_state = get_cell()(x, state)
+                    except ValueError:  # auto_reuse doesn't work with LSTM cells
+                        _, new_state = get_cell(reuse=True)(x, state)
+                    return new_state
+
+                if scope is not None:
+                    with tf.variable_scope(scope):
+                        return fun()
+                else:
+                    return fun()
+
+            context_vector, new_weights = attention_(state)
+            #x = tf.concat([input_, context_vector], 1)
+            x = input_
+            state = get_next_state(x, state)
+
+            #output_ = state
+            output_ = tf.concat([state, context_vector], axis=1)
+
+            if decoder.maxout:
+                output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
+                output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
+
+            output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
+
+            if decoder.tie_embeddings:
+                bias = get_variable('softmax1/bias', shape=[decoder.vocab_size])
+                output_ = tf.matmul(output_, tf.transpose(embedding)) + bias
+            else:
+                output_ = dense(output_, decoder.vocab_size, use_bias=True, name='softmax1')
+
+            proj_outputs = proj_outputs.write(time, output_)
+
+            return time + 1, state, proj_outputs
+
+        _, new_state, proj_outputs = tf.while_loop(
+            cond=lambda time, *_: time < time_steps,
+            body=_time_step,
+            loop_vars=(time, state, proj_outputs),
+            parallel_iterations=decoder.parallel_iterations,
+            swap_memory=decoder.swap_memory)
+
+        proj_outputs = proj_outputs.stack()
+        beam_tensors = utils.AttrDict(data=state, new_data=new_state)
+        proj_outputs = tf.transpose(proj_outputs, perm=(1, 0, 2))
+
+        return proj_outputs, None, None, None, None, beam_tensors
+
 
 
 def sequence_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True):
@@ -570,7 +690,7 @@ def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_p
 
     attention_states, encoder_state = multi_encoder(**parameters)
 
-    outputs, attention_weights, _, _, _, beam_tensors = attention_decoder(
+    outputs, attention_weights, _, _, _, beam_tensors = attention_decoder(   # FIXME
         attention_states=attention_states, initial_state=encoder_state,
         feed_previous=feed_previous, decoder_inputs=targets[:, :-1],
         align_encoder_id=align_encoder_id, **parameters

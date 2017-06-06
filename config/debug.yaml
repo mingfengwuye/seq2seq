@@ -41,4 +41,4 @@ encoders:
 decoders:
   - name: en
     maxout: False
-    tie_embeddings: True
+    #tie_embeddings: True
