@@ -14,7 +14,7 @@ parser.add_argument('--bleu', action='store_true')
 parser.add_argument('--max-size', type=int)
 parser.add_argument('--case-insensitive', '-i', action='store_true')
 
-parser.add_argument('--draws', type=int, default=1000)
+parser.add_argument('--samples', type=int, default=1000)
 parser.add_argument('--sample-size', type=int, default=0)
 parser.add_argument('-p', type=float, default=0.05)
 
@@ -48,7 +48,7 @@ if __name__ == '__main__':
         if args.sample_size == 0:
             args.sample_size = len(references)
 
-        diff = []
+        diffs = []
 
         hypotheses_1 = np.array(hypotheses_1)
         hypotheses_2 = np.array(hypotheses_2)
@@ -56,18 +56,29 @@ if __name__ == '__main__':
 
         score_fun = corpus_bleu if args.bleu else corpus_ter
 
-        for _ in range(args.draws):
+        #diff = abs(score_fun(hypotheses_1, references)[0] - score_fun(hypotheses_2, references)[0])
+
+        for _ in range(args.samples):
             indices = np.random.randint(len(references), size=args.sample_size)
             hypotheses_1_ = hypotheses_1[indices]
             hypotheses_2_ = hypotheses_2[indices]
             references_ = references[indices]
 
-            bleu_1, _ = score_fun(hypotheses_1_, references_)
-            bleu_2, _ = score_fun(hypotheses_2_, references_)
+            score_1, _ = score_fun(hypotheses_1_, references_)
+            score_2, _ = score_fun(hypotheses_2_, references_)
 
-            diff.append(int(bleu_1 > bleu_2))
+            diffs.append(int(score_1 > score_2))
+            #diffs.append(abs(score_1 - score_2))
 
-        p = sum(diff) / len(diff)
+        # avg_diff = sum(diffs) / len(diffs)
+        # c = sum(
+        #     int(diff_ - avg_diff >= diff) for diff_ in diffs
+        # )
+        #
+        # p = (c + 1) / (len(diffs) + 1)
+        # print(p)
+
+        p = sum(diffs) / len(diffs)
         if not args.bleu:
             p = 1 - p
 
