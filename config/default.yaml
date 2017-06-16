@@ -50,7 +50,10 @@ weight_scale: null       # if not null, initialize all weights to a normal distr
 layer_norm: False        # apply layer norm to the LSTMs
 lstm_dropout: False      # apply dropout to the LSTMs
 tie_embeddings: False
-maxout: True             # TODO
+
+maxout: True             # parameters of the decoder
+input_attention: True    # use attention as input to the LSTM
+use_previous_word: True  # use previous word when predicting a new word
 
 # data
 data_dir: data           # directory containing the training data
@@ -85,6 +88,7 @@ parallel_iterations: 16  # parameter of Tensorflow's while_loop
 swap_memory: True        # parameter of Tensorflow's while_loop
 max_to_keep: 1           # keep that many latest checkpoints
 keep_every_n_hours: 0    # keep checkpoints every n hours
+embeddings_on_cpu: True
 
 encoders:                # this is a list (you can specify several encoders)
   - name: fr             # each encoder or decoder has a name (used for naming variables) and an extension (for files)

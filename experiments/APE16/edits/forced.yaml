@@ -21,9 +21,11 @@ learning_rate: 1.0
 learning_rate_decay_factor: 0.95
 decay_every_n_epoch: 1
 decay_after_n_epoch: 3
+#decay_every_n_epoch: 0.1
+#decay_after_n_epoch: 0.3
 
-steps_per_checkpoint: 400
-steps_per_eval: 400
+steps_per_checkpoint: 200
+steps_per_eval: 200
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
@@ -32,15 +34,26 @@ batch_mode: 'standard'
 read_ahead: 10
 
 encoders:
-  - name: mt
+  - name: de
+    ext: mt
     align_edits: True
     attention_type: 'local'
-    attention_window_size: 0
+    attention_window_size: 0   # FIXME
     max_len: 36
 
 decoders:
-  - name: edits
+  - name: de
+    ext: edits
     max_len: 45
+    maxout: False
+    tie_embedding: False
+    input_attention: False
+    skip_updates: False
+    lstm_input: words         # concat, sum, words, ops
+    prediction_input: ops     # concat, sum, words, ops, none
+    split_ops: True
 
+embeddings_on_cpu: False
 ref_ext: pe
 pred_edits: True
+#train_prefix: train.random

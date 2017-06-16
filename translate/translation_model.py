@@ -3,6 +3,7 @@ import os
 import pickle
 import re
 import time
+import numpy as np
 import sys
 import math
 import shutil
@@ -127,7 +128,7 @@ class TranslationModel:
             ]
             return token_ids
 
-        for batch in batches:
+        for batch_id, batch in enumerate(batches):
             token_ids = list(map(map_to_ids, batch))
 
             if beam_search:
@@ -137,7 +138,8 @@ class TranslationModel:
                                                                       early_stopping=early_stopping)
                 batch_token_ids = [[hypotheses[0]]]  # first hypothesis is the highest scoring one
             else:
-                batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
+                batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids,
+                                                                     print_stats=(batch_id == len(batches) - 1))
                 batch_token_ids = zip(*batch_token_ids)
 
             for src_tokens, trg_token_ids in zip(batch, batch_token_ids):
@@ -165,6 +167,7 @@ class TranslationModel:
                     trg_tokens = [token for token in trg_tokens if token != utils._UNK]
 
                 yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
+
 
     def align(self, sess, output=None, align_encoder_id=0, **kwargs):
         if len(self.filenames.test) != len(self.extensions):
@@ -383,7 +386,7 @@ class TranslationModel:
 
         epoch = self.batch_size * global_step // self.train_size
 
-        if decay_after_n_epoch is not None and epoch >= decay_after_n_epoch:
+        if decay_after_n_epoch is not None and self.batch_size * global_step >= decay_after_n_epoch * self.train_size:
             if decay_every_n_epoch is not None and (self.batch_size * (global_step - self.training.last_decay)
                                                     >= decay_every_n_epoch * self.train_size):
                 sess.run(self.learning_rate_decay_op)
@@ -512,6 +515,8 @@ class TranslationModel:
                 load_checkpoint(sess, None, checkpoint, blacklist=blacklist)
         elif not reset:
             load_checkpoint(sess, self.checkpoint_dir, blacklist=blacklist)
+
+        utils.debug('global step: {}'.format(self.global_step.eval(sess)))
 
     def save(self, sess):
         save_checkpoint(sess, self.saver, self.checkpoint_dir, self.global_step)

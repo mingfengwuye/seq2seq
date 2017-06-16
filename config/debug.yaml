@@ -25,8 +25,8 @@ learning_rate_decay_factor: 0.9
 decay_every_n_epoch: 1
 decay_after_n_epoch: 21
 
-steps_per_checkpoint: 200
-steps_per_eval: 200
+steps_per_checkpoint: 500
+steps_per_eval: 500
 score_function: corpus_scores
 
 max_gradient_norm: 1.0
@@ -40,5 +40,9 @@ encoders:
 
 decoders:
   - name: en
-    maxout: False
-    #tie_embeddings: True
+
+keep_best: 100
+input_attention: False
+use_previous_word: False
+maxout: False
+tie_embeddings: True

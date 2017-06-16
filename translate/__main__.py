@@ -189,12 +189,12 @@ def main(args=None):
             # create one session for each model in the ensemble
             sess = [tf.Session() for _ in config.load]
             for sess_, checkpoint in zip(sess, config.load):
-                model.initialize(sess_, [checkpoint], reset=True)
+                model.initialize(sess_, [checkpoint])
         elif (not config.load and (args.eval or args.decode is not None or args.align) and
              (os.path.isfile(best_checkpoint + '.index') or os.path.isfile(best_checkpoint + '.index'))):
             # in decoding and evaluation mode, unless specified otherwise (by `load`),
             # try to load the best checkpoint)
-            model.initialize(sess, [best_checkpoint], reset=True)
+            model.initialize(sess, [best_checkpoint])
         else:
             # loads last checkpoint, unless `reset` is true
             model.initialize(sess, **config)

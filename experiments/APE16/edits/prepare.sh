@@ -7,60 +7,46 @@
 # synthetic PE data by using back-translation
 
 raw_data=experiments/APE16/raw_data
-data_dir=experiments/APE16/edits/data
+data_dir=experiments/APE16/edits/data_new
 
 rm -rf ${data_dir}
 mkdir -p ${data_dir}
 
-cp ${raw_data}/{train,dev,test,500K,4M}.{src,mt,pe} ${data_dir}
+cp ${raw_data}/{train,dev,test}.{src,mt,pe} ${data_dir}
 
 scripts/extract-edits.py ${data_dir}/train.{mt,pe} > ${data_dir}/train.edits
 scripts/extract-edits.py ${data_dir}/dev.{mt,pe} > ${data_dir}/dev.edits
 scripts/extract-edits.py ${data_dir}/test.{mt,pe} > ${data_dir}/test.edits
+
+cat ${data_dir}/train.{mt,pe} > ${data_dir}/train.de
+
+#scripts/prepare-data.py ${data_dir}/train src mt pe edits ${data_dir} --mode vocab --vocab-size 0
+scripts/prepare-data.py ${data_dir}/train src de ${data_dir} --mode vocab --vocab-size 0
+
+cp ${data_dir}/vocab.de ${data_dir}/vocab.mt
+cp ${data_dir}/vocab.de ${data_dir}/vocab.pe
+cp ${data_dir}/vocab.de ${data_dir}/vocab.edits
+
+#for i in {1..10}; do   # inflate corpus with randomness
+#    cat ${data_dir}/train.mt >> ${data_dir}/train.random.mt
+#    scripts/extract-edits.py ${data_dir}/train.{mt,pe} >> ${data_dir}/train.random.edits --randomize
+#done
+
+cp ${raw_data}/500K.{src,mt,pe} ${data_dir}
 scripts/extract-edits.py ${data_dir}/500K.{mt,pe} > ${data_dir}/500K.edits
-scripts/extract-edits.py ${data_dir}/4M.{mt,pe} > ${data_dir}/4M.edits
-
-scripts/prepare-data.py ${data_dir}/train src pe mt edits ${data_dir} --mode vocab --vocab-size 0
-
-cp ${data_dir}/500K.mt ${data_dir}/train.concat.mt
-cp ${data_dir}/500K.pe ${data_dir}/train.concat.pe
+cat ${data_dir}/500K.{mt,pe} > ${data_dir}/train.concat.de
 cp ${data_dir}/500K.src ${data_dir}/train.concat.src
 cp ${data_dir}/500K.edits ${data_dir}/train.concat.edits
 
 for i in {1..20}; do   # oversample PE data
-    cat ${data_dir}/train.mt >> ${data_dir}/train.concat.mt
-    cat ${data_dir}/train.pe >> ${data_dir}/train.concat.pe
+    cat ${data_dir}/train.{mt,pe} >> ${data_dir}/train.concat.de
     cat ${data_dir}/train.src >> ${data_dir}/train.concat.src
     cat ${data_dir}/train.edits >> ${data_dir}/train.concat.edits
 done
 
-scripts/prepare-data.py ${data_dir}/train.concat src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.concat \
+scripts/prepare-data.py ${data_dir}/train.concat src de ${data_dir} --mode vocab --vocab-prefix vocab.concat \
 --vocab-size 30000
 
-# train.all dataset
-cat ${data_dir}/{4M,train.concat}.mt > ${data_dir}/train.all.mt
-cat ${data_dir}/{4M,train.concat}.pe > ${data_dir}/train.all.pe
-cat ${data_dir}/{4M,train.concat}.src > ${data_dir}/train.all.src
-cat ${data_dir}/{4M,train.concat}.edits > ${data_dir}/train.all.edits
-
-scripts/prepare-data.py ${data_dir}/train.all src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.all \
---vocab-size 60000
-
-# smaller vocab
-head -n30000 ${data_dir}/vocab.all.mt > ${data_dir}/vocab.all.30k.mt
-head -n30000 ${data_dir}/vocab.all.pe > ${data_dir}/vocab.all.30k.pe
-head -n30000 ${data_dir}/vocab.all.src > ${data_dir}/vocab.all.30k.src
-head -n30000 ${data_dir}/vocab.all.edits > ${data_dir}/vocab.all.30k.edits
-
-# train.100k dataset
-head -n100000 ${data_dir}/500K.mt > ${data_dir}/train.100k.mt
-head -n100000 ${data_dir}/500K.pe > ${data_dir}/train.100k.pe
-head -n100000 ${data_dir}/500K.src > ${data_dir}/train.100k.src
-head -n100000 ${data_dir}/500K.edits > ${data_dir}/train.100k.edits
-cat ${data_dir}/train.mt >> ${data_dir}/train.100k.mt
-cat ${data_dir}/train.pe >> ${data_dir}/train.100k.pe
-cat ${data_dir}/train.src >> ${data_dir}/train.100k.src
-cat ${data_dir}/train.edits >> ${data_dir}/train.100k.edits
-
-scripts/prepare-data.py ${data_dir}/train.100k src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.100k \
---vocab-size 30000
+cp ${data_dir}/vocab.concat.de ${data_dir}/vocab.concat.mt
+cp ${data_dir}/vocab.concat.de ${data_dir}/vocab.concat.pe
+cp ${data_dir}/vocab.concat.de ${data_dir}/vocab.concat.edits

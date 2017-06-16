@@ -47,8 +47,8 @@ decoders:   # first decoder is the main one
     embedding_size: 32
 
     skip_update: True
-    op_loss_ratio: 2.0
-    op_loss_strategy: random
+    loss_ratio: 2.0
+    multi_loss_strategy: random
     ignore_dels: True
     force_keep: True
     #input_aggregation: only_words   # only_words, only_ops, concat, sum

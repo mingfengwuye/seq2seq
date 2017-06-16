@@ -3,6 +3,8 @@
 import argparse
 import sys
 import numpy as np
+import functools
+import random
 
 parser = argparse.ArgumentParser()
 parser.add_argument('source')
@@ -14,12 +16,43 @@ parser.add_argument('--char-level', action='store_true')
 parser.add_argument('--sub-cost', type=float, default=1.0)
 parser.add_argument('--del-cost', type=float, default=1.0)
 parser.add_argument('--ins-cost', type=float, default=1.0)
-parser.add_argument('--cache-size', type=int, default=512)
+parser.add_argument('--randomize', action='store_true')
 
 
-def levenshtein(src, trg, sub_cost=1.0, del_cost=1.0, ins_cost=1.0):
-    KEEP, SUB, INS, DEL = range(4)
-    op_names = 'keep', 'sub', 'insert', 'delete'
+@functools.lru_cache(maxsize=1024)
+def levenshtein_legacy(src, trg, *args, **kwargs):
+    # Dynamic programming by memoization
+    # This recursive solution is easier, but much slower than the `true` dynamic programming solution
+    # (due to important dictionary lookup overhead, and probably not exactly constant lookup time)
+
+    if len(src) == 0:
+        return len(trg), [('insert', w) for w in trg]
+    elif len(trg) == 0:
+        return len(src), ['delete' for _ in src]
+
+    insert = levenshtein_legacy(src, trg[1:])
+    delete = levenshtein_legacy(src[1:], trg)
+
+    res = [
+        (1 + delete[0], ['delete'] + delete[1]),
+        (1 + insert[0], [('insert', trg[0])] + insert[1]),
+    ]
+
+    if src[0] == trg[0]:
+        keep = levenshtein_legacy(src[1:], trg[1:])
+        res.append((keep[0], [('keep', src[0])] + keep[1]))
+
+    return min(res, key=lambda p: p[0])
+
+
+def levenshtein(src, trg, sub_cost=1.0, del_cost=1.0, ins_cost=1.0, randomize=False):
+    INS, DEL, KEEP, SUB  = range(4)
+    op_names = 'insert', 'delete', 'keep', 'sub'
+
+    # reverse sequences to do `forward` backtracking
+    # this is useful to give priority to certain operations (we want insertions to occur before deletions)
+    src = src[::-1]
+    trg = trg[::-1]
 
     costs = np.zeros((len(trg) + 1, len(src) + 1))
     ops = np.zeros((len(trg) + 1, len(src) + 1), dtype=np.int32)
@@ -29,15 +62,19 @@ def levenshtein(src, trg, sub_cost=1.0, del_cost=1.0, ins_cost=1.0):
     ops[0] = DEL
     ops[:,0] = INS
 
+    if randomize:
+        key = lambda p: (p[0], random.random())
+    else:
+        key = lambda p: p
+
     for i in range(1, len(trg) + 1):
         for j in range(1, len(src) + 1):
             c, op = (sub_cost, SUB) if trg[i - 1] != src[j - 1] else (0, KEEP)
-
             costs[i,j], ops[i,j] = min([
                 (costs[i - 1, j] + ins_cost, INS),
                 (costs[i, j - 1] + del_cost, DEL),
                 (costs[i - 1, j - 1] + c, op),
-            ], key=lambda p: p[0])
+            ], key=key)
 
     # backtracking
     i, j = len(trg), len(src)
@@ -58,7 +95,7 @@ def levenshtein(src, trg, sub_cost=1.0, del_cost=1.0, ins_cost=1.0):
             if op != INS:
                 j -= 1
 
-    return cost, res[::-1]
+    return cost, res
 
 
 if __name__ == '__main__':
@@ -80,7 +117,7 @@ if __name__ == '__main__':
 
             try:
                 _, ops = levenshtein(src_words, trg_words, sub_cost=args.sub_cost,
-                                     del_cost=args.del_cost, ins_cost=args.ins_cost)
+                                     del_cost=args.del_cost, ins_cost=args.ins_cost, randomize=args.randomize)
             except KeyboardInterrupt:
                 sys.exit()
 

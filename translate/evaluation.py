@@ -5,8 +5,57 @@ import math
 import numpy as np
 import re
 import os
+import random
 
 from collections import Counter, OrderedDict
+
+
+def levenshtein(src, trg, sub_cost=1.0, del_cost=1.0, ins_cost=1.0, randomize=True):
+    DEL, INS, KEEP, SUB  = range(4)
+    op_names = 'delete', 'insert', 'keep', 'sub'
+
+    costs = np.zeros((len(trg) + 1, len(src) + 1))
+    ops = np.zeros((len(trg) + 1, len(src) + 1), dtype=np.int32)
+
+    costs[0] = range(len(src) + 1)
+    costs[:,0] = range(len(trg) + 1)
+    ops[0] = DEL
+    ops[:,0] = INS
+
+    if randomize:
+        key = lambda p: (p[0], random.random())
+    else:
+        key = None
+
+    for i in range(1, len(trg) + 1):
+        for j in range(1, len(src) + 1):
+            c, op = (sub_cost, SUB) if trg[i - 1] != src[j - 1] else (0, KEEP)
+            costs[i,j], ops[i,j] = min([
+                (costs[i, j - 1] + del_cost, DEL),
+                (costs[i - 1, j] + ins_cost, INS),
+                (costs[i - 1, j - 1] + c, op),
+            ], key=key)
+
+    # backtracking
+    i, j = len(trg), len(src)
+    cost = costs[i, j]
+
+    res = []
+
+    while i > 0 or j > 0:
+        op = ops[i, j]
+        op_name = op_names[op]
+
+        if op == DEL:
+            res.append(op_name)
+            j -= 1
+        else:
+            res.append((op_name, trg[i - 1]))
+            i -= 1
+            if op != INS:
+                j -= 1
+
+    return cost, res[::-1]
 
 
 def sentence_bleu(hypothesis, reference, smoothing=True, order=4, **kwargs):

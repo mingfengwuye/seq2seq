@@ -10,7 +10,7 @@ from collections import namedtuple
 class Seq2SeqModel(object):
     def __init__(self, encoders, decoders, learning_rate, global_step, max_gradient_norm, dropout_rate=0.0,
                  freeze_variables=None, feed_previous=0.0, optimizer='sgd', decode_only=False, len_normalization=1.0,
-                 name=None, chained_encoders=False, dual_output=False, **kwargs):
+                 name=None, chained_encoders=False, dual_output=False, pred_edits=False, **kwargs):
         self.encoders = encoders
         self.decoders = decoders
         self.name = name
@@ -33,7 +33,6 @@ class Seq2SeqModel(object):
         self.feed_argmax = tf.constant(True, dtype=tf.bool)  # feed with argmax or sample
 
         self.encoder_inputs = []
-        self.encoder_input_length = []
         self.input_weights = []
 
         self.encoder_inputs = [
@@ -46,10 +45,10 @@ class Seq2SeqModel(object):
             for decoder in decoders
         ])
 
-        if chained_encoders:
+        if chained_encoders and pred_edits:
             architecture = models.chained_encoders
-        elif dual_output:
-            architecture = models.dual_encoder_decoder
+        elif dual_output or pred_edits:
+            architecture = models.multi_encoder_decoder
         else:
             architecture = models.encoder_decoder
 
@@ -122,7 +121,7 @@ class Seq2SeqModel(object):
 
         return namedtuple('output', 'loss weights')(res['loss'], res.get('weights'))
 
-    def greedy_decoding(self, session, token_ids):
+    def greedy_decoding(self, session, token_ids, print_stats=False):
         if self.dropout is not None:
             session.run(self.dropout_off)
 
@@ -140,6 +139,23 @@ class Seq2SeqModel(object):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
 
         outputs = session.run(self.outputs, input_feed)
+
+        e = np.exp(outputs[0])
+        o = np.max(e, axis=2) / np.sum(e, axis=2)
+
+        o = o.flatten()
+
+        if not hasattr(self, 'stats'):
+            self.stats = []
+
+        self.stats.append(o)
+
+        if print_stats:
+            stats = np.concatenate(self.stats)
+            utils.debug('softmax stats: min={:.2f}, max={:.2f}, avg={:.2f}, std={:.2f}'.format(
+                np.min(stats), np.max(stats), np.mean(stats), np.std(stats)
+            ))
+            self.stats = []
 
         return [np.argmax(outputs_, axis=2) for outputs_ in outputs]
 
@@ -305,8 +321,6 @@ class Seq2SeqModel(object):
 
             beam_data, proba = session.run(output_feed, input_feed)
             #proba = np.maximum(proba, 1e-30)  # FIXME
-
-            #import ipdb; ipdb.set_trace()
 
             scores_ = scores[:, None] - np.log(proba)
             scores_ = scores_.flatten()
