@@ -7,7 +7,7 @@
 # synthetic PE data by using back-translation
 
 raw_data=experiments/APE16/raw_data
-data_dir=experiments/APE16/edits/data_new
+data_dir=experiments/APE16/edits/data
 
 rm -rf ${data_dir}
 mkdir -p ${data_dir}

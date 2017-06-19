@@ -32,7 +32,7 @@ if __name__ == '__main__':
                 if not re.search(args.task_name, line):
                     continue
 
-            m = re.findall('(\w+)=(\d+.\d+)', line)
+            m = re.findall('(bleu|score|ter|wer|penalty|ratio)=(\d+.\d+)', line)
             if m:
                 scores_ = {k: float(v) for k, v in m}
                 scores.setdefault(current_step, scores_)

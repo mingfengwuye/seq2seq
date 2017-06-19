@@ -45,10 +45,10 @@ decoders:
   - name: de
     ext: edits
     max_len: 45
-    maxout: False
+    maxout: True
     tie_embedding: False
     input_attention: False
-    skip_updates: False
+    skip_updates: True
     lstm_input: words         # concat, sum, words, ops
     prediction_input: ops     # concat, sum, words, ops, none
     split_ops: True
