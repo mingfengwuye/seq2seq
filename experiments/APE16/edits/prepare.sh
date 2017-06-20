@@ -34,13 +34,16 @@ cp ${data_dir}/vocab.de ${data_dir}/vocab.edits
 
 cp ${raw_data}/500K.{src,mt,pe} ${data_dir}
 scripts/extract-edits.py ${data_dir}/500K.{mt,pe} > ${data_dir}/500K.edits
+
 cat ${data_dir}/500K.{mt,pe} > ${data_dir}/train.concat.de
 cp ${data_dir}/500K.src ${data_dir}/train.concat.src
+cp ${data_dir}/500K.mt ${data_dir}/train.concat.mt
 cp ${data_dir}/500K.edits ${data_dir}/train.concat.edits
 
 for i in {1..20}; do   # oversample PE data
     cat ${data_dir}/train.{mt,pe} >> ${data_dir}/train.concat.de
     cat ${data_dir}/train.src >> ${data_dir}/train.concat.src
+    cat ${data_dir}/train.mt >> ${data_dir}/train.concat.mt
     cat ${data_dir}/train.edits >> ${data_dir}/train.concat.edits
 done
 

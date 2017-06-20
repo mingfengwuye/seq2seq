@@ -46,7 +46,7 @@ class Seq2SeqModel(object):
         ])
 
         if chained_encoders and pred_edits:
-            architecture = models.chained_encoders
+            architecture = models.chained_encoder_decoder
         elif dual_output or pred_edits:
             architecture = models.multi_encoder_decoder
         else:

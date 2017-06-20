@@ -565,9 +565,10 @@ def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_p
     return xent_loss, [outputs], encoder_state, attention_states, attention_weights, beam_tensors
 
 
-def chained_encoders(encoders, decoders, dropout, encoder_inputs, targets, feed_previous, chaining_strategy=None,
-                     more_dropout=False, align_encoder_id=0, chaining_non_linearity=False, chaining_loss_ratio=1.0,
-                     chaining_stop_gradient=False, **kwargs):
+def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_previous,
+                            chaining_strategy=None, more_dropout=False, align_encoder_id=0,
+                            chaining_non_linearity=False, chaining_loss_ratio=1.0, chaining_stop_gradient=False,
+                            **kwargs):
     decoder = decoders[0]
     targets = targets[0]  # single decoder
 
@@ -593,12 +594,12 @@ def chained_encoders(encoders, decoders, dropout, encoder_inputs, targets, feed_
     pad = tf.ones(shape=tf.stack([batch_size, 1]), dtype=tf.int32) * utils.BOS_ID
     decoder_inputs = tf.concat([pad, decoder_inputs], axis=1)
 
-    outputs, _, states, attns, _ = multi_decoder(
-        attention_states=attention_states, initial_state=encoder_state, decoder_inputs=decoder_inputs,
+    outputs, _, states, attns, _ = edit_decoder(
+        attention_states=attention_states, initial_state=encoder_state, decoder_inputs=[decoder_inputs],
         **parameters
     )
 
-    chaining_loss = sequence_loss(logits=outputs, targets=encoder_inputs[0], weights=input_weights[0])
+    chaining_loss = sequence_loss(logits=outputs[0], targets=encoder_inputs[0], weights=input_weights[0])
 
     if decoder.use_lstm:
         size = states.get_shape()[2].value
@@ -659,23 +660,24 @@ def chained_encoders(encoders, decoders, dropout, encoder_inputs, targets, feed_
 
         attention_states[0] += x
 
-    outputs, attention_weights, _, _, beam_tensors = multi_decoder(
+    outputs, attention_weights, _, _, beam_tensors = edit_decoder(
         attention_states=attention_states, initial_state=encoder_state,
-        feed_previous=feed_previous, decoder_inputs=decoder_inputs,
+        feed_previous=feed_previous, decoder_inputs=[targets[:,:-1]],
         align_encoder_id=align_encoder_id, **parameters
     )
 
-    xent_loss = sequence_loss(logits=outputs, targets=targets[:, 1:],
-                                            weights=target_weights)
+    xent_loss = sequence_loss(logits=outputs[0], targets=targets[:, 1:],
+                              weights=target_weights)
 
     if chaining_loss is not None and chaining_loss_ratio:
         xent_loss += chaining_loss_ratio * chaining_loss
 
-    return xent_loss, [outputs], encoder_state, attention_states, attention_weights, beam_tensors
+    return xent_loss, outputs[:1], encoder_state, attention_states, attention_weights, beam_tensors
 
 
 def multi_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_previous,
                           align_encoder_id=0, **kwargs):
+    # FIXME
     main_decoder = decoders[0]
 
     encoder_input_length = []
@@ -1113,13 +1115,12 @@ def edit_decoder(decoder_inputs, initial_state, attention_states, encoders, deco
         is_keep = tf.equal(predicted_symbol, utils.KEEP_ID)
         is_del = tf.equal(predicted_symbol, utils.DEL_ID)
         is_not_ins = tf.logical_or(is_keep, is_del)
-        aligned_word = tf.gather_nd(encoder_inputs[align_encoder_id],
-                                    tf.stack([tf.range(batch_size), tf.to_int32(edit_pos)], axis=1))
-        edit_pos += tf.to_float(is_not_ins)
-        edit_pos = tf.minimum(edit_pos, tf.to_float(encoder_input_length[align_encoder_id] - 1))
 
         if decoder.split_ops:
             # if predicted symbol is DEL or KEEP, replace by corresponding argument.
+            aligned_word = tf.gather_nd(encoder_inputs[align_encoder_id],
+                                        tf.stack([tf.range(batch_size), tf.to_int32(edit_pos)], axis=1))
+
             word = tf.where(
                 is_not_ins,
                 aligned_word,
@@ -1137,6 +1138,8 @@ def edit_decoder(decoder_inputs, initial_state, attention_states, encoders, deco
             word = tf.nn.embedding_lookup(embedding, predicted_symbol)
             op = None
 
+        edit_pos += tf.to_float(is_not_ins)
+        edit_pos = tf.minimum(edit_pos, tf.to_float(encoder_input_length[align_encoder_id] - 1))
         input_ = aggregation(decoder.lstm_input, word, op)
 
         if decoder.input_attention and not decoder.split_ops:
