@@ -161,7 +161,7 @@ class TranslationModel:
                     trg_tokens = [token for token in trg_tokens if token not in utils._START_VOCAB]
                 else:
                     trg_tokens = trg_tokens[0]
-                    raw = ' '.join(trg_tokens[0])
+                    raw = ' '.join(trg_tokens)
 
                 if remove_unk:
                     trg_tokens = [token for token in trg_tokens if token != utils._UNK]
