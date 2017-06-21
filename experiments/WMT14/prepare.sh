@@ -27,4 +27,4 @@ ln -s test.fr test.char.fr
 cd ${cur_dir}
 
 scripts/prepare-data.py ${data_dir}/train.char en fr ${data_dir} --mode vocab --vocab-size 0 --character-level \
---vocab-prefix vocab.char
+--vocab-prefix vocab.char --vocab-size 200

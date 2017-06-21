@@ -156,10 +156,13 @@ def main(args=None):
         config.checkpoint_dir = os.path.join(config.model_dir, 'checkpoints')
 
         if config.weight_scale:
-            initializer = tf.random_normal_initializer(stddev=config.weight_scale)
+            if config.initializer == 'uniform':
+                initializer = tf.random_uniform_initializer(minval=-config.weight_scale, maxval=config.weight_scale)
+            else:
+                initializer = tf.random_normal_initializer(stddev=config.weight_scale)
         else:
-            #initializer = None
-            initializer = tf.random_uniform_initializer(minval=-0.01, maxval=0.01)
+            initializer = None
+
 
         tf.get_variable_scope().set_initializer(initializer)
 

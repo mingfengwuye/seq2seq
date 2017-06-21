@@ -9,7 +9,8 @@ embedding_size: 512
 layers: 1
 bidir: True
 use_lstm: True
-weight_scale: 0.1
+initializer: uniform
+weight_scale: 0.01
 
 data_dir: experiments/WMT14/data
 model_dir: models/WMT14
