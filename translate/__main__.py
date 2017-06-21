@@ -155,7 +155,12 @@ def main(args=None):
     with tf.device(device):
         config.checkpoint_dir = os.path.join(config.model_dir, 'checkpoints')
 
-        initializer = tf.random_normal_initializer(stddev=config.weight_scale) if config.weight_scale else None
+        if config.weight_scale:
+            initializer = tf.random_normal_initializer(stddev=config.weight_scale)
+        else:
+            #initializer = None
+            initializer = tf.random_uniform_initializer(minval=-0.01, maxval=0.01)
+
         tf.get_variable_scope().set_initializer(initializer)
 
         config.decode_only = args.decode is not None or args.eval or args.align  # exempt from creating gradient ops

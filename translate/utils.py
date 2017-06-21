@@ -228,7 +228,7 @@ def read_dataset(paths, extensions, vocabs, max_size=None, character_level=None,
             log("  reading data line {}".format(counter))
 
         lines = [
-            sentence_to_token_ids(input_, vocab.vocab, character_level=character_level.get(ext, False))
+            sentence_to_token_ids(input_, vocab.vocab, character_level=character_level.get(ext))
             for input_, vocab, ext in zip(inputs, vocabs, extensions)
         ]
 

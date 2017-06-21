@@ -1,34 +1,30 @@
 #!/usr/bin/env bash
 
-#!/usr/bin/env bash
-
 raw_data=experiments/APE16/raw_data
-data_dir=experiments/APE16/edits/data_char
+data_dir=experiments/APE16/edits/data
 
-rm -rf ${data_dir}
+#rm -rf ${data_dir}
 mkdir -p ${data_dir}
 
-cp ${raw_data}/{train,dev,test,500K}.{src,mt,pe} ${data_dir}
+scripts/extract-edits.py ${raw_data}/train.{mt,pe} > ${data_dir}/train.char.edits --char-level
+scripts/extract-edits.py ${raw_data}/dev.{mt,pe} > ${data_dir}/dev.char.edits --char-level
+scripts/extract-edits.py ${raw_data}/test.{mt,pe} > ${data_dir}/test.char.edits --char-level
 
-scripts/extract-edits.py ${data_dir}/train.{mt,pe} > ${data_dir}/train.edits --char-level --subs
-scripts/extract-edits.py ${data_dir}/dev.{mt,pe} > ${data_dir}/dev.edits --char-level --subs
-scripts/extract-edits.py ${data_dir}/test.{mt,pe} > ${data_dir}/test.edits --char-level --subs
-scripts/extract-edits.py ${data_dir}/500K.{mt,pe} > ${data_dir}/500K.edits --char-level --subs
+cat ${raw_data}/train.{src,mt,pe} > ${data_dir}/train.char.all
 
-scripts/prepare-data.py ${data_dir}/train src pe mt edits ${data_dir} --mode vocab --vocab-size 0 --character-level src pe mt
+cp ${raw_data}/train.src ${data_dir}/train.char.src
+cp ${raw_data}/train.mt ${data_dir}/train.char.mt
+cp ${raw_data}/train.pe ${data_dir}/train.char.pe
+cp ${raw_data}/dev.src ${data_dir}/dev.char.src
+cp ${raw_data}/dev.mt ${data_dir}/dev.char.mt
+cp ${raw_data}/dev.pe ${data_dir}/dev.char.pe
+cp ${raw_data}/test.src ${data_dir}/test.char.src
+cp ${raw_data}/test.mt ${data_dir}/test.char.mt
+cp ${raw_data}/test.pe ${data_dir}/test.char.pe
 
+scripts/prepare-data.py ${data_dir}/train.char all ${data_dir} --mode vocab --vocab-size 0 --character-level --vocab-prefix vocab.char
 
-cp ${data_dir}/500K.mt ${data_dir}/train.concat.mt
-cp ${data_dir}/500K.pe ${data_dir}/train.concat.pe
-cp ${data_dir}/500K.src ${data_dir}/train.concat.src
-cp ${data_dir}/500K.edits ${data_dir}/train.concat.edits
-
-for i in {1..20}; do   # oversample PE data
-    cat ${data_dir}/train.mt >> ${data_dir}/train.concat.mt
-    cat ${data_dir}/train.pe >> ${data_dir}/train.concat.pe
-    cat ${data_dir}/train.src >> ${data_dir}/train.concat.src
-    cat ${data_dir}/train.edits >> ${data_dir}/train.concat.edits
-done
-
-scripts/prepare-data.py ${data_dir}/train.concat src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.concat \
---vocab-size 0 --character-level src pe mt
+cp ${data_dir}/vocab.char.all ${data_dir}/vocab.char.mt
+cp ${data_dir}/vocab.char.all ${data_dir}/vocab.char.pe
+cp ${data_dir}/vocab.char.all ${data_dir}/vocab.char.edits
+cp ${data_dir}/vocab.char.all ${data_dir}/vocab.char.src

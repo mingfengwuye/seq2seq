@@ -75,6 +75,8 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
         device = '/cpu:0' if encoder.embeddings_on_cpu else None
         with tf.device(device):
             embedding = get_variable('embedding_{}'.format(encoder.name), shape=embedding_shape)
+            # FIXME
+            #embedding = get_variable('embedding_{}'.format(encoder.name), initializer=tf.zeros(embedding_shape))
         embedding_variables.append(embedding)
 
     for i, encoder in enumerate(encoders):
@@ -98,10 +100,10 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
 
             embedding = embedding_variables[i]
 
-            if embedding is not None:
-                batch_size = tf.shape(encoder_inputs_)[0]
-                time_steps = tf.shape(encoder_inputs_)[1]
+            batch_size = tf.shape(encoder_inputs_)[0]
+            time_steps = tf.shape(encoder_inputs_)[1]
 
+            if embedding is not None:
                 flat_inputs = tf.reshape(encoder_inputs_, [tf.multiply(batch_size, time_steps)])
                 flat_inputs = tf.nn.embedding_lookup(embedding, flat_inputs)
                 encoder_inputs_ = tf.reshape(flat_inputs,
@@ -109,6 +111,57 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
 
             if other_inputs is not None:
                 encoder_inputs_ = tf.concat([encoder_inputs_, other_inputs], axis=2)
+
+            if encoder.convolutions:
+                pad = tf.nn.embedding_lookup(embedding, utils.BOS_ID)
+                pad = tf.expand_dims(tf.expand_dims(pad, axis=0), axis=1)
+                pad = tf.tile(pad, [batch_size, 1, 1])
+
+                # Fully Character-Level NMT without Explicit Segmentation, Lee et al. 2016
+
+                #pad = tf.ones(shape=tf.stack([batch_size, 1]), dtype=tf.int32) * utils.BOS_ID
+                #decoder_inputs = tf.concat([pad, decoder_inputs], axis=1)
+
+                inputs = []
+
+                for w, filter_size in enumerate(encoder.convolutions, 1):
+                    filter_ = get_variable('filter_{}'.format(w), [w, encoder.embedding_size, filter_size])
+
+                    if w > 1:
+                        right = (w - 1) // 2
+                        left = (w - 1) - right
+                        pad_right = tf.tile(pad, [1, right, 1])
+                        pad_left = tf.tile(pad, [1, left, 1])
+                        inputs_ = tf.concat([pad_left, encoder_inputs_, pad_right], axis=1)
+                    else:
+                        inputs_ = encoder_inputs_
+
+                    inputs_ = tf.nn.convolution(inputs_, filter=filter_, padding='VALID')
+                    inputs.append(inputs_)
+
+                old_encoder_inputs_ = encoder_inputs_
+                encoder_inputs_ = tf.concat(inputs, axis=2)
+                #activation = encoder.convolution_activation or 'relu'
+                #if activation.lower() == 'relu':
+                encoder_inputs_ = tf.nn.relu(encoder_inputs_)
+                encoder_inputs_ = tf.Print(encoder_inputs_, [tf.shape(encoder_inputs_), tf.shape(old_encoder_inputs_)],
+                                           summarize=100, first_n=10, message='convolution: ')
+
+            if encoder.maxout_stride:
+                old_encoder_inputs_ = encoder_inputs_
+                stride = encoder.maxout_stride
+                k = tf.mod(time_steps, stride)
+                pad = tf.zeros([batch_size, k, tf.shape(encoder_inputs_)[2]])
+                encoder_inputs_ = tf.concat([encoder_inputs_, pad], axis=1)
+
+                encoder_inputs_ = tf.nn.pool(encoder_inputs_, window_shape=[stride], pooling_type='MAX',
+                                             padding='VALID', strides=[stride])
+                #encoder_inputs_ = tf.nn.pool(encoder_inputs_, window_shape=[stride], pooling_type='MAX',
+                #                             padding='SAME', strides=[stride])
+
+                encoder_inputs_ = tf.Print(encoder_inputs_, [tf.shape(encoder_inputs_), tf.shape(old_encoder_inputs_)],
+                                           summarize=100, first_n=10, message='maxout: ')
+                #encoder_inputs_ = tf.Print(encoder_inputs_, [encoder_inputs_], summarize=1000)
 
             # Contrary to Theano's RNN implementation, states after the sequence length are zero
             # (while Theano repeats last state)
@@ -142,10 +195,11 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
             else:
                 if encoder.layers > 1:
                     cell = MultiRNNCell([get_cell() for _ in range(encoder.layers)])
+                    initial_state = (get_initial_state(),) * encoder.layers
                 else:
                     cell = get_cell()
+                    initial_state = get_initial_state()
 
-                initial_state = (get_initial_state(),) * encoder.layers
                 encoder_outputs_, _ = auto_reuse(tf.nn.dynamic_rnn)(cell=cell, initial_state=initial_state,
                                                                     **parameters)
                 encoder_state_ = encoder_outputs_[:, -1, :]
@@ -420,7 +474,9 @@ def simple_decoder(decoder_inputs, initial_state, attention_states, encoders, de
 
             if decoder.maxout:
                 output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
-                output_ = tf.reduce_max(tf.reshape(output_, tf.stack([batch_size, decoder.cell_size // 2, 2])), axis=2)
+                output_ = tf.nn.pool(tf.expand_dims(output_, axis=2), window_shape=[2], pooling_type='MAX',
+                                     padding='SAME', strides=[2])
+                output_ = tf.squeeze(output_, axis=2)
 
             output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
 

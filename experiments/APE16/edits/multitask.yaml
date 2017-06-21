@@ -46,7 +46,7 @@ tasks:
         max_len: 36
 
     decoders:
-      - name: edits
+      - name: edits   # best score: 23.34
         #name: de
         ext: edits
         max_len: 45

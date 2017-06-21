@@ -27,11 +27,6 @@ cp ${data_dir}/vocab.de ${data_dir}/vocab.mt
 cp ${data_dir}/vocab.de ${data_dir}/vocab.pe
 cp ${data_dir}/vocab.de ${data_dir}/vocab.edits
 
-#for i in {1..10}; do   # inflate corpus with randomness
-#    cat ${data_dir}/train.mt >> ${data_dir}/train.random.mt
-#    scripts/extract-edits.py ${data_dir}/train.{mt,pe} >> ${data_dir}/train.random.edits --randomize
-#done
-
 cp ${raw_data}/500K.{src,mt,pe} ${data_dir}
 scripts/extract-edits.py ${data_dir}/500K.{mt,pe} > ${data_dir}/500K.edits
 

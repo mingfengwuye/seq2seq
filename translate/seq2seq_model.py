@@ -86,11 +86,12 @@ class Seq2SeqModel(object):
         frozen_parameters = [var.name for var in tf.trainable_variables()
                              if any(re.match(var_, var.name) for var_ in freeze_variables)]
         params = [var for var in tf.trainable_variables() if var.name not in frozen_parameters]
+        self.params = params
 
         gradients = tf.gradients(loss, params)
-
         if max_gradient_norm:
             gradients, _ = tf.clip_by_global_norm(gradients, max_gradient_norm)
+        self.gradients = gradients
 
         update_ops = []
         for opt in opts:
@@ -105,7 +106,6 @@ class Seq2SeqModel(object):
             session.run(self.dropout_on)
 
         encoder_inputs, targets = self.get_batch(data)
-
         input_feed = {self.targets: targets}
 
         for i in range(len(self.encoders)):
@@ -117,7 +117,32 @@ class Seq2SeqModel(object):
         if align:
             output_feed['weights'] = self.attention_weights
 
+        embedding = tf.get_default_graph().get_tensor_by_name('embedding_fr:0')
+        j = next(i for i, v in enumerate(self.params) if v.name == 'embedding_fr:0')
+        gradient = self.gradients[j]
+        embedding_ = session.run(embedding)
+        gradient_ = session.run(gradient, input_feed)
+        outputs_ = session.run(self.outputs[0], input_feed)
+        flattened = gradient_.values.flatten()
+
+        def stats(flattened, header):
+            zero_values = np.count_nonzero(flattened == 0)
+            nan_values = np.count_nonzero(np.isnan(flattened))
+            large_values = np.count_nonzero(flattened > 100)
+
+            if nan_values > 0 or large_values > 0 or zero_values > 0.9 * flattened.shape[0]:
+                utils.debug('{} NaN: {}, large: {}, zero: {:.1f}%'.format(
+                    header, nan_values, large_values, 100 * zero_values / flattened.shape[0]))
+
+        stats(flattened,            'gradients: ')
+        stats(embedding_.flatten(), 'embeddings:')
+        stats(outputs_.flatten(),   'outputs:   ')
+
         res = session.run(output_feed, input_feed)
+
+        if np.isnan(res['loss']):
+            import ipdb; ipdb.set_trace()
+            pass
 
         return namedtuple('output', 'loss weights')(res['loss'], res.get('weights'))
 

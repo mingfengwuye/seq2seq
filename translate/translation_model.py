@@ -18,11 +18,15 @@ class TranslationModel:
                  pred_edits=False, dual_output=False, **kwargs):
 
         self.batch_size = batch_size
+        self.character_level = {}
         for encoder_or_decoder in encoders + decoders:
             encoder_or_decoder.ext = encoder_or_decoder.ext or encoder_or_decoder.name
+            self.character_level[encoder_or_decoder.ext] = encoder_or_decoder.character_level
+        self.char_output = decoders[0].character_level
 
         self.src_ext = [encoder.ext for encoder in encoders]
         self.trg_ext = [decoder.ext for decoder in decoders]
+
         self.extensions = self.src_ext + self.trg_ext
 
         self.ref_ext = ref_ext
@@ -72,7 +76,8 @@ class TranslationModel:
                   **kwargs):
         utils.debug('reading training data')
         train_set = utils.read_dataset(self.filenames.train, self.extensions, self.vocabs,
-                                       max_size=max_train_size, max_seq_len=self.max_len)
+                                       max_size=max_train_size, max_seq_len=self.max_len,
+                                       character_level=self.character_level)
         self.train_size = len(train_set)
         self.batch_iterator = utils.read_ahead_batch_iterator(train_set, self.batch_size, read_ahead=read_ahead,
                                                               mode=batch_mode, shuffle=shuffle)
@@ -80,7 +85,8 @@ class TranslationModel:
         utils.debug('reading development data')
 
         dev_sets = [
-            utils.read_dataset(dev, self.extensions, self.vocabs, max_size=max_dev_size)
+            utils.read_dataset(dev, self.extensions, self.vocabs, max_size=max_dev_size,
+                               character_level=self.character_level)
             for dev in self.filenames.dev
         ]
         # subset of the dev set whose perplexity is periodically evaluated
@@ -123,8 +129,8 @@ class TranslationModel:
 
         def map_to_ids(sentence_tuple):
             token_ids = [
-                utils.sentence_to_token_ids(sentence, vocab.vocab)
-                for vocab, sentence in zip(self.vocabs, sentence_tuple)
+                utils.sentence_to_token_ids(sentence, vocab.vocab, character_level=self.character_level.get(ext))
+                for ext, vocab, sentence in zip(self.extensions, self.vocabs, sentence_tuple)
             ]
             return token_ids
 
@@ -159,14 +165,18 @@ class TranslationModel:
                     raw = ' '.join('_'.join(tokens) for tokens in zip(*trg_tokens))
                     trg_tokens = utils.reverse_edits(src_tokens[0].split(), trg_tokens, fix=fix_edits)
                     trg_tokens = [token for token in trg_tokens if token not in utils._START_VOCAB]
+                    # FIXME: char-level
                 else:
                     trg_tokens = trg_tokens[0]
-                    raw = ' '.join(trg_tokens)
+                    raw = ''.join(trg_tokens) if self.char_output else ' '.join(trg_tokens)
 
                 if remove_unk:
                     trg_tokens = [token for token in trg_tokens if token != utils._UNK]
 
-                yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
+                if self.char_output:
+                    yield ''.join(trg_tokens), raw
+                else:
+                    yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
 
 
     def align(self, sess, output=None, align_encoder_id=0, **kwargs):
@@ -175,7 +185,8 @@ class TranslationModel:
 
         for line_id, lines in enumerate(utils.read_lines(self.filenames.test, self.extensions)):
             token_ids = [
-                utils.sentence_to_token_ids(sentence, vocab.vocab) for vocab, sentence in zip(self.vocabs, lines)
+                utils.sentence_to_token_ids(sentence, vocab.vocab, character_level=self.character_level.get(ext))
+                for ext, vocab, sentence in zip(self.extensions, self.vocabs, lines)
             ]
 
             _, weights = self.seq2seq_model.step(sess, data=[token_ids], forward_only=True, align=True,
