@@ -388,8 +388,7 @@ def simple_decoder(decoder_inputs, initial_state, attention_states, encoders, de
       outputs of the decoder as a tensor of shape (batch_size, output_length, decoder_cell_size)
       attention weights as a tensor of shape (output_length, encoders, batch_size, input_length)
     """
-    # TODO: dropout instead of keep probability
-    assert decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'   # because of maxout
+    assert not decoder.maxout or decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'
 
     embedding_shape = [decoder.vocab_size, decoder.embedding_size]
 
@@ -451,13 +450,53 @@ def simple_decoder(decoder_inputs, initial_state, attention_states, encoders, de
 
         initial_input = embed(inputs.read(0))   # first symbol is BOS
 
-        def _time_step(time, input_, state, proj_outputs, states, weights,  attns):
-            context_vector, new_weights = attention_(state)
+        attn_input = state
+        if decoder.attn_prev_word:
+            attn_input = tf.concat([attn_input, initial_input], axis=1)
+        initial_context, _ = attention_(attn_input)
 
-            attns = attns.write(time, context_vector)
+        def get_next_state(x, state, scope=None):
+            def fun():
+                try:
+                    _, new_state = get_cell()(x, state)
+                except ValueError:  # auto_reuse doesn't work with LSTM cells
+                    _, new_state = get_cell(reuse=True)(x, state)
+                return new_state
+
+            if scope is not None:
+                with tf.variable_scope(scope):
+                    return fun()
+            else:
+                return fun()
+
+        def _time_step(time, input_, context, state, proj_outputs, states, weights,  attns):
+            rnn_input = input_
+
+            if not decoder.vanilla:
+                if decoder.input_attention:
+                    rnn_input = tf.concat([rnn_input, context], axis=1)
+                state = tf.cond(
+                    tf.equal(time, 0),
+                    lambda: state,
+                    lambda: get_next_state(rnn_input, state)
+                )
+
+            attn_input = state
+            if decoder.attn_prev_word:
+                attn_input = tf.concat([attn_input, input_], axis=1)
+
+            context, new_weights = attention_(attn_input)
+            attns = attns.write(time, context)
             weights = weights.write(time, new_weights[align_encoder_id])
 
-            projection_input = [state, context_vector]
+            if decoder.vanilla:
+                if decoder.input_attention:
+                    rnn_input = tf.concat([rnn_input, context], axis=1)
+                state = get_next_state(rnn_input, state)
+
+            states = states.write(time, state)
+
+            projection_input = [state, context]
             if decoder.use_previous_word:
                 projection_input.insert(1, input_)
 
@@ -487,37 +526,14 @@ def simple_decoder(decoder_inputs, initial_state, attention_states, encoders, de
             sample.set_shape([None])
             sample = tf.stop_gradient(sample)
 
-            def get_next_state(x, state, scope=None):
-                def fun():
-                    try:
-                        _, new_state = get_cell()(x, state)
-                    except ValueError:  # auto_reuse doesn't work with LSTM cells
-                        _, new_state = get_cell(reuse=True)(x, state)
-                    return new_state
-
-                if scope is not None:
-                    with tf.variable_scope(scope):
-                        return fun()
-                else:
-                    return fun()
-
             input_ = embed(sample)
 
-            rnn_input = [input_]
-            if decoder.input_attention:
-                rnn_input.append(context_vector)
+            return time + 1, input_, context, state, proj_outputs, states, weights, attns
 
-            rnn_input = tf.concat(rnn_input, axis=1)
-            new_state = get_next_state(rnn_input, state)
-
-            states = states.write(time, new_state)
-
-            return time + 1, input_, new_state, proj_outputs, states, weights, attns
-
-        _, _, new_state, proj_outputs, states, weights, attns = tf.while_loop(
+        _, _, _, new_state, proj_outputs, states, weights, attns = tf.while_loop(
             cond=lambda time, *_: time < time_steps,
             body=_time_step,
-            loop_vars=(time, initial_input, state, proj_outputs, weights, states, attns),
+            loop_vars=(time, initial_input, initial_context, state, proj_outputs, weights, states, attns),
             parallel_iterations=decoder.parallel_iterations,
             swap_memory=decoder.swap_memory)
 

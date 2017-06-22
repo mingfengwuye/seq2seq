@@ -55,6 +55,10 @@ tie_embeddings: False
 maxout: True             # parameters of the decoder
 input_attention: True    # use attention as input to the LSTM
 use_previous_word: True  # use previous word when predicting a new word
+vanilla: False           # use a vanilla decoder
+attn_prev_word: False    # use the previous word in the attention model
+maxout_stride: null
+convolutions: null
 
 # data
 data_dir: data           # directory containing the training data

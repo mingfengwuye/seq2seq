@@ -1,46 +1,50 @@
 label: 'WMT14'
 description: "large character-level NMT model"
 
-dropout_rate: 0.2
-cell_size: 1024
-attn_size: 1024
-embedding_size: 512
+dropout_rate: 0.0
 
 layers: 1
 bidir: True
-use_lstm: True
+use_lstm: False
 initializer: uniform
 weight_scale: 0.01
 
 data_dir: experiments/WMT14/data
-model_dir: models/WMT14
+model_dir: experiments/WMT14/model
 batch_size: 64
-dev_prefix: dev
 
 optimizer: 'adam'
-learning_rate: 0.0001
+learning_rate: 0.003
 
-steps_per_checkpoint: 1000
-steps_per_eval: 1000
+steps_per_checkpoint: 2000
+steps_per_eval: 2000
 score_function: corpus_scores
 
 max_gradient_norm: 1.0
 batch_mode: 'standard'
-read_ahead: 10
+read_ahead: 20
 
-max_len: 25
+max_train_size: 5000000   # FIXME
 
 encoders:
   - name: en
     ext: char.en
-    #max_len: 100
+    max_len: 319  # 95% coverage of train set
     character_level: True
     maxout_stride: 5
-    convolutions: [200, 200, 200, 200, 200, 200, 200, 200]
+    convolutions: [200, 200, 250, 250, 300, 300, 300, 300]
+    embedding_size: 128
+    cell_size: 512
+    attn_size: 512
 
 decoders:
   - name: fr
     ext: char.en
     character_level: True
-    #max_len: 100
+    max_len: 379  # 95% coverage of train set
     maxout: True
+    embedding_size: 512
+    cell_size: 1024
+    layers: 2
+    vanilla: True
+    attn_prev_word: True
