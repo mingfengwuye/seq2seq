@@ -75,8 +75,6 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
         device = '/cpu:0' if encoder.embeddings_on_cpu else None
         with tf.device(device):
             embedding = get_variable('embedding_{}'.format(encoder.name), shape=embedding_shape)
-            # FIXME
-            #embedding = get_variable('embedding_{}'.format(encoder.name), initializer=tf.zeros(embedding_shape))
         embedding_variables.append(embedding)
 
     for i, encoder in enumerate(encoders):
@@ -118,10 +116,6 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                 pad = tf.tile(pad, [batch_size, 1, 1])
 
                 # Fully Character-Level NMT without Explicit Segmentation, Lee et al. 2016
-
-                #pad = tf.ones(shape=tf.stack([batch_size, 1]), dtype=tf.int32) * utils.BOS_ID
-                #decoder_inputs = tf.concat([pad, decoder_inputs], axis=1)
-
                 inputs = []
 
                 for w, filter_size in enumerate(encoder.convolutions, 1):
@@ -139,29 +133,26 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                     inputs_ = tf.nn.convolution(inputs_, filter=filter_, padding='VALID')
                     inputs.append(inputs_)
 
-                old_encoder_inputs_ = encoder_inputs_
                 encoder_inputs_ = tf.concat(inputs, axis=2)
-                #activation = encoder.convolution_activation or 'relu'
-                #if activation.lower() == 'relu':
+                # if encoder.convolution_activation.lower() == 'relu':
                 encoder_inputs_ = tf.nn.relu(encoder_inputs_)
-                encoder_inputs_ = tf.Print(encoder_inputs_, [tf.shape(encoder_inputs_), tf.shape(old_encoder_inputs_)],
-                                           summarize=100, first_n=10, message='convolution: ')
 
             if encoder.maxout_stride:
-                old_encoder_inputs_ = encoder_inputs_
                 stride = encoder.maxout_stride
-                k = tf.mod(time_steps, stride)
+                k = tf.to_int32(tf.ceil(time_steps / stride) * stride) - time_steps   # TODO: simpler
                 pad = tf.zeros([batch_size, k, tf.shape(encoder_inputs_)[2]])
                 encoder_inputs_ = tf.concat([encoder_inputs_, pad], axis=1)
 
+                # encoder_inputs_ = tf.transpose(encoder_inputs_, [0, 2, 1])
+                # time_steps_ = tf.shape(encoder_inputs_)[2]
+                # shape = tf.stack([batch_size, encoder_inputs_.get_shape()[1], time_steps_ // stride, stride])
+                # encoder_inputs_ = tf.reshape(encoder_inputs_, shape=shape)
+                # encoder_inputs_ = tf.reduce_max(encoder_inputs_, axis=3)
+                # encoder_inputs_ = tf.transpose(encoder_inputs_, [0, 2, 1])
                 encoder_inputs_ = tf.nn.pool(encoder_inputs_, window_shape=[stride], pooling_type='MAX',
                                              padding='VALID', strides=[stride])
-                #encoder_inputs_ = tf.nn.pool(encoder_inputs_, window_shape=[stride], pooling_type='MAX',
-                #                             padding='SAME', strides=[stride])
-
-                encoder_inputs_ = tf.Print(encoder_inputs_, [tf.shape(encoder_inputs_), tf.shape(old_encoder_inputs_)],
-                                           summarize=100, first_n=10, message='maxout: ')
-                #encoder_inputs_ = tf.Print(encoder_inputs_, [encoder_inputs_], summarize=1000)
+                encoder_input_length_ = tf.to_int32(tf.ceil(encoder_input_length_ / stride))
+                encoder_input_length[i] = encoder_input_length_
 
             # Contrary to Theano's RNN implementation, states after the sequence length are zero
             # (while Theano repeats last state)
@@ -208,7 +199,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
             encoder_states.append(encoder_state_)
 
     encoder_state = tf.concat(encoder_states, 1)
-    return encoder_outputs, encoder_state
+    return encoder_outputs, encoder_state, encoder_input_length
 
 
 def compute_energy(hidden, state, attn_size, **kwargs):
@@ -475,7 +466,7 @@ def simple_decoder(decoder_inputs, initial_state, attention_states, encoders, de
             if decoder.maxout:
                 output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
                 output_ = tf.nn.pool(tf.expand_dims(output_, axis=2), window_shape=[2], pooling_type='MAX',
-                                     padding='SAME', strides=[2])
+                                    padding='SAME', strides=[2])
                 output_ = tf.squeeze(output_, axis=2)
 
             output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
@@ -603,18 +594,17 @@ def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_p
         weights = get_weights(encoder_inputs_, utils.EOS_ID, time_major=False, include_first_eos=True)
         encoder_input_length.append(tf.to_int32(tf.reduce_sum(weights, axis=1)))
 
-    parameters = dict(encoders=encoders, decoder=decoder, dropout=dropout,
-                      encoder_input_length=encoder_input_length,
-                      encoder_inputs=encoder_inputs)
+    parameters = dict(encoders=encoders, decoder=decoder, dropout=dropout, encoder_inputs=encoder_inputs)
 
     target_weights = get_weights(targets[:, 1:], utils.EOS_ID, time_major=False, include_first_eos=True)
 
-    attention_states, encoder_state = multi_encoder(**parameters)
+    attention_states, encoder_state, encoder_input_length = multi_encoder(
+        encoder_input_length=encoder_input_length, **parameters)
 
     outputs, attention_weights, _, _, beam_tensors = simple_decoder(
-        attention_states=attention_states, initial_state=encoder_state,
-        feed_previous=feed_previous, decoder_inputs=targets[:, :-1],
-        align_encoder_id=align_encoder_id, **parameters
+        attention_states=attention_states, initial_state=encoder_state, feed_previous=feed_previous,
+        decoder_inputs=targets[:, :-1], align_encoder_id=align_encoder_id, encoder_input_length=encoder_input_length,
+        **parameters
     )
 
     xent_loss = sequence_loss(logits=outputs, targets=targets[:, 1:], weights=target_weights)
@@ -639,10 +629,10 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
 
     target_weights = get_weights(targets[:, 1:], utils.EOS_ID, time_major=False, include_first_eos=True)
 
-    parameters = dict(encoders=encoders[1:], decoders=[encoders[0]], dropout=dropout,
-                      encoder_input_length=encoder_input_length[1:], more_dropout=more_dropout)
+    parameters = dict(encoders=encoders[1:], decoders=[encoders[0]], dropout=dropout, more_dropout=more_dropout)
 
-    attention_states, encoder_state = multi_encoder(encoder_inputs[1:], **parameters)
+    attention_states, encoder_state, encoder_input_length[1:] = multi_encoder(
+        encoder_inputs[1:], encoder_input_length=encoder_input_length[1:], **parameters)
 
     decoder_inputs = encoder_inputs[0][:, :-1]
     batch_size = tf.shape(decoder_inputs)[0]
@@ -652,7 +642,7 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
 
     outputs, _, states, attns, _ = edit_decoder(
         attention_states=attention_states, initial_state=encoder_state, decoder_inputs=[decoder_inputs],
-        **parameters
+        encoder_input_length=encoder_input_length[1:], **parameters
     )
 
     chaining_loss = sequence_loss(logits=outputs[0], targets=encoder_inputs[0], weights=input_weights[0])
@@ -673,11 +663,11 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
     if other_inputs is not None and chaining_stop_gradient:
         other_inputs = tf.stop_gradient(other_inputs)
 
-    parameters = dict(encoders=encoders[:1], decoders=[decoder], dropout=dropout,
-                      encoder_input_length=encoder_input_length[:1],
-                      encoder_inputs=encoder_inputs[:1], other_inputs=other_inputs)
+    parameters = dict(encoders=encoders[:1], decoders=[decoder], dropout=dropout, encoder_inputs=encoder_inputs[:1],
+                      other_inputs=other_inputs)
 
-    attention_states, encoder_state = multi_encoder(**parameters)
+    attention_states, encoder_state, encoder_input_length[:1] = multi_encoder(
+        encoder_input_length=encoder_input_length[:1], **parameters)
 
     if dropout is not None and more_dropout:
         attns = tf.nn.dropout(attns, keep_prob=dropout)
@@ -719,7 +709,8 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
     outputs, attention_weights, _, _, beam_tensors = edit_decoder(
         attention_states=attention_states, initial_state=encoder_state,
         feed_previous=feed_previous, decoder_inputs=[targets[:,:-1]],
-        align_encoder_id=align_encoder_id, **parameters
+        align_encoder_id=align_encoder_id, encoder_input_length=encoder_input_length[:1],
+        **parameters
     )
 
     xent_loss = sequence_loss(logits=outputs[0], targets=targets[:, 1:],
@@ -741,9 +732,7 @@ def multi_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, 
         weights = get_weights(encoder_inputs_, utils.EOS_ID, time_major=False, include_first_eos=True)
         encoder_input_length.append(tf.to_int32(tf.reduce_sum(weights, axis=1)))
 
-    parameters = dict(encoders=encoders, decoders=decoders, dropout=dropout,
-                      encoder_input_length=encoder_input_length,
-                      encoder_inputs=encoder_inputs)
+    parameters = dict(encoders=encoders, decoders=decoders, dropout=dropout, encoder_inputs=encoder_inputs)
 
     target_weights = [
         get_weights(targets_[:, 1:], utils.EOS_ID, time_major=False, include_first_eos=True)
@@ -757,12 +746,13 @@ def multi_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, 
 
     decoder_inputs = [targets_[:, :-1] for targets_ in targets]
 
-    attention_states, encoder_state = multi_encoder(**parameters)
+    attention_states, encoder_state, encoder_input_length = multi_encoder(
+        encoder_input_length=encoder_input_length, **parameters)
 
     outputs, attention_weights, _, _, beam_tensors = edit_decoder(
         attention_states=attention_states, initial_state=encoder_state,
         feed_previous=feed_previous, decoder_inputs=decoder_inputs,
-        align_encoder_id=align_encoder_id, **parameters
+        align_encoder_id=align_encoder_id, encoder_input_length=encoder_input_length, **parameters
     )
 
     ratios = [decoder.get('loss_ratio', 1.0) for decoder in decoders]
