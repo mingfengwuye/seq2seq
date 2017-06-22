@@ -2,14 +2,17 @@ label: 'debug'
 description: "small BTEC config"
 
 dropout_rate: 0.5
+cell_size: 128
+attn_size: 128
+embedding_size: 64
 
+layers: 1
 bidir: True
-use_lstm: True
-#initializer: uniform
+use_lstm: False
 weight_scale: 0.1
 
-data_dir: data/btec_char
-model_dir: models/debug_char
+data_dir: data/btec
+model_dir: models/debug
 batch_size: 32
 dev_prefix: dev
 
@@ -22,8 +25,8 @@ learning_rate_decay_factor: 0.9
 decay_every_n_epoch: 1
 decay_after_n_epoch: 21
 
-steps_per_checkpoint: 500
-steps_per_eval: 500
+steps_per_checkpoint: 200
+steps_per_eval: 200
 score_function: corpus_scores
 
 max_gradient_norm: 1.0
@@ -33,23 +36,9 @@ max_len: 25
 
 encoders:
   - name: fr
-    ext: char.fr
-    max_len: 100
-    character_level: True
-    maxout_stride: 4
-    convolutions: [64, 64, 64, 64, 64]
-    embedding_size: 64
-    cell_size: 128
-    attn_size: 128
 
 decoders:
   - name: en
-    ext: char.en
-    max_len: 100
-    character_level: True
-    embedding_size: 128
-    cell_size: 256
-    attn_size: 256
     maxout: True
     vanilla: True
     attn_prev_word: True

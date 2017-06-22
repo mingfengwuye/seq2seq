@@ -215,7 +215,7 @@ def get_filenames(data_dir, model_dir, extensions, train_prefix, dev_prefix, voc
 
 
 def read_dataset(paths, extensions, vocabs, max_size=None, character_level=None, sort_by_length=False,
-                 max_seq_len=None):
+                 max_seq_len=None, from_byte=None):
     data_set = []
 
     line_reader = read_lines(paths, extensions)
