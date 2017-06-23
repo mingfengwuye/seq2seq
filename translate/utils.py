@@ -232,7 +232,7 @@ def read_dataset(paths, extensions, vocabs, max_size=None, character_level=None,
     positions = None
 
     for inputs, positions in line_reader:
-        if len(data_set) > 0 and len(data_set) % 100 == 0:
+        if len(data_set) > 0 and len(data_set) % 100000 == 0:
             log("  lines read {}".format(len(data_set)))
         if max_size and len(data_set) >= max_size:
             break

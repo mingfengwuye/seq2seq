@@ -41,7 +41,7 @@ encoders:
 
 decoders:
   - name: fr
-    ext: char.en
+    ext: char.fr
     character_level: True
     max_len: 379  # 95% coverage of train set
     maxout: True
