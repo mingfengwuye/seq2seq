@@ -53,3 +53,5 @@ decoders:
     maxout: True
     vanilla: True
     attn_prev_word: True
+
+parallel_iterations: 1

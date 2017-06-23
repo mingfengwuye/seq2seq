@@ -9,6 +9,7 @@ import math
 import wave
 import shutil
 import collections
+import functools
 
 from collections import namedtuple
 from contextlib import contextmanager
@@ -55,7 +56,11 @@ def open_files(names, mode='r'):
     files = []
     try:
         for name_ in names:
-            files.append(open(name_, mode=mode))
+            if name_ is None:
+                file_ = sys.stdin if 'r' in mode else sys.stdout
+            else:
+                file_ = open(name_, mode=mode)
+            files.append(file_)
         yield files
     finally:
         for file_ in files:
@@ -215,17 +220,22 @@ def get_filenames(data_dir, model_dir, extensions, train_prefix, dev_prefix, voc
 
 
 def read_dataset(paths, extensions, vocabs, max_size=None, character_level=None, sort_by_length=False,
-                 max_seq_len=None, from_byte=None):
+                 max_seq_len=None, from_position=None):
     data_set = []
 
-    line_reader = read_lines(paths, extensions)
+    if from_position is not None:
+        debug('reading from position: {}'.format(from_position))
+
+    line_reader = read_lines_from_position(paths, from_position=from_position)
     character_level = character_level or {}
 
-    for counter, inputs in enumerate(line_reader, 1):
-        if max_size and counter > max_size:
+    positions = None
+
+    for inputs, positions in line_reader:
+        if len(data_set) > 0 and len(data_set) % 100 == 0:
+            log("  lines read {}".format(len(data_set)))
+        if max_size and len(data_set) >= max_size:
             break
-        if counter % 100000 == 0:
-            log("  reading data line {}".format(counter))
 
         lines = [
             sentence_to_token_ids(input_, vocab.vocab, character_level=character_level.get(ext))
@@ -246,7 +256,7 @@ def read_dataset(paths, extensions, vocabs, max_size=None, character_level=None,
     if sort_by_length:
         data_set.sort(key=lambda lines: list(map(len, lines)))
 
-    return data_set
+    return data_set, positions
 
 
 def random_batch_iterator(data, batch_size):
@@ -317,6 +327,40 @@ def read_ahead_batch_iterator(data, batch_size, read_ahead=10, shuffle=True, all
             yield batch
 
 
+def get_batch_iterator(paths, extensions, vocabs, batch_size, max_size=None, character_level=None,
+                       sort_by_length=False, max_seq_len=None, read_ahead=10, mode='standard', shuffle=True):
+    read_shard = functools.partial(read_dataset,
+        paths=paths, extensions=extensions, vocabs=vocabs, max_size=max_size, max_seq_len=max_seq_len,
+        character_level=character_level, sort_by_length=sort_by_length)
+
+    batch_iterator = functools.partial(read_ahead_batch_iterator,
+        batch_size=batch_size, read_ahead=read_ahead, mode=mode, shuffle=shuffle)
+
+    shard, position = read_shard()
+
+    if not max_size or len(shard) < max_size:
+        # training set is small enough to fit entirely into memory (single shard)
+        import ipdb; ipdb.set_trace()
+        return batch_iterator(shard), len(shard)
+    else:
+        def generator(position, shard):
+            while True:
+                if len(shard) < max_size:
+                    # last shard, start again from the beginning of the dataset
+                    position = None
+
+                size = 0
+                for batch in batch_iterator(shard):
+                    size += len(batch)
+                    yield batch
+
+                    if size >= len(shard):  # cycle through this shard only once, then read next shard
+                        shard, position = read_shard(from_position=position)
+                        break
+
+        return generator(position, shard), max_size
+
+
 def get_batches(data, batch_size, batches=0, allow_smaller=True):
     """
     Segment `data` into a given number of fixed-size batches. The dataset is automatically shuffled.
@@ -345,13 +389,22 @@ def get_batches(data, batch_size, batches=0, allow_smaller=True):
     return batches
 
 
-def read_lines(paths, extensions):
-    iterators = [
-        sys.stdin if paths is None else open(filename)
-        for ext, filename in zip(extensions, paths)
-    ]
+def read_lines(paths):
+    return zip(*[sys.stdin if path is None else open(path) for path in paths])
 
-    return zip(*iterators)
+
+def read_lines_from_position(paths, from_position=None):
+    with open_files(paths) as files:
+        if from_position:
+            for path, file_, position in zip(paths, files, from_position):
+                if path is not None:
+                    file_.seek(position)
+        while True:
+            lines = [file_.readline() for file_ in files]
+            if not all(lines):
+                break
+            position = [file_.tell() for file_ in files]
+            yield lines, position
 
 
 def create_logger(log_file=None):

@@ -75,18 +75,17 @@ class TranslationModel:
     def read_data(self, max_train_size, max_dev_size, read_ahead=10, batch_mode='standard', shuffle=True,
                   **kwargs):
         utils.debug('reading training data')
-        train_set = utils.read_dataset(self.filenames.train, self.extensions, self.vocabs,
-                                       max_size=max_train_size, max_seq_len=self.max_len,
-                                       character_level=self.character_level)
-        self.train_size = len(train_set)
-        self.batch_iterator = utils.read_ahead_batch_iterator(train_set, self.batch_size, read_ahead=read_ahead,
-                                                              mode=batch_mode, shuffle=shuffle)
+        self.batch_iterator, self.train_size = utils.get_batch_iterator(
+            self.filenames.train, self.extensions, self.vocabs, self.batch_size,
+            max_size=max_train_size, character_level=self.character_level, max_seq_len=self.max_len,
+            read_ahead=read_ahead, mode=batch_mode, shuffle=shuffle
+        )
 
         utils.debug('reading development data')
 
         dev_sets = [
             utils.read_dataset(dev, self.extensions, self.vocabs, max_size=max_dev_size,
-                               character_level=self.character_level)
+                               character_level=self.character_level)[0]
             for dev in self.filenames.dev
         ]
         # subset of the dev set whose perplexity is periodically evaluated
@@ -183,7 +182,7 @@ class TranslationModel:
         if len(self.filenames.test) != len(self.extensions):
             raise Exception('wrong number of input files')
 
-        for line_id, lines in enumerate(utils.read_lines(self.filenames.test, self.extensions)):
+        for line_id, lines in enumerate(utils.read_lines(self.filenames.test)):
             token_ids = [
                 utils.sentence_to_token_ids(sentence, vocab.vocab, character_level=self.character_level.get(ext))
                 for ext, vocab, sentence in zip(self.extensions, self.vocabs, lines)
@@ -233,7 +232,7 @@ class TranslationModel:
         try:
             output_file = sys.stdout if output is None else open(output, 'w')
 
-            lines = utils.read_lines(self.filenames.test, self.src_ext)
+            lines = utils.read_lines(self.filenames.test)
 
             if self.filenames.test is None:   # interactive mode
                 batch_size = 1
@@ -286,7 +285,7 @@ class TranslationModel:
             if self.ref_ext is not None:
                 extensions.append(self.ref_ext)
 
-            lines = list(utils.read_lines(filenames_, extensions))
+            lines = list(utils.read_lines(filenames_))
             if on_dev and max_dev_size:
                 lines = lines[:max_dev_size]
 

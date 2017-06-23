@@ -16,15 +16,17 @@ batch_size: 64
 optimizer: 'adam'
 learning_rate: 0.003
 
-steps_per_checkpoint: 2000
-steps_per_eval: 2000
+steps_per_checkpoint: 1000
+steps_per_eval: 1000
 score_function: corpus_scores
 
 max_gradient_norm: 1.0
 batch_mode: 'standard'
 read_ahead: 20
 
-max_train_size: 5000000   # FIXME
+max_train_size: 500000  # read only this many data points at once
+parallel_iterations: 8
+swap_memory: True
 
 encoders:
   - name: en
@@ -32,7 +34,7 @@ encoders:
     max_len: 319  # 95% coverage of train set
     character_level: True
     maxout_stride: 5
-    convolutions: [200, 200, 250, 250, 300, 300, 300, 300]
+    convolutions: [150, 150, 180, 180, 200, 200, 200, 200]
     embedding_size: 128
     cell_size: 512
     attn_size: 512
@@ -44,7 +46,7 @@ decoders:
     max_len: 379  # 95% coverage of train set
     maxout: True
     embedding_size: 512
-    cell_size: 1024
+    cell_size: 512
     layers: 2
     vanilla: True
     attn_prev_word: True
