@@ -143,8 +143,9 @@ class TranslationModel:
                                                                       early_stopping=early_stopping)
                 batch_token_ids = [[hypotheses[0]]]  # first hypothesis is the highest scoring one
             else:
-                batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids,
-                                                                     print_stats=(batch_id == len(batches) - 1))
+                #batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids,
+                #                                                     print_stats=(batch_id == len(batches) - 1))
+                batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
                 batch_token_ids = zip(*batch_token_ids)
 
             for src_tokens, trg_token_ids in zip(batch, batch_token_ids):
@@ -231,10 +232,10 @@ class TranslationModel:
         output_file = None
         try:
             output_file = sys.stdout if output is None else open(output, 'w')
+            paths = self.filenames.test or [None]
+            lines = utils.read_lines(paths)
 
-            lines = utils.read_lines(self.filenames.test)
-
-            if self.filenames.test is None:   # interactive mode
+            if not self.filenames.test:   # interactive mode
                 batch_size = 1
             else:
                 batch_size = self.batch_size
@@ -382,9 +383,10 @@ class TranslationModel:
         self.training.last_decay = global_step
         self.training.scores = []
 
-    def train_step(self, sess, beam_size, steps_per_checkpoint, model_dir, steps_per_eval=None, eval_output=None,
-                   max_steps=0, max_epochs=0, eval_burn_in=0, decay_if_no_progress=None, decay_after_n_epoch=None,
-                   decay_every_n_epoch=None, sgd_after_n_epoch=None, sgd_learning_rate=None, **kwargs):
+    def train_step(self, sess, beam_size, steps_per_checkpoint, model_dir, steps_per_eval=None, max_steps=0,
+                   max_epochs=0, eval_burn_in=0, decay_if_no_progress=None, decay_after_n_epoch=None,
+                   decay_every_n_epoch=None, sgd_after_n_epoch=None, sgd_learning_rate=None, min_learning_rate=None,
+                   **kwargs):
         start_time = time.time()
         res = self.seq2seq_model.step(sess, next(self.batch_iterator), update_model=True,
                                       use_sgd=self.training.use_sgd)
@@ -447,6 +449,9 @@ class TranslationModel:
             score, *_ = self.evaluate(sess, beam_size, on_dev=True, **kwargs_)
             self.training.scores.append((global_step, score))
 
+        if min_learning_rate is not None and self.learning_rate.eval() < min_learning_rate:
+            utils.debug('learning rate is too small: stopping')
+            raise utils.FinishedTrainingException
         if 0 < max_steps <= global_step or 0 < max_epochs <= epoch:
             raise utils.FinishedTrainingException
         elif steps_per_checkpoint and global_step % steps_per_checkpoint == 0:

@@ -340,7 +340,6 @@ def get_batch_iterator(paths, extensions, vocabs, batch_size, max_size=None, cha
 
     if not max_size or len(shard) < max_size:
         # training set is small enough to fit entirely into memory (single shard)
-        import ipdb; ipdb.set_trace()
         return batch_iterator(shard), len(shard)
     else:
         def generator(position, shard):
