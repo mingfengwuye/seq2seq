@@ -120,8 +120,6 @@ def process_file(filename, lang, ext, args):
 
         processes = [['cat']]   # just copy file if there is no other operation
 
-        if ext in args.unescape_special_chars:
-            processes.append([path_to('unescape-special-chars.perl')])
         if ext in args.normalize_punk:
             processes.append([path_to('normalize-punctuation.perl'), '-l',
                               lang])
@@ -136,6 +134,8 @@ def process_file(filename, lang, ext, args):
             processes.append([path_to('lowercase.perl')])
         if ext in args.normalize_digits:
             processes.append(['sed', 's/[[:digit:]]/0/g'])
+        if ext in args.unescape_special_chars:
+            processes.append([path_to('unescape-special-chars.perl')])
         if ext in args.escape_special_chars:
             processes.append([path_to('escape-special-chars.perl')])
 
