@@ -538,14 +538,16 @@ class TranslationModel:
 
 
 variable_mapping = [   # for backward compatibility with old models
-    (r'encoder_(.*?)/forward_1/initial_state', r'encoder_\1/initial_state_fw'),
-    (r'encoder_(.*?)/backward_1/initial_state', r'encoder_\1/initial_state_bw'),
-    (r'encoder_(.*?)/forward_1/basic_lstm_cell', r'encoder_\1/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/layer_norm_basic_lstm_cell'),
-    (r'encoder_(.*?)/backward_1/basic_lstm_cell', r'encoder_\1/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/layer_norm_basic_lstm_cell'),
-    (r'decoder_(.*?)/basic_lstm_cell', r'decoder_\1/layer_norm_basic_lstm_cell'),
+    (r'/forward_1/initial_state', r'/initial_state_fw'),
+    (r'/backward_1/initial_state', r'/initial_state_bw'),
+    (r'/forward_1/basic_lstm_cell', r'/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/layer_norm_basic_lstm_cell'),
+    (r'/backward_1/basic_lstm_cell', r'/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/layer_norm_basic_lstm_cell'),
+    (r'/basic_lstm_cell', r'/layer_norm_basic_lstm_cell'),
     (r'map_attns/Matrix', r'map_attns/matrix'),
-    (r'Matrix', r'kernel'),
-    (r'Bias', r'bias'),
+    (r'/weights', r'/kernel'),
+    (r'/biases', r'/bias'),
+    (r'/Matrix', r'/kernel'),
+    (r'/Bias', r'/bias'),
 ]
 
 
