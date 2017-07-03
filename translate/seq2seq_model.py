@@ -117,27 +117,6 @@ class Seq2SeqModel(object):
         if align:
             output_feed['weights'] = self.attention_weights
 
-        embedding = tf.get_default_graph().get_tensor_by_name('embedding_fr:0')
-        j = next(i for i, v in enumerate(self.params) if v.name == 'embedding_fr:0')
-        gradient = self.gradients[j]
-        embedding_ = session.run(embedding)
-        gradient_ = session.run(gradient, input_feed)
-        outputs_ = session.run(self.outputs[0], input_feed)
-        flattened = gradient_.values.flatten()
-
-        def stats(flattened, header):
-            zero_values = np.count_nonzero(flattened == 0)
-            nan_values = np.count_nonzero(np.isnan(flattened))
-            large_values = np.count_nonzero(flattened > 100)
-
-            if nan_values > 0 or large_values > 0 or zero_values > 0.9 * flattened.shape[0]:
-                utils.debug('{} NaN: {}, large: {}, zero: {:.1f}%'.format(
-                    header, nan_values, large_values, 100 * zero_values / flattened.shape[0]))
-
-        stats(flattened,            'gradients: ')
-        stats(embedding_.flatten(), 'embeddings:')
-        stats(outputs_.flatten(),   'outputs:   ')
-
         res = session.run(output_feed, input_feed)
 
         if np.isnan(res['loss']):
@@ -146,7 +125,7 @@ class Seq2SeqModel(object):
 
         return namedtuple('output', 'loss weights')(res['loss'], res.get('weights'))
 
-    def greedy_decoding(self, session, token_ids, print_stats=False):
+    def greedy_decoding(self, session, token_ids):
         if self.dropout is not None:
             session.run(self.dropout_off)
 
@@ -164,23 +143,6 @@ class Seq2SeqModel(object):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
 
         outputs = session.run(self.outputs, input_feed)
-
-        e = np.exp(outputs[0])
-        o = np.max(e, axis=2) / np.sum(e, axis=2)
-
-        o = o.flatten()
-
-        if not hasattr(self, 'stats'):
-            self.stats = []
-
-        self.stats.append(o)
-
-        if print_stats:
-            stats = np.concatenate(self.stats)
-            utils.debug('softmax stats: min={:.2f}, max={:.2f}, avg={:.2f}, std={:.2f}'.format(
-                np.min(stats), np.max(stats), np.mean(stats), np.std(stats)
-            ))
-            self.stats = []
 
         return [np.argmax(outputs_, axis=2) for outputs_ in outputs]
 

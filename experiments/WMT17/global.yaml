@@ -10,7 +10,7 @@ use_lstm: True
 
 weight_scale: 0.1
 
-data_dir: experiments/WMT17/data
+data_dir: experiments/WMT17/data_2017
 model_dir: experiments/WMT17/global
 
 batch_size: 32
