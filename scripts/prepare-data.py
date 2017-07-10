@@ -255,7 +255,7 @@ def process_corpora(args, corpora, output_corpora, sizes):
         if corpus is not None:
             corpus[:] = filter_corpus(corpus, args)
 
-        # create subwords and process files accordingly
+    # create subwords and process files accordingly
     if args.subwords:
         if args.bpe_path:
             bpe_filenames = args.bpe_path
@@ -321,6 +321,9 @@ def process_vocabularies(args, corpora):
                                                                args.vocab_size,
                                                                args.extensions,
                                                                args.min_count):
+        if ext in args.subwords:
+            size = 0
+
         character_level = ext in args.character_level
         create_vocabulary(filename, output_filename, size, character_level, min_count)
 

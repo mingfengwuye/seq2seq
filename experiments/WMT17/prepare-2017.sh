@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Summary of the task at: http://www.statmt.org/wmt16/ape-task.html
-# interesting papers on the subject:
-# https://arxiv.org/abs/1606.07481:   multi-source, no additional data, predicts a sequence of edits
-# https://arxiv.org/abs/1605.04800:   merges two mono-source models, lots of additional (parallel data), creates
-# synthetic PE data by using back-translation
-
 raw_data=experiments/APE16/raw_data
 data_dir=experiments/WMT17/data_2017
 
@@ -39,3 +33,12 @@ done
 
 scripts/prepare-data.py ${data_dir}/train.concat src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.concat \
 --vocab-size 30000
+
+scripts/prepare-data.py ${data_dir}/train src mt pe ${data_dir} --vocab-prefix vocab.subwords --output train.subwords \
+--dev-corpus ${raw_data}/dev --dev-prefix dev.subwords --test-corpus ${raw_data}/test --test-prefix test.subwords \
+--no-tokenize --subwords --vocab-size 0
+
+scripts/prepare-data.py ${data_dir}/train.concat src mt pe ${data_dir} --vocab-prefix vocab.concat.subwords \
+--output train.concat.subwords --dev-corpus ${raw_data}/dev --dev-prefix dev.concat.subwords \
+--test-corpus ${raw_data}/test --test-prefix test.concat.subwords \
+--no-tokenize --subwords --vocab-size 30000

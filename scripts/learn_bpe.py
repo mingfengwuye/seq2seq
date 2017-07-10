@@ -184,7 +184,12 @@ if __name__ == '__main__':
     big_stats = copy.deepcopy(stats)
     # threshold is inspired by Zipfian assumption, but should only affect speed
     threshold = max(stats.values()) / 10
-    for i in range(args.symbols):
+
+    i = 0
+    while True:
+        if 0 < args.symbols <= i:
+            break
+
         if stats:
             most_frequent = max(stats, key=stats.get)
 
@@ -209,3 +214,5 @@ if __name__ == '__main__':
         stats[most_frequent] = 0
         if not i % 100:
             prune_stats(stats, big_stats, threshold)
+
+        i += 1
