@@ -1,6 +1,6 @@
 
 dropout_rate: 0.5
-cell_size: 128
+cell_size: 512
 attn_size: 128
 embedding_size: 128
 
@@ -15,18 +15,20 @@ model_dir: experiments/WMT17/subwords_syn
 
 batch_size: 32
 
-optimizer: 'sgd'
-learning_rate: 1.0
-learning_rate_decay_factor: 0.8
-decay_every_n_epoch: 0.5
-decay_after_n_epoch: 1
+optimizer: 'adam'
+learning_rate: 0.001
+#optimizer: 'sgd'
+#learning_rate: 1.0
+#learning_rate_decay_factor: 0.8
+#decay_every_n_epoch: 0.5
+#decay_after_n_epoch: 1
 
 steps_per_checkpoint: 400
 steps_per_eval: 400
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
-max_epochs: 8
+max_epochs: 10
 batch_mode: 'standard'
 read_ahead: 10
 
@@ -35,13 +37,18 @@ attention_type: 'global'
 encoders:
   - name: mt
     max_len: 40
+    embeddings_on_cpu: False
   - name: src
     max_len: 40
 
 decoders:
-  - name: pe
+  - name: mt
+    ext: pe
     max_len: 41
     aggregation_method: concat
+    tie_embeddings: True
+    embeddings_on_cpu: False
+    cell_size: 128
 
 train_prefix: train.concat.subwords
 vocab_prefix: vocab.concat.subwords
