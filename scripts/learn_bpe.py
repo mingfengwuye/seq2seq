@@ -49,6 +49,7 @@ def create_parser():
     parser.add_argument(
         '--verbose', '-v', action="store_true",
         help="verbose mode.")
+    parser.add_argument('--min-freq', '-f', type=int, default=2, help="minimum word frequency")
 
     return parser
 
@@ -202,8 +203,8 @@ if __name__ == '__main__':
             threshold = stats[most_frequent] * i/(i+10000.0)
             prune_stats(stats, big_stats, threshold)
 
-        if stats[most_frequent] < 2:
-            sys.stderr.write('no pair has frequency > 1. Stopping\n')
+        if stats[most_frequent] < args.min_freq:
+            sys.stderr.write('no pair has frequency > {}. Stopping\n'.format(args.min_freq - 1))
             break
 
         if args.verbose:

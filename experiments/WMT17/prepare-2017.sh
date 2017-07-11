@@ -17,8 +17,6 @@ scripts/extract-edits.py ${data_dir}/dev.{mt,pe} > ${data_dir}/dev.edits
 scripts/extract-edits.py ${data_dir}/test.{mt,pe} > ${data_dir}/test.edits
 scripts/extract-edits.py ${data_dir}/500K.{mt,pe} > ${data_dir}/500K.edits
 
-scripts/prepare-data.py ${data_dir}/train src pe mt edits ${data_dir} --mode vocab --vocab-size 0
-
 cp ${data_dir}/500K.mt ${data_dir}/train.concat.mt
 cp ${data_dir}/500K.pe ${data_dir}/train.concat.pe
 cp ${data_dir}/500K.src ${data_dir}/train.concat.src
@@ -31,14 +29,51 @@ for i in {1..10}; do   # oversample PE data
     cat ${data_dir}/train.edits >> ${data_dir}/train.concat.edits
 done
 
-scripts/prepare-data.py ${data_dir}/train.concat src pe mt edits ${data_dir} --mode vocab --vocab-prefix vocab.concat \
+cat ${data_dir}/train.{mt,pe} > ${data_dir}/train.de
+cat ${data_dir}/train.concat.{mt,pe} > ${data_dir}/train.concat.de
+
+# prepare subwords
+
+scripts/learn_bpe.py -i ${data_dir}/train.de -o ${data_dir}/bpe.de -s 30000 --min-freq 5
+scripts/learn_bpe.py -i ${data_dir}/train.src -o ${data_dir}/bpe.src -s 30000 --min-freq 5
+
+scripts/apply_bpe.py -i ${data_dir}/train.de -o ${data_dir}/train.subwords.de -c ${data_dir}/bpe.de
+for corpus in train dev test; do
+    scripts/apply_bpe.py -i ${data_dir}/${corpus}.mt -o ${data_dir}/${corpus}.subwords.mt -c ${data_dir}/bpe.de
+    scripts/apply_bpe.py -i ${data_dir}/${corpus}.pe -o ${data_dir}/${corpus}.subwords.pe -c ${data_dir}/bpe.de
+    scripts/apply_bpe.py -i ${data_dir}/${corpus}.src -o ${data_dir}/${corpus}.subwords.src -c ${data_dir}/bpe.src
+done
+scripts/apply_bpe.py -i ${data_dir}/test.2017.mt -o ${data_dir}/test.2017.subwords.mt -c ${data_dir}/bpe.de
+scripts/apply_bpe.py -i ${data_dir}/test.2017.src -o ${data_dir}/test.2017.subwords.src -c ${data_dir}/bpe.src
+
+scripts/learn_bpe.py -i ${data_dir}/train.concat.de -o ${data_dir}/bpe.concat.de -s 30000 --min-freq 5
+scripts/learn_bpe.py -i ${data_dir}/train.concat.src -o ${data_dir}/bpe.concat.src -s 30000 --min-freq 5
+
+scripts/apply_bpe.py -i ${data_dir}/train.concat.de -o ${data_dir}/train.concat.subwords.de -c ${data_dir}/bpe.de
+scripts/apply_bpe.py -i ${data_dir}/train.concat.mt -o ${data_dir}/train.concat.subwords.mt -c ${data_dir}/bpe.de
+scripts/apply_bpe.py -i ${data_dir}/train.concat.pe -o ${data_dir}/train.concat.subwords.pe -c ${data_dir}/bpe.de
+scripts/apply_bpe.py -i ${data_dir}/train.concat.src -o ${data_dir}/train.concat.subwords.src -c ${data_dir}/bpe.src
+for corpus in dev test; do
+    scripts/apply_bpe.py -i ${data_dir}/${corpus}.mt -o ${data_dir}/${corpus}.concat.subwords.mt -c ${data_dir}/bpe.de
+    scripts/apply_bpe.py -i ${data_dir}/${corpus}.pe -o ${data_dir}/${corpus}.concat.subwords.pe -c ${data_dir}/bpe.de
+    scripts/apply_bpe.py -i ${data_dir}/${corpus}.src -o ${data_dir}/${corpus}.concat.subwords.src -c ${data_dir}/bpe.src
+done
+scripts/apply_bpe.py -i ${data_dir}/test.2017.mt -o ${data_dir}/test.2017.concat.subwords.mt -c ${data_dir}/bpe.de
+scripts/apply_bpe.py -i ${data_dir}/test.2017.src -o ${data_dir}/test.2017.concat.subwords.src -c ${data_dir}/bpe.src
+
+# prepare vocabs
+
+scripts/prepare-data.py ${data_dir}/train src de edits ${data_dir} --mode vocab --vocab-size 0
+scripts/prepare-data.py ${data_dir}/train.concat src de edits ${data_dir} --mode vocab --vocab-prefix vocab.concat \
 --vocab-size 30000
 
-scripts/prepare-data.py ${data_dir}/train src mt pe ${data_dir} --vocab-prefix vocab.subwords --output train.subwords \
---dev-corpus ${raw_data}/dev --dev-prefix dev.subwords --test-corpus ${raw_data}/test --test-prefix test.subwords \
---no-tokenize --subwords --vocab-size 0
+scripts/prepare-data.py ${data_dir}/train.subwords src de ${data_dir} --vocab-prefix vocab.subwords \
+--no-tokenize --vocab-size 0 --mode vocab
 
-scripts/prepare-data.py ${data_dir}/train.concat src mt pe ${data_dir} --vocab-prefix vocab.concat.subwords \
---output train.concat.subwords --dev-corpus ${raw_data}/dev --dev-prefix dev.concat.subwords \
---test-corpus ${raw_data}/test --test-prefix test.concat.subwords \
---no-tokenize --subwords --vocab-size 30000
+scripts/prepare-data.py ${data_dir}/train.concat.subwords src de ${data_dir} --vocab-prefix vocab.concat.subwords \
+--no-tokenize --vocab-size 0 --mode vocab
+
+for vocab in vocab vocab.concat vocab.subwords vocab.concat.subwords; do
+    cp ${data_dir}/${vocab}.de ${data_dir}/${vocab}.mt
+    cp ${data_dir}/${vocab}.de ${data_dir}/${vocab}.pe
+done

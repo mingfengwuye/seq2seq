@@ -36,15 +36,15 @@ attention_type: 'global'
 
 encoders:
   - name: mt
-    max_len: 38
+    max_len: 39
     embeddings_on_cpu: False
   - name: src
-    max_len: 34
+    max_len: 37
 
 decoders:
   - name: mt
     ext: pe
-    max_len: 39
+    max_len: 40
     aggregation_method: concat
     tie_embeddings: True
     embeddings_on_cpu: False
