@@ -36,7 +36,7 @@ attention_type: 'global'
 
 encoders:
   - name: mt
-    max_len: 39
+    max_len: 39  # 99% coverage
     embeddings_on_cpu: False
   - name: src
     max_len: 37
