@@ -1,8 +1,8 @@
 
 dropout_rate: 0.5
 cell_size: 512
-attn_size: 128
-embedding_size: 128
+attn_size: 256
+embedding_size: 256
 
 layers: 1
 bidir: True
@@ -11,7 +11,7 @@ use_lstm: True
 weight_scale: 0.1
 
 data_dir: experiments/WMT17/data_2017
-model_dir: experiments/WMT17/subwords_syn
+model_dir: experiments/WMT17/subwords_syn_big_tied
 
 batch_size: 32
 
@@ -38,8 +38,10 @@ encoders:
   - name: mt
     max_len: 41  # 95% coverage
     embeddings_on_cpu: False
+    layers: 2
   - name: src
     max_len: 40
+    layers: 2
 
 decoders:
   - name: mt
@@ -48,7 +50,7 @@ decoders:
     aggregation_method: concat
     tie_embeddings: True
     embeddings_on_cpu: False
-    cell_size: 128
+    cell_size: 256
 
 train_prefix: train.concat.subwords
 vocab_prefix: vocab.concat.subwords
