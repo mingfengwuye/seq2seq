@@ -46,11 +46,11 @@ class Seq2SeqModel(object):
         ])
 
         if chained_encoders and pred_edits:
-            architecture = models.chained_encoder_decoder
-        elif dual_output or pred_edits:
-            architecture = models.multi_encoder_decoder
+             architecture = models.chained_encoder_decoder
         else:
-            architecture = models.encoder_decoder
+             architecture = models.encoder_decoder
+        # elif dual_output or pred_edits:
+        #     architecture = models.multi_encoder_decoder
 
         tensors = architecture(encoders, decoders, self.dropout, self.encoder_inputs, self.targets, self.feed_previous,
                                **kwargs)

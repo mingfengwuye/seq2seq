@@ -370,8 +370,8 @@ def multi_attention(state, hidden_states, encoders, encoder_input_length, pos=No
     return context_vector, weights
 
 
-def simple_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
-                   dropout=None, feed_previous=0.0, align_encoder_id=0, **kwargs):
+def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
+                      dropout=None, feed_previous=0.0, align_encoder_id=0, **kwargs):
     """
     :param targets: tensor of shape (output_length, batch_size)
     :param initial_state: initial state of the decoder (usually the final state of the encoder),
@@ -440,7 +440,7 @@ def simple_decoder(decoder_inputs, initial_state, attention_states, encoders, de
 
         time = tf.constant(0, dtype=tf.int32, name='time')
 
-        proj_outputs = tf.TensorArray(dtype=tf.float32, size=time_steps, clear_after_read=False)
+        outputs = tf.TensorArray(dtype=tf.float32, size=time_steps, clear_after_read=False)
 
         inputs = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False).unstack(
                                 tf.cast(tf.transpose(decoder_inputs, perm=(1, 0)), tf.int64))
@@ -448,14 +448,10 @@ def simple_decoder(decoder_inputs, initial_state, attention_states, encoders, de
         weights = tf.TensorArray(dtype=tf.float32, size=time_steps)
         attns = tf.TensorArray(dtype=tf.float32, size=time_steps)
 
-        initial_input = embed(inputs.read(0))   # first symbol is BOS
+        initial_symbol = inputs.read(0)    # first symbol is BOS
+        initial_input = embed(initial_symbol)
 
-        attn_input = state
-        if decoder.attn_prev_word:
-            attn_input = tf.concat([attn_input, initial_input], axis=1)
-        initial_context, _ = attention_(attn_input)
-
-        def get_next_state(x, state, scope=None):
+        def get_next_state(x, state, symbol=None, scope=None):
             def fun():
                 try:
                     _, new_state = get_cell()(x, state)
@@ -465,34 +461,48 @@ def simple_decoder(decoder_inputs, initial_state, attention_states, encoders, de
 
             if scope is not None:
                 with tf.variable_scope(scope):
-                    return fun()
+                    new_state = fun()
             else:
-                return fun()
+                new_state = fun()
 
-        def _time_step(time, input_, context, state, proj_outputs, states, weights,  attns):
-            rnn_input = input_
+            if decoder.skip_update and decoder.pred_edits and symbol is not None:
+                is_del = tf.equal(symbol, utils.DEL_ID)
+                new_state = tf.where(is_del, state, new_state)
 
-            if not decoder.vanilla:
-                if decoder.input_attention:
-                    rnn_input = tf.concat([rnn_input, context], axis=1)
-                state = tf.cond(
-                    tf.equal(time, 0),
-                    lambda: state,
-                    lambda: get_next_state(rnn_input, state)
-                )
+            return new_state
 
+        def get_initial_pos():
+            if not decoder.pred_edits:
+                return None
+            return tf.zeros([batch_size], tf.float32)
+
+        def get_next_pos(pos, symbol, max_pos=None):
+            if not decoder.pred_edits:
+                return None
+
+            is_keep = tf.equal(symbol, utils.KEEP_ID)
+            is_del = tf.equal(symbol, utils.DEL_ID)
+            is_not_ins = tf.logical_or(is_keep, is_del)
+            pos += tf.to_float(is_not_ins)
+            if max_pos is not None:
+                pos = tf.minimum(pos, tf.to_float(max_pos))
+            return pos
+
+        def _time_step(time, input_, input_symbol, pos, state, outputs, states, weights, attns):
             attn_input = state
             if decoder.attn_prev_word:
                 attn_input = tf.concat([attn_input, input_], axis=1)
 
-            context, new_weights = attention_(attn_input)
+            pos_ = [pos if i == align_encoder_id else None for i in range(len(encoders))]
+            context, new_weights = attention_(attn_input, pos=pos_)
             attns = attns.write(time, context)
             weights = weights.write(time, new_weights[align_encoder_id])
 
+            rnn_input = input_
             if decoder.vanilla:
                 if decoder.input_attention:
                     rnn_input = tf.concat([rnn_input, context], axis=1)
-                state = get_next_state(rnn_input, state)
+                state = get_next_state(rnn_input, state, input_symbol)
 
             states = states.write(time, state)
 
@@ -516,40 +526,48 @@ def simple_decoder(decoder_inputs, initial_state, attention_states, encoders, de
             else:
                 output_ = dense(output_, output_size, use_bias=True, name='softmax1')
 
-            proj_outputs = proj_outputs.write(time, output_)
+            outputs = outputs.write(time, output_)
 
             argmax = lambda: tf.argmax(output_, 1)
             target = lambda: inputs.read(time + 1)
 
-            sample = tf.cond(tf.logical_and(time < time_steps - 1, tf.random_uniform([]) >= feed_previous),
+            predicted_symbol = tf.cond(tf.logical_and(time < time_steps - 1, tf.random_uniform([]) >= feed_previous),
                              target, argmax)
-            sample.set_shape([None])
-            sample = tf.stop_gradient(sample)
+            predicted_symbol.set_shape([None])
+            predicted_symbol = tf.stop_gradient(predicted_symbol)
 
-            input_ = embed(sample)
+            input_ = embed(predicted_symbol)
+            pos = get_next_pos(pos, predicted_symbol, encoder_input_length[align_encoder_id])
 
-            return time + 1, input_, context, state, proj_outputs, states, weights, attns
+            if not decoder.vanilla:
+                rnn_input = input_
+                if decoder.input_attention:
+                    rnn_input = tf.concat([rnn_input, context], axis=1)
+                state = get_next_state(rnn_input, state, predicted_symbol)
 
-        _, _, _, new_state, proj_outputs, states, weights, attns = tf.while_loop(
+            return time + 1, input_, predicted_symbol, pos, state, outputs, states, weights, attns
+
+        _, _, _, new_pos, new_state, outputs, states, weights, attns = tf.while_loop(
             cond=lambda time, *_: time < time_steps,
             body=_time_step,
-            loop_vars=(time, initial_input, initial_context, state, proj_outputs, weights, states, attns),
+            loop_vars=(time, initial_input, initial_symbol, get_initial_pos(), state, outputs, weights, states, attns),
             parallel_iterations=decoder.parallel_iterations,
             swap_memory=decoder.swap_memory)
 
-        proj_outputs = proj_outputs.stack()
+        outputs = outputs.stack()
         weights = weights.stack()  # batch_size, encoders, output time, input time
         states = states.stack()
         attns = attns.stack()
 
         beam_tensors = utils.AttrDict(data=state, new_data=new_state)
 
-        proj_outputs = tf.transpose(proj_outputs, perm=(1, 0, 2))
+        # put batch_size as first dimension
+        outputs = tf.transpose(outputs, perm=(1, 0, 2))
         weights = tf.transpose(weights, perm=(1, 0, 2))
         states = tf.transpose(states, perm=(1, 0, 2))
         attns = tf.transpose(attns, perm=(1, 0, 2))
 
-        return proj_outputs, weights, states, attns, beam_tensors
+        return outputs, weights, states, attns, beam_tensors
 
 
 def sequence_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True):
@@ -617,7 +635,7 @@ def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_p
     attention_states, encoder_state, encoder_input_length = multi_encoder(
         encoder_input_length=encoder_input_length, **parameters)
 
-    outputs, attention_weights, _, _, beam_tensors = simple_decoder(
+    outputs, attention_weights, _, _, beam_tensors = attention_decoder(
         attention_states=attention_states, initial_state=encoder_state, feed_previous=feed_previous,
         decoder_inputs=targets[:, :-1], align_encoder_id=align_encoder_id, encoder_input_length=encoder_input_length,
         **parameters
@@ -645,7 +663,7 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
 
     target_weights = get_weights(targets[:, 1:], utils.EOS_ID, time_major=False, include_first_eos=True)
 
-    parameters = dict(encoders=encoders[1:], decoders=[encoders[0]], dropout=dropout, more_dropout=more_dropout)
+    parameters = dict(encoders=encoders[1:], decoder=encoders[0], dropout=dropout, more_dropout=more_dropout)
 
     attention_states, encoder_state, encoder_input_length[1:] = multi_encoder(
         encoder_inputs[1:], encoder_input_length=encoder_input_length[1:], **parameters)
@@ -656,12 +674,12 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
     pad = tf.ones(shape=tf.stack([batch_size, 1]), dtype=tf.int32) * utils.BOS_ID
     decoder_inputs = tf.concat([pad, decoder_inputs], axis=1)
 
-    outputs, _, states, attns, _ = edit_decoder(
-        attention_states=attention_states, initial_state=encoder_state, decoder_inputs=[decoder_inputs],
+    outputs, _, states, attns, _ = attention_decoder(
+        attention_states=attention_states, initial_state=encoder_state, decoder_inputs=decoder_inputs,
         encoder_input_length=encoder_input_length[1:], **parameters
     )
 
-    chaining_loss = sequence_loss(logits=outputs[0], targets=encoder_inputs[0], weights=input_weights[0])
+    chaining_loss = sequence_loss(logits=outputs, targets=encoder_inputs[0], weights=input_weights[0])
 
     if decoder.use_lstm:
         size = states.get_shape()[2].value
@@ -679,7 +697,7 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
     if other_inputs is not None and chaining_stop_gradient:
         other_inputs = tf.stop_gradient(other_inputs)
 
-    parameters = dict(encoders=encoders[:1], decoders=[decoder], dropout=dropout, encoder_inputs=encoder_inputs[:1],
+    parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=dropout, encoder_inputs=encoder_inputs[:1],
                       other_inputs=other_inputs)
 
     attention_states, encoder_state, encoder_input_length[:1] = multi_encoder(
@@ -722,20 +740,20 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
 
         attention_states[0] += x
 
-    outputs, attention_weights, _, _, beam_tensors = edit_decoder(
+    outputs, attention_weights, _, _, beam_tensors = attention_decoder(
         attention_states=attention_states, initial_state=encoder_state,
-        feed_previous=feed_previous, decoder_inputs=[targets[:,:-1]],
+        feed_previous=feed_previous, decoder_inputs=targets[:,:-1],
         align_encoder_id=align_encoder_id, encoder_input_length=encoder_input_length[:1],
         **parameters
     )
 
-    xent_loss = sequence_loss(logits=outputs[0], targets=targets[:, 1:],
+    xent_loss = sequence_loss(logits=outputs, targets=targets[:, 1:],
                               weights=target_weights)
 
     if chaining_loss is not None and chaining_loss_ratio:
         xent_loss += chaining_loss_ratio * chaining_loss
 
-    return xent_loss, outputs[:1], encoder_state, attention_states, attention_weights, beam_tensors
+    return xent_loss, [outputs], encoder_state, attention_states, attention_weights, beam_tensors
 
 
 def multi_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_previous,

@@ -33,6 +33,7 @@ max_gradient_norm: 1.0
 batch_mode: 'standard'
 read_ahead: 10
 max_len: 25
+max_dev_size: 100
 
 encoders:
   - name: fr

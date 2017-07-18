@@ -7,6 +7,7 @@ import numpy as np
 import sys
 import math
 import shutil
+import itertools
 from collections import OrderedDict
 from translate import utils, evaluation
 from translate.seq2seq_model import Seq2SeqModel
@@ -137,10 +138,10 @@ class TranslationModel:
             token_ids = list(map(map_to_ids, batch))
 
             if beam_search:
-                #hypotheses, _ = self.seq2seq_model.beam_search_decoding(sess, token_ids[0], beam_size,
-                #                                                        early_stopping=early_stopping)
-                hypotheses, _ = self.seq2seq_model.simple_beam_search(sess, token_ids[0], beam_size,
-                                                                      early_stopping=early_stopping)
+                hypotheses, _ = self.seq2seq_model.beam_search_decoding(sess, token_ids[0], beam_size,
+                                                                        early_stopping=early_stopping)
+                #hypotheses, _ = self.seq2seq_model.simple_beam_search(sess, token_ids[0], beam_size,
+                #                                                      early_stopping=early_stopping)
                 batch_token_ids = [[hypotheses[0]]]  # first hypothesis is the highest scoring one
             else:
                 batch_token_ids = self.seq2seq_model.greedy_decoding(sess, token_ids)
@@ -219,7 +220,8 @@ class TranslationModel:
 
             utils.heatmap(src_tokens, trg_tokens, weights, output_file=output_file)
 
-    def decode(self, sess, beam_size, output=None, remove_unk=False, early_stopping=True, raw_output=False, **kwargs):
+    def decode(self, sess, beam_size, output=None, remove_unk=False, early_stopping=True, raw_output=False,
+               max_test_size=None, **kwargs):
         utils.log('starting decoding')
 
         # empty `test` means that we read from standard input, which is not possible with multiple encoders
@@ -232,6 +234,9 @@ class TranslationModel:
             output_file = sys.stdout if output is None else open(output, 'w')
             paths = self.filenames.test or [None]
             lines = utils.read_lines(paths)
+
+            if max_test_size:
+                lines = itertools.islice(lines, max_test_size)
 
             if not self.filenames.test:   # interactive mode
                 batch_size = 1
@@ -253,7 +258,8 @@ class TranslationModel:
                 output_file.close()
 
     def evaluate(self, sess, beam_size, score_function, on_dev=True, output=None, remove_unk=False, max_dev_size=None,
-                 script_dir='scripts', early_stopping=True, raw_output=False, fix_edits=True, **kwargs):
+                 script_dir='scripts', early_stopping=True, raw_output=False, fix_edits=True,
+                 max_test_size=None, **kwargs):
         """
         :param score_function: name of the scoring function used to score and rank models
           (typically 'bleu_score')
@@ -287,6 +293,8 @@ class TranslationModel:
             lines = list(utils.read_lines(filenames_))
             if on_dev and max_dev_size:
                 lines = lines[:max_dev_size]
+            elif not on_dev and max_test_size:
+                lines = lines[:max_test_size]
 
             hypotheses = []
             references = []
