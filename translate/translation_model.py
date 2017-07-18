@@ -20,9 +20,12 @@ class TranslationModel:
 
         self.batch_size = batch_size
         self.character_level = {}
+        self.binary = []
         for encoder_or_decoder in encoders + decoders:
             encoder_or_decoder.ext = encoder_or_decoder.ext or encoder_or_decoder.name
             self.character_level[encoder_or_decoder.ext] = encoder_or_decoder.character_level
+            self.binary.append(encoder_or_decoder.get('binary', False))
+
         self.char_output = decoders[0].character_level
 
         self.src_ext = [encoder.ext for encoder in encoders]
@@ -48,12 +51,13 @@ class TranslationModel:
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
         self.filenames = utils.get_filenames(extensions=self.extensions, dev_prefix=dev_prefix, name=name,
-                                             ref_ext=ref_ext, **kwargs)
+                                             ref_ext=ref_ext, binary=self.binary, **kwargs)
         utils.debug('reading vocabularies')
         self.read_vocab()
 
         for encoder_or_decoder, vocab in zip(encoders + decoders, self.vocabs):
-            encoder_or_decoder.vocab_size = len(vocab.reverse)
+            if vocab:
+                encoder_or_decoder.vocab_size = len(vocab.reverse)
 
         utils.debug('creating model')
         self.seq2seq_model = Seq2SeqModel(encoders, decoders, self.learning_rate, self.global_step, name=name,
@@ -79,29 +83,29 @@ class TranslationModel:
         self.batch_iterator, self.train_size = utils.get_batch_iterator(
             self.filenames.train, self.extensions, self.vocabs, self.batch_size,
             max_size=max_train_size, character_level=self.character_level, max_seq_len=self.max_len,
-            read_ahead=read_ahead, mode=batch_mode, shuffle=shuffle
+            read_ahead=read_ahead, mode=batch_mode, shuffle=shuffle, binary=self.binary,
         )
 
         utils.debug('reading development data')
 
         dev_sets = [
             utils.read_dataset(dev, self.extensions, self.vocabs, max_size=max_dev_size,
-                               character_level=self.character_level)[0]
+                               character_level=self.character_level, binary=self.binary)[0]
             for dev in self.filenames.dev
         ]
-        # subset of the dev set whose perplexity is periodically evaluated
+        # subset of the dev set whose loss is periodically evaluated
         self.dev_batches = [utils.get_batches(dev_set, batch_size=self.batch_size) for dev_set in dev_sets]
 
     def read_vocab(self):
         # don't try reading vocabulary for encoders that take pre-computed features
         self.vocabs = [
-            utils.initialize_vocabulary(vocab_path)
-            for ext, vocab_path in zip(self.extensions, self.filenames.vocab)
+            None if binary else utils.initialize_vocabulary(vocab_path)
+            for vocab_path, binary in zip(self.filenames.vocab, self.binary)
         ]
         self.src_vocab, self.trg_vocab = self.vocabs[:len(self.src_ext)], self.vocabs[len(self.src_ext):]
 
     def eval_step(self, sess):
-        # compute perplexity on dev set
+        # compute loss on dev set
         for prefix, dev_batches in zip(self.dev_prefix, self.dev_batches):
             eval_loss = sum(
                 self.seq2seq_model.step(sess, batch, update_model=False).loss * len(batch)
@@ -129,6 +133,7 @@ class TranslationModel:
 
         def map_to_ids(sentence_tuple):
             token_ids = [
+                sentence if vocab is None else
                 utils.sentence_to_token_ids(sentence, vocab.vocab, character_level=self.character_level.get(ext))
                 for ext, vocab, sentence in zip(self.extensions, self.vocabs, sentence_tuple)
             ]
@@ -179,11 +184,15 @@ class TranslationModel:
 
 
     def align(self, sess, output=None, align_encoder_id=0, **kwargs):
+        if self.binary and any(self.binary):
+            raise NotImplementedError
+
         if len(self.filenames.test) != len(self.extensions):
             raise Exception('wrong number of input files')
 
         for line_id, lines in enumerate(utils.read_lines(self.filenames.test)):
             token_ids = [
+                sentence if vocab is None else
                 utils.sentence_to_token_ids(sentence, vocab.vocab, character_level=self.character_level.get(ext))
                 for ext, vocab, sentence in zip(self.extensions, self.vocabs, lines)
             ]
@@ -194,19 +203,6 @@ class TranslationModel:
             trg_vocab = self.trg_vocab[0]      # FIXME
             trg_token_ids = token_ids[len(self.src_ext)]
             trg_tokens = [trg_vocab.reverse[i] if i < len(trg_vocab.reverse) else utils._UNK for i in trg_token_ids]
-
-            # if self.pred_edits:
-            #     src_tokens = lines[0].split()
-            #     new_trg_tokens = []
-            #     for trg_token in trg_tokens:
-            #         if len(src_tokens) > 0 and trg_token == utils._KEEP or trg_token == utils._DEL:
-            #             src_token = src_tokens.pop(0)
-            #             trg_token = '{} {}'.format(src_token, trg_token)
-            #         else:
-            #             trg_token = '{} {}'.format(trg_token, utils._INS)
-            #
-            #         new_trg_tokens.append(trg_token)
-            #     trg_tokens = new_trg_tokens
 
             weights = weights.squeeze()
             max_len = weights.shape[1]
@@ -233,7 +229,7 @@ class TranslationModel:
         try:
             output_file = sys.stdout if output is None else open(output, 'w')
             paths = self.filenames.test or [None]
-            lines = utils.read_lines(paths)
+            lines = utils.read_lines(paths, binary=self.binary)
 
             if max_test_size:
                 lines = itertools.islice(lines, max_test_size)
@@ -258,8 +254,7 @@ class TranslationModel:
                 output_file.close()
 
     def evaluate(self, sess, beam_size, score_function, on_dev=True, output=None, remove_unk=False, max_dev_size=None,
-                 script_dir='scripts', early_stopping=True, raw_output=False, fix_edits=True,
-                 max_test_size=None, **kwargs):
+                 early_stopping=True, raw_output=False, fix_edits=True, max_test_size=None, **kwargs):
         """
         :param score_function: name of the scoring function used to score and rank models
           (typically 'bleu_score')
@@ -290,7 +285,7 @@ class TranslationModel:
             if self.ref_ext is not None:
                 extensions.append(self.ref_ext)
 
-            lines = list(utils.read_lines(filenames_))
+            lines = list(utils.read_lines(filenames_, binary=self.binary))
             if on_dev and max_dev_size:
                 lines = lines[:max_dev_size]
             elif not on_dev and max_test_size:
@@ -338,7 +333,7 @@ class TranslationModel:
                     output_file.close()
 
             # default scoring function is utils.bleu_score
-            score, score_summary = getattr(evaluation, score_function)(hypotheses, references, script_dir=script_dir)
+            score, score_summary = getattr(evaluation, score_function)(hypotheses, references)
 
             # print scoring information
             score_info = [prefix, 'score={:.2f}'.format(score)]
@@ -361,10 +356,12 @@ class TranslationModel:
         while True:
             try:
                 self.train_step(sess=sess, **kwargs)
-            except utils.CheckpointException:
+            except utils.EvalException:
                 self.save(sess)
                 step, score = self.training.scores[-1]
                 self.manage_best_checkpoints(step, score)
+            except utils.CheckpointException:
+                self.save(sess)
 
     def init_training(self, sess, sgd_after_n_epoch=None, **kwargs):
         self.read_data(**kwargs)
@@ -460,6 +457,8 @@ class TranslationModel:
             raise utils.FinishedTrainingException
         if 0 < max_steps <= global_step or 0 < max_epochs <= epoch:
             raise utils.FinishedTrainingException
+        elif steps_per_eval and global_step % steps_per_eval == 0:
+            raise utils.EvalException
         elif steps_per_checkpoint and global_step % steps_per_checkpoint == 0:
             raise utils.CheckpointException
 
@@ -544,11 +543,10 @@ class TranslationModel:
 
 
 variable_mapping = [   # for backward compatibility with old models
+    (r'/layer_norm_basic_lstm_cell', r'/basic_lstm_cell'),
+    (r'/attention/', r'/attention_src/'),  # FIXME
     (r'/forward_1/initial_state', r'/initial_state_fw'),
     (r'/backward_1/initial_state', r'/initial_state_bw'),
-    (r'/forward_1/basic_lstm_cell', r'/stack_bidirectional_rnn/cell_0/bidirectional_rnn/fw/layer_norm_basic_lstm_cell'),
-    (r'/backward_1/basic_lstm_cell', r'/stack_bidirectional_rnn/cell_0/bidirectional_rnn/bw/layer_norm_basic_lstm_cell'),
-    (r'/basic_lstm_cell', r'/layer_norm_basic_lstm_cell'),
     (r'map_attns/Matrix', r'map_attns/matrix'),
     (r'/weights', r'/kernel'),
     (r'/biases', r'/bias'),
@@ -606,8 +604,8 @@ def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
         tf.train.Saver(variables).restore(sess, filename)
 
         utils.debug('retrieved parameters ({})'.format(len(variables)))
-        for name, var in variables.items():
-            utils.debug('  {} {}'.format(name, var.get_shape()))
+        for var in sorted(variables.values(), key=lambda var: var.name):
+            utils.debug('  {} {}'.format(var.name, var.get_shape()))
 
 
 def save_checkpoint(sess, saver, checkpoint_dir, step=None, name=None):

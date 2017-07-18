@@ -1,0 +1,52 @@
+label: 'debug'
+description: "debug model on BTEC"
+
+dropout_rate: 0.5
+bidir: True
+use_lstm: False
+
+data_dir: experiments/btec_speech/data
+model_dir: experiments/btec_speech/debug
+
+optimizer: 'adam'
+max_steps: 20000
+batch_size: 32
+steps_per_checkpoint: 100
+steps_per_eval: 100
+
+train_prefix: train.1000
+dev_prefix: dev.100
+max_train_size: 0
+
+cell_size: 64
+embedding_size: 64
+attn_size: 64
+
+encoders:
+  - name: feats41
+    embedding_size: 41
+    layers: 2
+    time_pooling: [4]
+    pooling_avg: True
+    binary: True
+    attention_filters: 1
+    attention_filter_length: 25
+    max_len: 400
+    concat_last_states: True
+    bidir_projection: True
+    trainable_initial_states: False
+
+decoders:
+  - name: en
+    layers: 2
+    max_len: 18
+    maxout: False
+    input_attention: False
+    use_previous_word: False
+    vanilla: False
+    state_zero: True
+    use_lstm_state: False
+    output_extra_proj: False
+    attn_prev_word: False
+    maxout_stride: null
+    convolutions: null

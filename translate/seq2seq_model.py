@@ -35,10 +35,17 @@ class Seq2SeqModel(object):
         self.encoder_inputs = []
         self.input_weights = []
 
-        self.encoder_inputs = [
-            tf.placeholder(tf.int32, shape=[None, None], name='encoder_{}'.format(encoder.name))
-            for encoder in encoders
-        ]
+        self.encoder_inputs = []
+        self.encoder_input_length = []
+        for encoder in encoders:
+            shape = [None, None, encoder.embedding_size] if encoder.binary else [None, None]
+            dtype = tf.float32 if encoder.binary else tf.int32
+            encoder_input = tf.placeholder(dtype=dtype, shape=shape, name='encoder_{}'.format(encoder.name))
+            encoder_input_length = tf.placeholder(dtype=tf.int32, shape=[None],
+                                                  name='encoder_input_length_{}'.format(encoder.name))
+            self.encoder_inputs.append(encoder_input)
+            self.encoder_input_length.append(encoder_input_length)
+
         # starts with BOS, and ends with EOS
         self.targets = tuple([
             tf.placeholder(tf.int32, shape=[None, None], name='target_{}'.format(decoder.name))
@@ -53,7 +60,7 @@ class Seq2SeqModel(object):
         #     architecture = models.multi_encoder_decoder
 
         tensors = architecture(encoders, decoders, self.dropout, self.encoder_inputs, self.targets, self.feed_previous,
-                               **kwargs)
+                               encoder_input_length=self.encoder_input_length, **kwargs)
         (self.xent_loss, self.outputs, self.encoder_state, self.attention_states, self.attention_weights,
          self.beam_tensors) = tensors
 
@@ -105,11 +112,12 @@ class Seq2SeqModel(object):
         if self.dropout is not None:
             session.run(self.dropout_on)
 
-        encoder_inputs, targets = self.get_batch(data)
+        encoder_inputs, targets, input_length = self.get_batch(data)
         input_feed = {self.targets: targets}
 
         for i in range(len(self.encoders)):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
+            input_feed[self.encoder_input_length[i]] = input_length[i]
 
         output_feed = {'loss': self.xent_loss}
         if update_model:
@@ -118,11 +126,6 @@ class Seq2SeqModel(object):
             output_feed['weights'] = self.attention_weights
 
         res = session.run(output_feed, input_feed)
-
-        if np.isnan(res['loss']):
-            import ipdb; ipdb.set_trace()
-            pass
-
         return namedtuple('output', 'loss weights')(res['loss'], res.get('weights'))
 
     def greedy_decoding(self, session, token_ids):
@@ -135,15 +138,15 @@ class Seq2SeqModel(object):
         ]
 
         batch = self.get_batch(data, decoding=True)
-        encoder_inputs, targets = batch
+        encoder_inputs, targets, input_length = batch
 
         input_feed = {self.targets: targets, self.feed_previous: 1.0}
 
         for i in range(len(self.encoders)):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
+            input_feed[self.encoder_input_length[i]] = input_length[i]
 
         outputs = session.run(self.outputs, input_feed)
-
         return [np.argmax(outputs_, axis=2) for outputs_ in outputs]
 
     def beam_search_decoding(self, session, token_ids, beam_size, early_stopping=True):
@@ -155,12 +158,13 @@ class Seq2SeqModel(object):
                 session_.run(self.dropout_off)
 
         data = [token_ids + [[]]]
-        encoder_inputs, targets = self.get_batch(data, decoding=True)
+        encoder_inputs, targets, input_length = self.get_batch(data, decoding=True)
         targets = targets[0]  # multi-decoder not supported
         input_feed = {}
 
         for i in range(len(self.encoders)):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
+            input_feed[self.encoder_input_length[i]] = input_length[i]
 
         output_feed = [self.encoder_state] + self.attention_states
         res = [session_.run(output_feed, input_feed) for session_ in session]
@@ -190,6 +194,7 @@ class Seq2SeqModel(object):
             for feed, attn_states_ in zip(input_feed, attn_states):
                 for i in range(len(self.encoders)):
                     feed[self.encoder_inputs[i]] = encoder_inputs[i]
+                    feed[self.encoder_input_length[i]] = input_length[i]
                     feed[self.attention_states[i]] = attn_states_[i].repeat(batch_size, axis=0)
 
             output_feed = [self.beam_tensors.new_data, self.beam_output]
@@ -197,7 +202,7 @@ class Seq2SeqModel(object):
             res = [session_.run(output_feed, input_feed_) for session_, input_feed_ in zip(session, input_feed)]
             beam_data, proba = list(zip(*res))
 
-            proba = [np.maximum(proba_, 1e-10) for proba_ in proba]
+            proba = [np.maximum(proba_, 1e-30) for proba_ in proba]
 
             scores_ = scores[:, None] - np.average([np.log(proba_) for proba_ in proba], axis=0)
             scores_ = scores_.flatten()
@@ -210,18 +215,13 @@ class Seq2SeqModel(object):
             new_scores = []
             new_data = [[] for _ in session]
             new_input = []
-            new_beam_size = beam_size
-
-            greedy_tokens = {}
 
             for flat_id, hyp_id, token_id in zip(flat_ids, hyp_ids, token_ids_):
+                if len(new_hypotheses) == beam_size:
+                    break
+
                 hypothesis = hypotheses[hyp_id] + [token_id]
                 score = scores_[flat_id]
-
-                if self.decoders[0].pred_edits:
-                    # always follow greedy recommendation
-                    op_id = min(token_id, len(utils._START_VOCAB))
-                    greedy_tokens.setdefault(hyp_id, op_id)
 
                 if token_id == utils.EOS_ID:
                     # hypothesis is finished, it is thus unnecessary to keep expanding it
@@ -230,7 +230,7 @@ class Seq2SeqModel(object):
 
                     # early stop: number of possible hypotheses is reduced by one
                     if early_stopping:
-                        new_beam_size -= 1
+                        beam_size -= 1
                 else:
                     new_hypotheses.append(hypothesis)
 
@@ -240,10 +240,6 @@ class Seq2SeqModel(object):
                     new_scores.append(score)
                     new_input.append(token_id)
 
-                if len(new_hypotheses) == beam_size:
-                    break
-
-            beam_size = new_beam_size
             hypotheses = new_hypotheses
             beam_data = [np.array(data_) for data_ in new_data]
             scores = np.array(new_scores)
@@ -274,9 +270,11 @@ class Seq2SeqModel(object):
         """
         inputs = [[] for _ in self.encoders]
         targets = [[] for _ in self.decoders]
+        input_length = [[] for _ in self.encoders]
 
         # maximum input length of each encoder in this batch
         max_input_len = [max(len(data_[i]) for data_ in data) for i in range(len(self.encoders))]
+
         if self.max_input_len is not None:
             max_input_len = [min(len_, max_len) for len_, max_len in zip(max_input_len, self.max_input_len)]
 
@@ -294,10 +292,15 @@ class Seq2SeqModel(object):
             trg_sentences = sentences[len(self.encoders):]
 
             for i, (encoder, src_sentence) in enumerate(zip(self.encoders, src_sentences)):
-                # pad sequences so that all sequences in the same batch have the same length
                 src_sentence = src_sentence[:max_input_len[i]]
-                encoder_pad = [utils.EOS_ID] * (1 + max_input_len[i] - len(src_sentence))
+                pad_symbol = np.zeros(encoder.embedding_size, dtype=np.float32) if encoder.binary else utils.EOS_ID
+                # pad sequences so that all sequences in the same batch have the same length
+
+                eos = 0 if encoder.binary else 1   # end of sentence marker for non-binary input
+                encoder_pad = [pad_symbol] * (eos + max_input_len[i] - len(src_sentence))
                 inputs[i].append(src_sentence + encoder_pad)
+                input_length[i].append(len(src_sentence) + eos)
+                # inputs[i].append(src_sentence[::-1] + encoder_pad)  # reverse sequence
 
             for i in range(len(targets)):
                 if decoding:
@@ -309,8 +312,10 @@ class Seq2SeqModel(object):
                     targets[i].append(trg_sentence)
 
         # convert lists to numpy arrays
-        inputs = [np.array(inputs_, dtype=np.int32) for inputs_ in inputs]
+        inputs = [np.array(inputs_, dtype=np.float32 if encoder.binary else np.int32)
+                  for encoder, inputs_ in zip(self.encoders, inputs)]
         # starts with BOS and ends with EOS
         targets = [np.array(targets_, dtype=np.int32) for targets_ in targets]
+        input_length = [np.array(input_length_, dtype=np.int32) for input_length_ in input_length]
 
-        return inputs, targets
+        return inputs, targets, input_length

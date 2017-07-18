@@ -50,8 +50,6 @@ use_lstm: False          # use LSTM units instead of GRU units
 character_level: False   # input sequence is at the character level
 weight_scale: null       # if not null, initialize all weights to a normal distribution with this stdev
 initializer: null        # normal or uniform initializer
-layer_norm: False        # apply layer norm to the LSTMs
-lstm_dropout: False      # apply dropout to the LSTMs
 tie_embeddings: False
 
 maxout: True             # parameters of the decoder
@@ -59,8 +57,16 @@ input_attention: True    # use attention as input to the LSTM
 use_previous_word: True  # use previous word when predicting a new word
 vanilla: False           # use a vanilla decoder
 attn_prev_word: False    # use the previous word in the attention model
+
+# encoder settings
 maxout_stride: null
 convolutions: null
+trainable_initial_states: True
+concat_last_states: False
+bidir_projection: False
+use_lstm_state: True
+output_extra_proj: True
+state_zero: False
 
 # data
 data_dir: data           # directory containing the training data
