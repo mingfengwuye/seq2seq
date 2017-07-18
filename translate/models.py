@@ -602,9 +602,13 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
                                     padding='SAME', strides=[2])
                 output_ = tf.squeeze(output_, axis=2)
 
-            output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
+            if decoder.output_extra_proj:
+                # intermediate projection to embedding size (before projecting to vocabulary size)
+                # this is useful to reduce the number of parameters, and
+                # to use the output embeddings for output projection (tie_embeddings parameter)
+                output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
 
-            if decoder.tie_embeddings:
+            if decoder.output_extra_proj and decoder.tie_embeddings:
                 bias = get_variable('softmax1/bias', shape=[decoder.vocab_size])
                 output_ = tf.matmul(output_, tf.transpose(embedding)) + bias
             else:

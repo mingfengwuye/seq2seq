@@ -36,23 +36,23 @@ ${speech_dir}/voxygen/convert-to-audio.sh ${raw_data_dir}/btec-test1.fr ${raw_au
 ${speech_dir}/voxygen/convert-to-audio.sh ${raw_data_dir}/btec-test2.fr ${raw_audio_dir}/test2-Marion Marion
 
 # extract 40 MFCC features + frame energy
-scripts/extract-audio-features.py ${raw_audio_dir}/train-Agnes/* ${data_dir}/train.Agnes.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/train-Fabienne/* ${data_dir}/train.Fabienne.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/train-Helene/* ${data_dir}/train.Helene.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/train-Loic/* ${data_dir}/train.Loic.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/train-Marion/* ${data_dir}/train.Marion.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/train-Michel/* ${data_dir}/train.Michel.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/train-Philippe/* ${data_dir}/train.Philippe.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/dev-Agnes/* ${data_dir}/dev.Agnes.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/test1-Agnes/* ${data_dir}/test1.Agnes.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/test2-Agnes/* ${data_dir}/test2.Agnes.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/dev-Michel/* ${data_dir}/dev.Michel.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/test1-Michel/* ${data_dir}/test1.Michel.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/test2-Michel/* ${data_dir}/test2.Michel.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/train-Agnes/* ${data_dir}/train.Agnes.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/train-Fabienne/* ${data_dir}/train.Fabienne.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/train-Helene/* ${data_dir}/train.Helene.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/train-Loic/* ${data_dir}/train.Loic.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/train-Marion/* ${data_dir}/train.Marion.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/train-Michel/* ${data_dir}/train.Michel.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/train-Philippe/* ${data_dir}/train.Philippe.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/dev-Agnes/* ${data_dir}/dev.Agnes.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/test1-Agnes/* ${data_dir}/test1.Agnes.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/test2-Agnes/* ${data_dir}/test2.Agnes.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/dev-Michel/* ${data_dir}/dev.Michel.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/test1-Michel/* ${data_dir}/test1.Michel.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/test2-Michel/* ${data_dir}/test2.Michel.feats41
 
 # real spoken data
-scripts/extract-audio-features.py ${raw_audio_dir}/btec-Laurent/* ${data_dir}/btec.Laurent.feats41
-scripts/extract-audio-features.py ${raw_audio_dir}/btec-Margaux/* ${data_dir}/btec.Margaux.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/btec-Laurent/* ${data_dir}/btec.Laurent.feats41
+scripts/speech/extract-audio-features.py ${raw_audio_dir}/btec-Margaux/* ${data_dir}/btec.Margaux.feats41
 
 # pre-process text data
 scripts/prepare-data.py ${raw_data_dir}/btec-Laurent en ${data_dir} --max 0 --lowercase --output btec.Laurent --mode prepare
@@ -68,7 +68,7 @@ scripts/prepare-data.py ${raw_data_dir}/btec-test1 mref.en ${data_dir} --max 0 -
 scripts/prepare-data.py ${raw_data_dir}/btec-test1 mref.en ${data_dir} --max 0 --lowercase --output test2 --mode prepare --lang en
 
 # Agnes is only used for development/testing, to test model's ability to generalize to other voices
-scripts/audio-features-cat.py ${data_dir}/train.{Helene,Fabienne,Loic,Marion,Michel,Philippe}.feats41 ${data_dir}/train.concat.feats41
+scripts/speech/audio-features-cat.py ${data_dir}/train.{Helene,Fabienne,Loic,Marion,Michel,Philippe}.feats41 ${data_dir}/train.concat.feats41
 cat ${data_dir}/train.{fr,fr,fr,fr,fr,fr} > ${data_dir}/train.concat.fr
 cat ${data_dir}/train.{en,en,en,en,en,en} > ${data_dir}/train.concat.en
 
@@ -85,8 +85,8 @@ cd ${cur_dir}
 # samples for debugging
 head -n 100 ${data_dir}/dev.en > ${data_dir}/dev.100.en
 head -n 100 ${data_dir}/dev.fr > ${data_dir}/dev.100.fr
-scripts/audio-features-head.py -n100 ${data_dir}/dev.Agnes.feats41 ${data_dir}/dev.100.Agnes.feats41
+scripts/speech/audio-features-head.py -n100 ${data_dir}/dev.Agnes.feats41 ${data_dir}/dev.100.Agnes.feats41
 
 head -n 1000 ${data_dir}/train.en > ${data_dir}/train.1000.en
 head -n 1000 ${data_dir}/train.fr > ${data_dir}/train.1000.fr
-scripts/audio-features-head.py -n1000 ${data_dir}/train.Agnes.feats41 ${data_dir}/train.1000.Agnes.feats41
+scripts/speech/audio-features-head.py -n1000 ${data_dir}/train.Agnes.feats41 ${data_dir}/train.1000.Agnes.feats41

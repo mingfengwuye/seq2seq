@@ -15,9 +15,9 @@ data_dir: experiments/btec_speech/data
 model_dir: experiments/btec_speech/baseline_multi
 batch_size: 64
 
-train_prefix: train.concat  # Michel, Philippe, Loic, Marion, Helene, Fabienne
-dev_prefix: dev.Agnes       # different speaker
-#max_train_size: 20000      # TODO: shuffle entire training set before training
+train_prefix: train.concat.shuf  # Michel, Philippe, Loic, Marion, Helene, Fabienne
+dev_prefix: dev.Agnes            # different speaker
+max_train_size: 20000
 
 optimizer: 'adam'
 learning_rate: 0.001
@@ -53,9 +53,6 @@ decoders:
     input_attention: False
     use_previous_word: False
     vanilla: False
-    state_zero: True
     use_lstm_state: False
     output_extra_proj: False
     attn_prev_word: False
-    maxout_stride: null
-    convolutions: null

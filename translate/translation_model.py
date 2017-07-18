@@ -542,9 +542,8 @@ class TranslationModel:
         save_checkpoint(sess, self.saver, self.checkpoint_dir, self.global_step)
 
 
-variable_mapping = [   # for backward compatibility with old models
+variable_mapping = [   # map old names to new names (for backward compatibility with old models)
     (r'/layer_norm_basic_lstm_cell', r'/basic_lstm_cell'),
-    (r'/attention/', r'/attention_src/'),  # FIXME
     (r'/forward_1/initial_state', r'/initial_state_fw'),
     (r'/backward_1/initial_state', r'/initial_state_bw'),
     (r'map_attns/Matrix', r'map_attns/matrix'),
@@ -552,6 +551,10 @@ variable_mapping = [   # for backward compatibility with old models
     (r'/biases', r'/bias'),
     (r'/Matrix', r'/kernel'),
     (r'/Bias', r'/bias'),
+]
+
+reverse_mapping = [   # map new names to old names
+    (r'/attention_.*?/', r'/attention/'),
 ]
 
 
@@ -582,16 +585,28 @@ def load_checkpoint(sess, checkpoint_dir, filename=None, blacklist=()):
 
         variables = {}
 
-        if variable_mapping is not None:
-            for var_name in var_names:
-                new_var_name = var_name
+        for var_name in var_names:
+            skip = False
+            for var in tf.global_variables():
+                name = var.name
+                for key, value in reverse_mapping:
+                    name = re.sub(key, value, name)
+                if var_name == name:
+                    variables[var_name] = var
+                    skip = True
+                    break
 
-                for key, value in variable_mapping:
-                    new_var_name = re.sub(key, value, new_var_name)
+            if skip:
+                continue
 
-                variable = get_variable_by_name(new_var_name)
-                if variable is not None:
-                    variables[var_name] = variable
+            name = var_name
+            for key, value in variable_mapping:
+                name = re.sub(key, value, name)
+
+            for var in tf.global_variables():
+                if var.name == name:
+                    variables[var_name] = var
+                    break
     else:
         variables = {var.name: var for var in tf.global_variables()}
 
