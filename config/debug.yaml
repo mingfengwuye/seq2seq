@@ -40,6 +40,3 @@ encoders:
 
 decoders:
   - name: en
-    maxout: True
-    vanilla: True
-    attn_prev_word: True

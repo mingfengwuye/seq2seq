@@ -36,6 +36,15 @@ keep_best: 4             # number of best checkpoints to keep
 feed_previous: 0.0       # randomly feed previous output instead of groundtruth to decoder during training
 optimizer: 'adam'        # 'sgd', 'adadelta', or 'adam'
 
+# reinforce parameters
+loss_function: 'xent'    # 'xent' or 'reinforce'
+reward_function: 'sentence_bleu'
+reinforce_after_n_epoch: null
+use_baseline: True       # train a reward baseline for reinforce
+baseline_steps: 0        # pre-training steps for reward baseline
+baseline_optimizer: 'adam'      # None: use the same one as the main model
+baseline_learning_rate: 0.001   # None: use the same one as the main model
+
 # model (each one of these settings can be defined specifically in `encoders` and `decoder`, or generally here)
 batch_size: 80           # training batch size
 cell_size: 1000          # size of the RNN cells

@@ -1,22 +1,27 @@
 import numpy as np
 import tensorflow as tf
 import re
+import functools
 
 from translate import utils
 from translate import models
+from translate import evaluation
 from collections import namedtuple
 
 
 class Seq2SeqModel(object):
     def __init__(self, encoders, decoders, learning_rate, global_step, max_gradient_norm, dropout_rate=0.0,
                  freeze_variables=None, feed_previous=0.0, optimizer='sgd', decode_only=False, len_normalization=1.0,
-                 name=None, chained_encoders=False, dual_output=False, pred_edits=False, **kwargs):
+                 name=None, chained_encoders=False, dual_output=False, pred_edits=False, baseline_step=None,
+                 use_baseline=True, **kwargs):
         self.encoders = encoders
         self.decoders = decoders
         self.name = name
 
         self.learning_rate = learning_rate
         self.global_step = global_step
+        self.baseline_step = baseline_step
+        self.use_baseline = use_baseline
 
         self.max_output_len = [decoder.max_len for decoder in decoders]
         self.max_input_len = [encoder.max_len for encoder in encoders]
@@ -51,27 +56,41 @@ class Seq2SeqModel(object):
             tf.placeholder(tf.int32, shape=[None, None], name='target_{}'.format(decoder.name))
             for decoder in decoders
         ])
-        self.rewards = tf.placeholder(tf.float32, shape=[None, None])
+        self.rewards = tf.placeholder(tf.float32, shape=[None, None], name='rewards')
 
         if chained_encoders and pred_edits:
-             architecture = models.chained_encoder_decoder
+             architecture = models.chained_encoder_decoder    # no REINFORCE for now
         else:
              architecture = models.encoder_decoder
         # elif dual_output or pred_edits:
         #     architecture = models.multi_encoder_decoder
 
         tensors = architecture(encoders, decoders, self.dropout, self.encoder_inputs, self.targets, self.feed_previous,
-                               encoder_input_length=self.encoder_input_length, feed_argmax=self.feed_argmax, **kwargs)
-        (self.loss, self.outputs, self.encoder_state, self.attention_states, self.attention_weights,
-         self.beam_tensors) = tensors
+                               encoder_input_length=self.encoder_input_length, feed_argmax=self.feed_argmax,
+                               rewards=self.rewards, use_baseline=use_baseline, **kwargs)
+
+        (self.losses, self.outputs, self.encoder_state, self.attention_states, self.attention_weights,
+         self.beam_tensors, self.samples) = tensors
+
+        self.xent_loss, self.reinforce_loss, self.baseline_loss = self.losses
+        self.loss = self.xent_loss   # main loss
 
         #self.beam_outputs = [models.softmax(outputs_[:, 0, :]) for outputs_ in self.outputs]
         self.beam_output = models.softmax(self.outputs[0][:, 0, :])
 
         optimizers = self.get_optimizers(optimizer, learning_rate)
+
         if not decode_only:
-            self.update_op, self.sgd_update_op = self.get_update_op(self.loss, optimizers, self.global_step,
-                                                                    max_gradient_norm, freeze_variables)
+            get_update_ops = functools.partial(self.get_update_op, opts=optimizers,
+                                               max_gradient_norm=max_gradient_norm, freeze_variables=freeze_variables)
+
+            self.update_ops = utils.AttrDict({
+                'xent': get_update_ops(self.xent_loss, global_step=self.global_step),
+                'reinforce': get_update_ops(self.reinforce_loss, global_step=self.global_step),
+            })
+
+            if use_baseline:
+                self.update_ops['baseline'] = get_update_ops(self.baseline_loss, global_step=self.baseline_step)
 
     @staticmethod
     def get_optimizers(optimizer_name, learning_rate):
@@ -99,49 +118,67 @@ class Seq2SeqModel(object):
         gradients = tf.gradients(loss, params)
         if max_gradient_norm:
             gradients, _ = tf.clip_by_global_norm(gradients, max_gradient_norm)
-        self.gradients = gradients
 
         update_ops = []
         for opt in opts:
             with tf.variable_scope('gradients' if self.name is None else 'gradients_{}'.format(self.name)):
-                update_op = opt.apply_gradients(zip(gradients, params), global_step=global_step)
+                update_op = opt.apply_gradients(list(zip(gradients, params)), global_step=global_step)
+
             update_ops.append(update_op)
 
         return update_ops
 
-    # def init_xent(self, optimizers, decode_only=False):
-    #     self.xent_loss = models.sequence_loss(logits=self.outputs, targets=self.targets[1:, :])
-    #
-    #     if not decode_only:
-    #         self.update_op, self.sgd_update_op = self.get_update_op(self.xent_loss, optimizers, self.global_step)
-    #
-    # def init_reinforce(self, optimizers, reinforce_baseline=True, decode_only=False):
-    #     self.rewards = tf.placeholder(tf.float32, [None, None], 'rewards')
-    #
-    #     # if reinforce_baseline:
-    #     #     reward = models.reinforce_baseline(self.decoder_outputs, self.rewards)
-    #     #     weights = models.get_weights(self.sampled_output, utils.EOS_ID, time_major=True,
-    #     #                                    include_first_eos=False)
-    #     #     self.baseline_loss = models.baseline_loss(reward=reward, weights=weights)
-    #     # else:
-    #     reward = self.rewards
-    #     self.baseline_loss = tf.constant(0.0)
-    #
-    #     weights = models.get_weights(self.sampled_output, utils.EOS_ID, time_major=True,
-    #                                  include_first_eos=True)   # FIXME: True or False?
-    #     self.reinforce_loss = models.sequence_loss(logits=self.outputs, targets=self.sampled_output,
-    #                                                weights=weights, reward=reward)
-    #
-    #     if not decode_only:
-    #         self.update_op, self.sgd_update_op = self.get_update_op(self.reinforce_loss,
-    #                                                                 optimizers,
-    #                                                                 self.global_step)
-    #
-    #         if reinforce_baseline:
-    #             baseline_opt = tf.train.AdamOptimizer(learning_rate=0.001)
-    #             self.baseline_update_op, = self.get_update_op(self.baseline_loss, [baseline_opt])
-    #         else:
-    #             self.baseline_update_op = tf.constant(0.0)   # dummy tensor
+    def reinforce_step(self, session, data, update_model=True, align=False, use_sgd=False, update_baseline=True,
+                       reward_function=None, **kwargs):
+        if self.dropout is not None:
+            session.run(self.dropout_on)
+
+        encoder_inputs, targets, input_length = self.get_batch(data)
+        input_feed = {self.targets: targets, self.feed_argmax: False, self.feed_previous: 1.0}
+
+        for i in range(len(self.encoders)):
+            input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
+            input_feed[self.encoder_input_length[i]] = input_length[i]
+
+        samples, outputs = session.run([self.samples, self.outputs], input_feed)
+
+        if reward_function is None:
+            reward_function = 'sentence_bleu'
+        reward_function = getattr(evaluation, reward_function)
+
+        def compute_reward(output, target):
+            j, = np.where(output == utils.EOS_ID)  # array of indices whose value is EOS_ID
+            if len(j) > 0:
+                output = output[:j[0]]
+
+            j, = np.where(target == utils.EOS_ID)
+            if len(j) > 0:
+                target = target[:j[0]]
+
+            return reward_function(output, target)
+
+        def compute_rewards(outputs, targets):
+            return np.array([compute_reward(output, target) for output, target in zip(outputs, targets)])
+
+        rewards = compute_rewards(samples, targets[0][:,1:])
+        rewards = np.stack([rewards] * samples.shape[1], axis=1)
+
+        input_feed[self.outputs[0]] = outputs[0]
+        input_feed[self.samples] = samples
+        input_feed[self.rewards] = rewards
+
+        output_feed = {'loss': self.reinforce_loss, 'baseline_loss': self.baseline_loss}
+        if update_model:
+            output_feed['update'] = self.update_ops.reinforce[1] if use_sgd else self.update_ops.reinforce[0]
+        if self.use_baseline and update_baseline:
+            output_feed['baseline_update'] = self.update_ops.baseline[0]  # FIXME
+
+        if align:
+            output_feed['weights'] = self.attention_weights
+
+        res = session.run(output_feed, input_feed)
+        return namedtuple('output', 'loss weights baseline_loss')(res['loss'], res.get('weights'),
+                                                                  res.get('baseline_loss'))
 
     def step(self, session, data, update_model=True, align=False, use_sgd=False, **kwargs):
         if self.dropout is not None:
@@ -154,9 +191,9 @@ class Seq2SeqModel(object):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
             input_feed[self.encoder_input_length[i]] = input_length[i]
 
-        output_feed = {'loss': self.loss}
+        output_feed = {'loss': self.xent_loss}
         if update_model:
-            output_feed['updates'] = self.sgd_update_op if use_sgd else self.update_op
+            output_feed['update'] = self.update_ops.xent[1] if use_sgd else self.update_ops.xent[0]
         if align:
             output_feed['weights'] = self.attention_weights
 

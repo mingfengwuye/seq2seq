@@ -49,6 +49,7 @@ class TranslationModel:
 
         with tf.device('/cpu:0'):
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
+            self.baseline_step = tf.Variable(0, trainable=False, name='baseline_step')
 
         self.filenames = utils.get_filenames(extensions=self.extensions, dev_prefix=dev_prefix, name=name,
                                              ref_ext=ref_ext, binary=self.binary, **kwargs)
@@ -61,7 +62,8 @@ class TranslationModel:
 
         utils.debug('creating model')
         self.seq2seq_model = Seq2SeqModel(encoders, decoders, self.learning_rate, self.global_step, name=name,
-                                          pred_edits=pred_edits, dual_output=dual_output, **kwargs)
+                                          pred_edits=pred_edits, dual_output=dual_output,
+                                          baseline_step=self.baseline_step, **kwargs)
 
         self.batch_iterator = None
         self.dev_batches = None
@@ -349,13 +351,20 @@ class TranslationModel:
 
         return scores
 
-    def train(self, sess, **kwargs):
+    def train(self, sess, baseline_steps=0, loss_function='xent', use_baseline=True, **kwargs):
         self.init_training(sess=sess, **kwargs)
+
+        if (loss_function == 'reinforce' and use_baseline and baseline_steps > 0 and
+                    self.baseline_step.eval(sess) < baseline_steps):
+            utils.log('pre-training reinforce baseline')
+            for i in range(baseline_steps - self.baseline_step.eval(sess)):
+                self.seq2seq_model.reinforce_step(sess, next(self.batch_iterator), update_model=False,
+                                                  use_sgd=False, update_baseline=True)
 
         utils.log('starting training')
         while True:
             try:
-                self.train_step(sess=sess, **kwargs)
+                self.train_step(sess=sess, loss_function=loss_function, use_baseline=use_baseline, **kwargs)
             except utils.EvalException:
                 self.save(sess)
                 step, score = self.training.scores[-1]
@@ -382,6 +391,7 @@ class TranslationModel:
         self.training.time = 0
         self.training.steps = 0
         self.training.loss = 0
+        self.training.baseline_loss = 0
         self.training.losses = []
         self.training.last_decay = global_step
         self.training.scores = []
@@ -389,11 +399,19 @@ class TranslationModel:
     def train_step(self, sess, beam_size, steps_per_checkpoint, model_dir, steps_per_eval=None, max_steps=0,
                    max_epochs=0, eval_burn_in=0, decay_if_no_progress=None, decay_after_n_epoch=None,
                    decay_every_n_epoch=None, sgd_after_n_epoch=None, sgd_learning_rate=None, min_learning_rate=None,
-                   **kwargs):
+                   loss_function='xent', use_baseline=True, **kwargs):
         start_time = time.time()
-        res = self.seq2seq_model.step(sess, next(self.batch_iterator), update_model=True,
-                                      use_sgd=self.training.use_sgd)
+
+        if loss_function == 'reinforce':
+            step_function = self.seq2seq_model.reinforce_step
+        else:
+            step_function = self.seq2seq_model.step
+
+        res = step_function(sess, next(self.batch_iterator), update_model=True, use_sgd=self.training.use_sgd,
+                            update_baseline=True)
+
         self.training.loss += res.loss
+        self.training.baseline_loss += getattr(res, 'baseline_loss', 0)
 
         self.training.time += time.time() - start_time
         self.training.steps += 1
@@ -418,12 +436,17 @@ class TranslationModel:
 
         if steps_per_checkpoint and global_step % steps_per_checkpoint == 0:
             loss = self.training.loss / self.training.steps
+            baseline_loss = self.training.baseline_loss / self.training.steps
             step_time = self.training.time / self.training.steps
 
             summary = 'step {} epoch {} learning rate {:.4f} step-time {:.4f} loss {:.4f}'.format(
                 global_step, epoch + 1, self.learning_rate.eval(), step_time, loss)
+
             if self.name is not None:
                 summary = '{} {}'.format(self.name, summary)
+            if use_baseline and loss_function == 'reinforce':
+                summary = '{} baseline-loss {:.4f}'.format(summary, baseline_loss)
+
             utils.log(summary)
 
             if decay_if_no_progress and len(self.training.losses) >= decay_if_no_progress:
@@ -431,7 +454,7 @@ class TranslationModel:
                     sess.run(self.learning_rate_decay_op)
 
             self.training.losses.append(loss)
-            self.training.loss, self.training.time, self.training.steps = 0, 0, 0
+            self.training.loss, self.training.time, self.training.steps, self.training.baseline_loss = 0, 0, 0, 0
             self.eval_step(sess)
 
         if steps_per_eval and global_step % steps_per_eval == 0 and 0 <= eval_burn_in <= global_step:
@@ -516,6 +539,13 @@ class TranslationModel:
 
     def initialize(self, sess, load=None, reset=False, reset_learning_rate=False, max_to_keep=1,
                    keep_every_n_hours=0, **kwargs):
+        """
+        :param load: list of checkpoints to load (instead of latest checkpoint)
+        :param reset: don't load latest checkpoint, reset learning rate and global step
+        :param reset_learning_rate: reset the learning rate to its initial value
+        :param max_to_keep: keep this many latest checkpoints at all times
+        :param keep_every_n_hours: and keep checkpoints every n hours
+        """
         if keep_every_n_hours <= 0 or keep_every_n_hours is None:
             keep_every_n_hours = float('inf')
 
@@ -537,6 +567,7 @@ class TranslationModel:
             load_checkpoint(sess, self.checkpoint_dir, blacklist=blacklist)
 
         utils.debug('global step: {}'.format(self.global_step.eval(sess)))
+        utils.debug('baseline step: {}'.format(self.baseline_step.eval(sess)))
 
     def save(self, sess):
         save_checkpoint(sess, self.saver, self.checkpoint_dir, self.global_step)

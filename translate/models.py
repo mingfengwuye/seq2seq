@@ -627,7 +627,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
                 default=argmax)   # default case is useful for beam-search
             predicted_symbol.set_shape([None])
             predicted_symbol = tf.stop_gradient(predicted_symbol)
-            samples = samples.write(0, predicted_symbol)
+            samples = samples.write(time, predicted_symbol)
 
             input_ = embed(predicted_symbol)
             pos = get_next_pos(pos, predicted_symbol, encoder_input_length[align_encoder_id])
@@ -663,73 +663,26 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         weights = tf.transpose(weights[1:], perm=(1, 0, 2))
         states = tf.transpose(states, perm=(1, 0, 2))
         attns = tf.transpose(attns, perm=(1, 0, 2))
+        samples = tf.transpose(samples)
 
         return outputs, weights, states, attns, beam_tensors, samples
 
 
-def sequence_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True):
-    batch_size = tf.shape(targets)[0]
-    time_steps = tf.shape(targets)[1]
-
-    logits_ = tf.reshape(logits, tf.stack([time_steps * batch_size, logits.get_shape()[2].value]))
-    targets_ = tf.reshape(targets, tf.stack([time_steps * batch_size]))
-
-    crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits_, labels=targets_)
-    crossent = tf.reshape(crossent, tf.stack([batch_size, time_steps]))
-
-    log_perp = tf.reduce_sum(crossent * weights, axis=1)
-
-    if average_across_timesteps:
-        total_size = tf.reduce_sum(weights, axis=0)
-        total_size += 1e-12  # just to avoid division by 0 for all-0 weights
-        log_perp /= total_size
-
-    cost = tf.reduce_sum(log_perp)
-
-    if average_across_batch:
-        return cost / tf.to_float(batch_size)
-    else:
-        return cost
-
-
-def softmax(logits, dim=-1, mask=None):
-    e = tf.exp(logits)
-    if mask is not None:
-        e *= mask
-
-    return e / tf.clip_by_value(tf.reduce_sum(e, axis=dim, keep_dims=True), 10e-37, 10e+37)
-
-
-def get_weights(sequence, eos_id, time_major=False, include_first_eos=True):
-    axis = 1 - time_major
-
-    weights = (1.0 - tf.minimum(
-        tf.cumsum(tf.cast(tf.equal(sequence, eos_id), tf.float32), axis=axis), 1.0))
-
-    if include_first_eos:
-        weights = weights[:-1,:] if time_major else weights[:,:-1]
-        shape = [tf.shape(weights)[0], tf.shape(weights)[1]]
-        shape[axis] = 1
-        weights = tf.concat([tf.ones(tf.stack(shape)), weights], axis)
-
-    return tf.stop_gradient(weights)
-
-
 def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_previous, align_encoder_id=0,
-                    encoder_input_length=None, loss_function='xent', feed_argmax=True, **kwargs):
+                    encoder_input_length=None, feed_argmax=True, rewards=None, use_baseline=True, **kwargs):
     decoder = decoders[0]
     targets = targets[0]  # single decoder
 
     if encoder_input_length is None:
         encoder_input_length = []
         for encoder_inputs_ in encoder_inputs:
-            weights = get_weights(encoder_inputs_, utils.EOS_ID, time_major=False, include_first_eos=True)
+            weights = get_weights(encoder_inputs_, utils.EOS_ID, include_first_eos=True)
             encoder_input_length.append(tf.to_int32(tf.reduce_sum(weights, axis=1)))
 
     parameters = dict(encoders=encoders, decoder=decoder, dropout=dropout, encoder_inputs=encoder_inputs,
                       feed_argmax=feed_argmax)
 
-    target_weights = get_weights(targets[:, 1:], utils.EOS_ID, time_major=False, include_first_eos=True)
+    target_weights = get_weights(targets[:, 1:], utils.EOS_ID, include_first_eos=True)
 
     attention_states, encoder_state, encoder_input_length = multi_encoder(
         encoder_input_length=encoder_input_length, **parameters)
@@ -740,8 +693,22 @@ def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_p
         **parameters
     )
 
+    if use_baseline:
+        baseline_rewards = reinforce_baseline(outputs, rewards)   # FIXME: use outputs or decoder states/outputs?
+        baseline_weights = get_weights(samples, utils.EOS_ID, include_first_eos=False)
+        baseline_loss_ = baseline_loss(rewards=baseline_rewards, weights=baseline_weights)
+    else:
+        baseline_rewards = rewards
+        baseline_loss_ = tf.constant(0.0)
+
+    reinforce_weights = get_weights(samples, utils.EOS_ID, include_first_eos=True)
+    reinforce_loss = sequence_loss(logits=outputs, targets=samples, weights=reinforce_weights,
+                                   rewards=baseline_rewards)
+
     xent_loss = sequence_loss(logits=outputs, targets=targets[:, 1:], weights=target_weights)
-    return xent_loss, [outputs], encoder_state, attention_states, attention_weights, beam_tensors
+    losses = [xent_loss, reinforce_loss, baseline_loss_]
+
+    return losses, [outputs], encoder_state, attention_states, attention_weights, beam_tensors, samples
 
 
 def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_previous,
@@ -756,11 +723,11 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
     encoder_input_length = []
     input_weights = []
     for encoder_inputs_ in encoder_inputs:
-        weights = get_weights(encoder_inputs_, utils.EOS_ID, time_major=False, include_first_eos=True)
+        weights = get_weights(encoder_inputs_, utils.EOS_ID, include_first_eos=True)
         input_weights.append(weights)
         encoder_input_length.append(tf.to_int32(tf.reduce_sum(weights, axis=1)))
 
-    target_weights = get_weights(targets[:, 1:], utils.EOS_ID, time_major=False, include_first_eos=True)
+    target_weights = get_weights(targets[:, 1:], utils.EOS_ID, include_first_eos=True)
 
     parameters = dict(encoders=encoders[1:], decoder=encoders[0], dropout=dropout, more_dropout=more_dropout)
 
@@ -852,4 +819,99 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
     if chaining_loss is not None and chaining_loss_ratio:
         xent_loss += chaining_loss_ratio * chaining_loss
 
-    return xent_loss, [outputs], encoder_state, attention_states, attention_weights, beam_tensors
+    losses = [xent_loss, None, None]
+
+    return losses, [outputs], encoder_state, attention_states, attention_weights, beam_tensors, samples
+
+
+def softmax(logits, dim=-1, mask=None):
+    e = tf.exp(logits)
+    if mask is not None:
+        e *= mask
+
+    return e / tf.clip_by_value(tf.reduce_sum(e, axis=dim, keep_dims=True), 10e-37, 10e+37)
+
+
+def sequence_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True, rewards=None):
+    batch_size = tf.shape(targets)[0]
+    time_steps = tf.shape(targets)[1]
+
+    logits_ = tf.reshape(logits, tf.stack([time_steps * batch_size, logits.get_shape()[2].value]))
+    targets_ = tf.reshape(targets, tf.stack([time_steps * batch_size]))
+
+    crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits_, labels=targets_)
+    crossent = tf.reshape(crossent, tf.stack([batch_size, time_steps]))
+
+    if rewards is not None:
+        crossent *= tf.stop_gradient(rewards)
+
+    log_perp = tf.reduce_sum(crossent * weights, axis=1)
+
+    if average_across_timesteps:
+        total_size = tf.reduce_sum(weights, axis=0)
+        total_size += 1e-12  # just to avoid division by 0 for all-0 weights
+        log_perp /= total_size
+
+    cost = tf.reduce_sum(log_perp)
+
+    if average_across_batch:
+        return cost / tf.to_float(batch_size)
+    else:
+        return cost
+
+
+def get_weights(sequence, eos_id, include_first_eos=True):
+    weights = (1.0 - tf.minimum(
+        tf.cumsum(tf.cast(tf.equal(sequence, eos_id), tf.float32), axis=1), 1.0))
+
+    if include_first_eos:
+        weights = weights[:,:-1]
+        shape = [tf.shape(weights)[0], 1]
+        weights = tf.concat([tf.ones(tf.stack(shape)), weights], axis=1)
+
+    return tf.stop_gradient(weights)
+
+
+def reinforce_baseline(decoder_states, reward):
+    """
+    Center the reward by computing a baseline reward over decoder states.
+
+    :param decoder_states: internal states of the decoder, tensor of shape (batch_size, time_steps, state_size)
+    :param reward: reward for each time step, tensor of shape (batch_size, time_steps)
+    :return: reward - computed baseline, tensor of shape (batch_size, time_steps)
+    """
+    # batch_size = tf.shape(decoder_states)[0]
+    # time_steps = tf.shape(decoder_states)[1]
+    # state_size = decoder_states.get_shape()[2]
+    # states = tf.reshape(decoder_states, shape=tf.stack([batch_size * time_steps, state_size]))
+
+    baseline = dense(tf.stop_gradient(decoder_states), units=1, activation=None, name='reward_baseline',
+                     kernel_initializer=tf.constant_initializer(0.01))
+    baseline = tf.squeeze(baseline, axis=2)
+
+    # baseline = tf.reshape(baseline, shape=tf.stack([batch_size, time_steps]))
+    return reward - baseline
+
+
+def baseline_loss(rewards, weights, average_across_timesteps=False, average_across_batch=True):
+    """
+    :param reward: tensor of shape (batch_size, time_steps)
+    :param weights: tensor of shape (batch_size, time_steps)
+    """
+    batch_size = tf.shape(rewards)[0]
+
+    cost = rewards ** 2
+    cost = tf.reduce_sum(cost * weights, axis=1)
+
+    if average_across_timesteps:
+        total_size = tf.reduce_sum(weights, axis=1)
+        total_size += 1e-12  # just to avoid division by 0 for all-0 weights
+        cost /= total_size
+
+    cost = tf.reduce_sum(cost)
+
+    if average_across_batch:
+        cost /= tf.to_float(batch_size)
+
+    return cost
+
