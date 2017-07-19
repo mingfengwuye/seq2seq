@@ -30,7 +30,7 @@ class Seq2SeqModel(object):
             self.dropout = None
 
         self.feed_previous = tf.constant(feed_previous, dtype=tf.float32)
-        self.feed_argmax = tf.constant(True, dtype=tf.bool)  # feed with argmax or sample
+        self.feed_argmax = tf.constant(True, dtype=tf.bool)  # feed with argmax or sample from softmax
 
         self.encoder_inputs = []
         self.input_weights = []
@@ -51,6 +51,7 @@ class Seq2SeqModel(object):
             tf.placeholder(tf.int32, shape=[None, None], name='target_{}'.format(decoder.name))
             for decoder in decoders
         ])
+        self.rewards = tf.placeholder(tf.float32, shape=[None, None])
 
         if chained_encoders and pred_edits:
              architecture = models.chained_encoder_decoder
@@ -60,8 +61,8 @@ class Seq2SeqModel(object):
         #     architecture = models.multi_encoder_decoder
 
         tensors = architecture(encoders, decoders, self.dropout, self.encoder_inputs, self.targets, self.feed_previous,
-                               encoder_input_length=self.encoder_input_length, **kwargs)
-        (self.xent_loss, self.outputs, self.encoder_state, self.attention_states, self.attention_weights,
+                               encoder_input_length=self.encoder_input_length, feed_argmax=self.feed_argmax, **kwargs)
+        (self.loss, self.outputs, self.encoder_state, self.attention_states, self.attention_weights,
          self.beam_tensors) = tensors
 
         #self.beam_outputs = [models.softmax(outputs_[:, 0, :]) for outputs_ in self.outputs]
@@ -69,7 +70,7 @@ class Seq2SeqModel(object):
 
         optimizers = self.get_optimizers(optimizer, learning_rate)
         if not decode_only:
-            self.update_op, self.sgd_update_op = self.get_update_op(self.xent_loss, optimizers, self.global_step,
+            self.update_op, self.sgd_update_op = self.get_update_op(self.loss, optimizers, self.global_step,
                                                                     max_gradient_norm, freeze_variables)
 
     @staticmethod
@@ -108,6 +109,40 @@ class Seq2SeqModel(object):
 
         return update_ops
 
+    # def init_xent(self, optimizers, decode_only=False):
+    #     self.xent_loss = models.sequence_loss(logits=self.outputs, targets=self.targets[1:, :])
+    #
+    #     if not decode_only:
+    #         self.update_op, self.sgd_update_op = self.get_update_op(self.xent_loss, optimizers, self.global_step)
+    #
+    # def init_reinforce(self, optimizers, reinforce_baseline=True, decode_only=False):
+    #     self.rewards = tf.placeholder(tf.float32, [None, None], 'rewards')
+    #
+    #     # if reinforce_baseline:
+    #     #     reward = models.reinforce_baseline(self.decoder_outputs, self.rewards)
+    #     #     weights = models.get_weights(self.sampled_output, utils.EOS_ID, time_major=True,
+    #     #                                    include_first_eos=False)
+    #     #     self.baseline_loss = models.baseline_loss(reward=reward, weights=weights)
+    #     # else:
+    #     reward = self.rewards
+    #     self.baseline_loss = tf.constant(0.0)
+    #
+    #     weights = models.get_weights(self.sampled_output, utils.EOS_ID, time_major=True,
+    #                                  include_first_eos=True)   # FIXME: True or False?
+    #     self.reinforce_loss = models.sequence_loss(logits=self.outputs, targets=self.sampled_output,
+    #                                                weights=weights, reward=reward)
+    #
+    #     if not decode_only:
+    #         self.update_op, self.sgd_update_op = self.get_update_op(self.reinforce_loss,
+    #                                                                 optimizers,
+    #                                                                 self.global_step)
+    #
+    #         if reinforce_baseline:
+    #             baseline_opt = tf.train.AdamOptimizer(learning_rate=0.001)
+    #             self.baseline_update_op, = self.get_update_op(self.baseline_loss, [baseline_opt])
+    #         else:
+    #             self.baseline_update_op = tf.constant(0.0)   # dummy tensor
+
     def step(self, session, data, update_model=True, align=False, use_sgd=False, **kwargs):
         if self.dropout is not None:
             session.run(self.dropout_on)
@@ -119,7 +154,7 @@ class Seq2SeqModel(object):
             input_feed[self.encoder_inputs[i]] = encoder_inputs[i]
             input_feed[self.encoder_input_length[i]] = input_length[i]
 
-        output_feed = {'loss': self.xent_loss}
+        output_feed = {'loss': self.loss}
         if update_model:
             output_feed['updates'] = self.sgd_update_op if use_sgd else self.update_op
         if align:

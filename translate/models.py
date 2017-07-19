@@ -445,7 +445,7 @@ def multi_attention(state, hidden_states, encoders, encoder_input_length, pos=No
 
 
 def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
-                      dropout=None, feed_previous=0.0, align_encoder_id=0, **kwargs):
+                      dropout=None, feed_previous=0.0, align_encoder_id=0, feed_argmax=True, **kwargs):
     """
     :param targets: tensor of shape (output_length, batch_size)
     :param initial_state: initial state of the decoder (usually the final state of the encoder),
@@ -513,8 +513,8 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
         time = tf.constant(0, dtype=tf.int32, name='time')
 
-        outputs = tf.TensorArray(dtype=tf.float32, size=time_steps, clear_after_read=False)
-
+        outputs = tf.TensorArray(dtype=tf.float32, size=time_steps)
+        samples = tf.TensorArray(dtype=tf.int64, size=time_steps)
         inputs = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False).unstack(
                                 tf.cast(tf.transpose(decoder_inputs, perm=(1, 0)), tf.int64))
         states = tf.TensorArray(dtype=tf.float32, size=time_steps)
@@ -562,7 +562,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
                 pos = tf.minimum(pos, tf.to_float(max_pos))
             return pos
 
-        def _time_step(time, input_, input_symbol, pos, state, outputs, states, weights, attns, prev_weights):
+        def _time_step(time, input_, input_symbol, pos, state, outputs, states, weights, attns, prev_weights, samples):
             attn_input = state
             if decoder.attn_prev_word:
                 attn_input = tf.concat([attn_input, input_], axis=1)
@@ -618,11 +618,16 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
             argmax = lambda: tf.argmax(output_, 1)
             target = lambda: inputs.read(time + 1)
+            softmax = lambda: tf.squeeze(tf.multinomial(tf.log(tf.nn.softmax(output_)), num_samples=1),
+                                         axis=1)
 
-            predicted_symbol = tf.cond(tf.logical_and(time < time_steps - 1, tf.random_uniform([]) >= feed_previous),
-                             target, argmax)
+            predicted_symbol = tf.case([
+                (tf.logical_and(time < time_steps - 1, tf.random_uniform([]) >= feed_previous), target),
+                (tf.logical_not(feed_argmax), softmax)],
+                default=argmax)   # default case is useful for beam-search
             predicted_symbol.set_shape([None])
             predicted_symbol = tf.stop_gradient(predicted_symbol)
+            samples = samples.write(0, predicted_symbol)
 
             input_ = embed(predicted_symbol)
             pos = get_next_pos(pos, predicted_symbol, encoder_input_length[align_encoder_id])
@@ -633,13 +638,14 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
                     rnn_input = tf.concat([rnn_input, context], axis=1)
                 rnn_output, state = get_next_state(rnn_input, state, predicted_symbol)
 
-            return time + 1, input_, predicted_symbol, pos, state, outputs, states, weights, attns, new_weights
+            return (time + 1, input_, predicted_symbol, pos, state, outputs, states, weights, attns, new_weights,
+                    samples)
 
-        _, _, _, new_pos, new_state, outputs, states, weights, attns, new_weights = tf.while_loop(
+        _, _, _, new_pos, new_state, outputs, states, weights, attns, new_weights, samples = tf.while_loop(
             cond=lambda time, *_: time < time_steps,
             body=_time_step,
             loop_vars=(time, initial_input, initial_symbol, initial_pos, initial_state, outputs, weights, states,
-                       attns, initial_weights),
+                       attns, initial_weights, samples),
             parallel_iterations=decoder.parallel_iterations,
             swap_memory=decoder.swap_memory)
 
@@ -647,6 +653,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         weights = weights.stack()  # batch_size, encoders, output time, input time
         states = states.stack()
         attns = attns.stack()
+        samples = samples.stack()
 
         new_data = tf.concat([new_state, tf.expand_dims(new_pos, axis=1), new_weights], axis=1)
         beam_tensors = utils.AttrDict(data=initial_data, new_data=new_data)
@@ -657,7 +664,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         states = tf.transpose(states, perm=(1, 0, 2))
         attns = tf.transpose(attns, perm=(1, 0, 2))
 
-        return outputs, weights, states, attns, beam_tensors
+        return outputs, weights, states, attns, beam_tensors, samples
 
 
 def sequence_loss(logits, targets, weights, average_across_timesteps=False, average_across_batch=True):
@@ -708,8 +715,8 @@ def get_weights(sequence, eos_id, time_major=False, include_first_eos=True):
     return tf.stop_gradient(weights)
 
 
-def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_previous,
-                    align_encoder_id=0, encoder_input_length=None, **kwargs):
+def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_previous, align_encoder_id=0,
+                    encoder_input_length=None, loss_function='xent', feed_argmax=True, **kwargs):
     decoder = decoders[0]
     targets = targets[0]  # single decoder
 
@@ -719,14 +726,15 @@ def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_p
             weights = get_weights(encoder_inputs_, utils.EOS_ID, time_major=False, include_first_eos=True)
             encoder_input_length.append(tf.to_int32(tf.reduce_sum(weights, axis=1)))
 
-    parameters = dict(encoders=encoders, decoder=decoder, dropout=dropout, encoder_inputs=encoder_inputs)
+    parameters = dict(encoders=encoders, decoder=decoder, dropout=dropout, encoder_inputs=encoder_inputs,
+                      feed_argmax=feed_argmax)
 
     target_weights = get_weights(targets[:, 1:], utils.EOS_ID, time_major=False, include_first_eos=True)
 
     attention_states, encoder_state, encoder_input_length = multi_encoder(
         encoder_input_length=encoder_input_length, **parameters)
 
-    outputs, attention_weights, _, _, beam_tensors = attention_decoder(
+    outputs, attention_weights, _, _, beam_tensors, samples = attention_decoder(
         attention_states=attention_states, initial_state=encoder_state, feed_previous=feed_previous,
         decoder_inputs=targets[:, :-1], align_encoder_id=align_encoder_id, encoder_input_length=encoder_input_length,
         **parameters
@@ -765,7 +773,7 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
     pad = tf.ones(shape=tf.stack([batch_size, 1]), dtype=tf.int32) * utils.BOS_ID
     decoder_inputs = tf.concat([pad, decoder_inputs], axis=1)
 
-    outputs, _, states, attns, _ = attention_decoder(
+    outputs, _, states, attns, _, samples = attention_decoder(
         attention_states=attention_states, initial_state=encoder_state, decoder_inputs=decoder_inputs,
         encoder_input_length=encoder_input_length[1:], **parameters
     )
@@ -831,7 +839,7 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
 
         attention_states[0] += x
 
-    outputs, attention_weights, _, _, beam_tensors = attention_decoder(
+    outputs, attention_weights, _, _, beam_tensors, samples = attention_decoder(
         attention_states=attention_states, initial_state=encoder_state,
         feed_previous=feed_previous, decoder_inputs=targets[:,:-1],
         align_encoder_id=align_encoder_id, encoder_input_length=encoder_input_length[:1],
@@ -845,4 +853,3 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
         xent_loss += chaining_loss_ratio * chaining_loss
 
     return xent_loss, [outputs], encoder_state, attention_states, attention_weights, beam_tensors
-
