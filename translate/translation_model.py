@@ -16,7 +16,7 @@ from translate.seq2seq_model import Seq2SeqModel
 class TranslationModel:
     def __init__(self, encoders, decoders, checkpoint_dir, learning_rate, learning_rate_decay_factor,
                  batch_size, keep_best=1, dev_prefix=None, score_function='corpus_scores', name=None, ref_ext=None,
-                 pred_edits=False, dual_output=False, **kwargs):
+                 pred_edits=False, dual_output=False, binary=None, **kwargs):
 
         self.batch_size = batch_size
         self.character_level = {}
@@ -54,6 +54,8 @@ class TranslationModel:
         self.filenames = utils.get_filenames(extensions=self.extensions, dev_prefix=dev_prefix, name=name,
                                              ref_ext=ref_ext, binary=self.binary, **kwargs)
         utils.debug('reading vocabularies')
+        self.vocabs = None
+        self.src_vocab, self.trg_vocab = None, None
         self.read_vocab()
 
         for encoder_or_decoder, vocab in zip(encoders + decoders, self.vocabs):
@@ -258,13 +260,24 @@ class TranslationModel:
     def evaluate(self, sess, beam_size, score_function, on_dev=True, output=None, remove_unk=False, max_dev_size=None,
                  early_stopping=True, raw_output=False, fix_edits=True, max_test_size=None, **kwargs):
         """
-        :param score_function: name of the scoring function used to score and rank models
-          (typically 'bleu_score')
+        Decode a dev or test set, and perform evaluation with respect to gold standard, using the provided
+        scoring function. If `output` is defined, also save the decoding output to this file.
+        When evaluating development data (`on_dev` to True), several dev sets can be specified (`dev_prefix` parameter
+        in configuration files), and a score is computed for each of them.
+
+        :param beam_size: if greater than 1, use a beam-search decoder with this beam size (otherwise do greedy
+            decoding)
+        :param score_function: name of the scoring function used to score and rank models (typically 'bleu_score')
         :param on_dev: if True, evaluate the dev corpus, otherwise evaluate the test corpus
         :param output: save the hypotheses to this file
         :param remove_unk: remove the UNK symbols from the output
         :param max_dev_size: maximum number of lines to read from dev files
-        :param script_dir: parameter of scoring functions
+        :param max_test_size: maximum number of lines to read from test files
+        :param early_stopping: parameter of the beam-search decoder: reduce beam-size by one each time a new
+            finished hypothesis (containing EOS symbol) is encountered.
+        :param raw_output: save raw decoder output (don't do post-processing like UNK deletion or subword
+            concatenation). The evaluation is still done with the post-processed output.
+        :param fix_edits: when predicting edit operations, pad shorter hypotheses with KEEP symbols.
         :return: scores of each corpus to evaluate
         """
         utils.log('starting decoding')
@@ -575,6 +588,7 @@ class TranslationModel:
 
 variable_mapping = [   # map old names to new names (for backward compatibility with old models)
     (r'/layer_norm_basic_lstm_cell', r'/basic_lstm_cell'),
+    (r'/U_a', r'/U_a/kernel'),
     (r'/forward_1/initial_state', r'/initial_state_fw'),
     (r'/backward_1/initial_state', r'/initial_state_bw'),
     (r'map_attns/Matrix', r'map_attns/matrix'),

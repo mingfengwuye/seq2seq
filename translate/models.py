@@ -35,6 +35,7 @@ class CellWrapper(RNNCell):
     the state_is_tuple=False behavior (soon to be deprecated).
     """
     def __init__(self, cell):
+        super(CellWrapper, self).__init__()
         self.cell = cell
         self.num_splits = len(cell.state_size) if isinstance(cell.state_size, tuple) else 1
 
@@ -58,13 +59,16 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
     Build multiple encoders according to the configuration in `encoders`, reading from `encoder_inputs`.
     The result is a list of the outputs produced by those encoders (for each time-step), and their final state.
 
-    :param encoder_inputs: list of tensors of shape (batch_size, input_length) (one tensor for each encoder)
+    :param encoder_inputs: list of tensors of shape (batch_size, input_length), one tensor for each encoder.
     :param encoders: list of encoder configurations
-    :param encoder_input_length: list of tensors of shape (batch_size) (one tensor for each encoder)
+    :param encoder_input_length: list of tensors of shape (batch_size,) (one tensor for each encoder)
     :param dropout: scalar tensor or None, specifying the keep probability (1 - dropout)
     :return:
-      encoder outputs: a list of tensors of shape (batch_size, input_length, encoder_cell_size)
+      encoder outputs: a list of tensors of shape (batch_size, input_length, encoder_cell_size), hidden states of the
+        encoders.
       encoder state: concatenation of the final states of all encoders, tensor of shape (batch_size, sum_of_state_sizes)
+      new_encoder_input_length: list of tensors of shape (batch_size,) with the true length of the encoder outputs.
+        May be different than `encoder_input_length` because of maxout strides, and time pooling.
     """
     encoder_states = []
     encoder_outputs = []
@@ -81,7 +85,8 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
         initializer = None
 
         device = '/cpu:0' if encoder.embeddings_on_cpu else None
-        with tf.device(device):
+        with tf.device(device):  # embeddings can take a very large amount of memory, so
+            # storing them in GPU memory can be impractical
             embedding = get_variable('embedding_{}'.format(encoder.name), shape=embedding_shape,
                                      initializer=initializer)
         embedding_variables.append(embedding)
@@ -239,18 +244,14 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
 
 
 def compute_energy(hidden, state, attn_size, **kwargs):
-    input_size = hidden.get_shape()[2].value
-
     y = dense(state, attn_size, use_bias=True, name='W_a')
     y = tf.expand_dims(y, axis=1)
-
-    k = get_variable('U_a', [input_size, attn_size])
-    f = tf.einsum('ijk,kl->ijl', hidden, k)
+    f = dense(hidden, attn_size, use_bias=False, name='U_a')
 
     v = get_variable('v_a', [attn_size])
     s = f + y
 
-    return tf.reduce_sum(v * tf.tanh(s), [2])
+    return tf.reduce_sum(v * tf.tanh(s), axis=2)
 
 
 def compute_energy_with_filter(hidden, state, prev_weights, attention_filters, attention_filter_length,
@@ -298,9 +299,10 @@ def global_attention(state, hidden_states, encoder, encoder_input_length, scope=
             e = compute_energy(hidden_states, state, attn_size=encoder.attn_size, **kwargs)
 
         e -= tf.reduce_max(e, axis=1, keep_dims=True)
-        mask = tf.sequence_mask(tf.cast(encoder_input_length, tf.int32), tf.shape(hidden_states)[1],
-                                dtype=tf.float32)
-        exp = tf.exp(e) * mask
+        mask = tf.sequence_mask(encoder_input_length, maxlen=tf.shape(hidden_states)[1], dtype=tf.float32)
+
+        T = encoder.attention_temperature or 1.0
+        exp = tf.exp(T * e) * mask
         weights = exp / tf.reduce_sum(exp, axis=-1, keep_dims=True)
         weighted_average = tf.reduce_sum(tf.expand_dims(weights, 2) * hidden_states, axis=1)
 
@@ -352,21 +354,21 @@ def local_attention(state, hidden_states, encoder, encoder_input_length, pos=Non
             # `pred_edits` scenario, where we know the aligned pos
             # when the windows size is non-zero, we concatenate consecutive encoder states
             # and map it to the right attention vector size.
-            weights = tf.to_float(tf.one_hot(tf.cast(tf.squeeze(pos, axis=1), tf.int32), depth=attn_length))
+            weights = tf.to_float(tf.one_hot(tf.to_int32(tf.squeeze(pos, axis=1)), depth=attn_length))
 
             weighted_average = []
             for offset in range(-encoder.attention_window_size, encoder.attention_window_size + 1):
                 pos_ = pos + offset
                 pos_ = tf.minimum(pos_, encoder_input_length - 1)
                 pos_ = tf.maximum(pos_, 0)  # TODO: when pos is < 0, use <S> or </S>
-                weights_ = tf.to_float(tf.one_hot(tf.cast(tf.squeeze(pos_, axis=1), tf.int32), depth=attn_length))
+                weights_ = tf.to_float(tf.one_hot(tf.to_int32(tf.squeeze(pos_, axis=1)), depth=attn_length))
                 weighted_average_ = tf.reduce_sum(tf.expand_dims(weights_, axis=2) * hidden_states, axis=1)
                 weighted_average.append(weighted_average_)
 
             weighted_average = tf.concat(weighted_average, axis=1)
             weighted_average = dense(weighted_average, encoder.attn_size)
         elif pos is not None:
-            weights = tf.to_float(tf.one_hot(tf.cast(tf.squeeze(pos, axis=1), tf.int32), depth=attn_length))
+            weights = tf.to_float(tf.one_hot(tf.to_int32(tf.squeeze(pos, axis=1)), depth=attn_length))
             weighted_average = tf.reduce_sum(tf.expand_dims(weights, axis=2) * hidden_states, axis=1)
         else:
             # Local attention of Luong et al. (http://arxiv.org/abs/1508.04025)
@@ -447,17 +449,25 @@ def multi_attention(state, hidden_states, encoders, encoder_input_length, pos=No
 def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
                       dropout=None, feed_previous=0.0, align_encoder_id=0, feed_argmax=True, **kwargs):
     """
-    :param targets: tensor of shape (output_length, batch_size)
+    :param decoder_inputs: int32 tensor of shape (batch_size, output_length)
     :param initial_state: initial state of the decoder (usually the final state of the encoder),
-      as a tensor of shape (batch_size, initial_state_size). This state is mapped to the
+      as a float32 tensor of shape (batch_size, initial_state_size). This state is mapped to the
       correct state size for the decoder.
     :param attention_states: list of tensors of shape (batch_size, input_length, encoder_cell_size),
-      usually the encoder outputs (one tensor for each encoder).
+      the hidden states of the encoder(s) (one tensor for each encoder).
     :param encoders: configuration of the encoders
     :param decoder: configuration of the decoder
+    :param encoder_input_length: list of int32 tensors of shape (batch_size,), tells for each encoder,
+     the true length of each sequence in the batch (sequences in the same batch are padded to all have the same
+     length).
     :param dropout: scalar tensor or None, specifying the keep probability (1 - dropout)
     :param feed_previous: scalar tensor corresponding to the probability to use previous decoder output
-      instead of the groundtruth as input for the decoder (1 when decoding, between 0 and 1 when training)
+      instead of the ground truth as input for the decoder (1 when decoding, between 0 and 1 when training)
+    :param feed_argmax: boolean tensor, when True the greedy decoder outputs the word with the highest
+    probability (argmax). When False, it samples a word from the probability distribution (softmax).
+    :param align_encoder_id: outputs attention weights for this encoder. Also used when predicting edit operations
+    (pred_edits), to specifify which encoder reads the sequence to post-edit (MT).
+
     :return:
       outputs of the decoder as a tensor of shape (batch_size, output_length, decoder_cell_size)
       attention weights as a tensor of shape (output_length, encoders, batch_size, input_length)
@@ -492,155 +502,152 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         else:
             return CellWrapper(MultiRNNCell(cells))
 
+    def get_attention(state, input_, prev_weights=None, pos=None):
+        prev_weights_ = [prev_weights if i == align_encoder_id else None for i in range(len(encoders))]
+        pos_ = None
+        if decoder.pred_edits:
+            pos_ = [pos if i == align_encoder_id else None for i in range(len(encoders))]
+        if decoder.attn_prev_word:
+            state = tf.concat([state, input_], axis=1)
+
+        parameters = dict(hidden_states=attention_states, encoder_input_length=encoder_input_length,
+                          encoders=encoders, aggregation_method=decoder.aggregation_method)
+        context, new_weights = multi_attention(state, pos=pos_, prev_weights=prev_weights_, **parameters)
+        return context, new_weights[align_encoder_id]
+
+    def get_next_state(state, input_, context, symbol=None):
+        if decoder.input_attention:
+            input_ = tf.concat([input_, context], axis=1)
+
+        try:
+            _, new_state = get_cell()(input_, state)
+        except ValueError:  # auto_reuse doesn't work with LSTM cells
+            _, new_state = get_cell(reuse=True)(input_, state)
+
+        if decoder.skip_update and decoder.pred_edits and symbol is not None:
+            is_del = tf.equal(symbol, utils.DEL_ID)
+            new_state = tf.where(is_del, state, new_state)
+
+        return new_state
+
+    def get_next_pos(pos, symbol, max_pos=None):
+        if not decoder.pred_edits:
+            return pos
+
+        is_keep = tf.equal(symbol, utils.KEEP_ID)
+        is_del = tf.equal(symbol, utils.DEL_ID)
+        is_not_ins = tf.logical_or(is_keep, is_del)
+        pos += tf.to_float(is_not_ins)
+        if max_pos is not None:
+            pos = tf.minimum(pos, tf.to_float(max_pos))
+        return pos
+
+    input_shape = tf.shape(decoder_inputs)
+    batch_size = input_shape[0]
+    time_steps = input_shape[1]
+
+    output_size = decoder.vocab_size
+
+    state_size = get_cell().state_size
+    cell_output_size = get_cell().output_size
+
+    time = tf.constant(0, dtype=tf.int32, name='time')
+
+    outputs = tf.TensorArray(dtype=tf.float32, size=time_steps)
+    samples = tf.TensorArray(dtype=tf.int64, size=time_steps)
+    inputs = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False).unstack(
+                            tf.to_int64(tf.transpose(decoder_inputs, perm=(1, 0))))
+    states = tf.TensorArray(dtype=tf.float32, size=time_steps)
+    weights = tf.TensorArray(dtype=tf.float32, size=time_steps)
+    attns = tf.TensorArray(dtype=tf.float32, size=time_steps)
+
+    initial_symbol = inputs.read(0)  # first symbol is BOS
+    initial_input = embed(initial_symbol)
+    initial_pos = tf.zeros([batch_size], tf.float32)
+    initial_weights = tf.zeros(tf.shape(attention_states[align_encoder_id])[:2])
+    #initial_context, _ = attention_(initial_input, pos=initial_pos, prev_weights=initial_weights)
+
+    if dropout is not None:
+        initial_state = tf.nn.dropout(initial_state, dropout)
+
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
-        attention_ = functools.partial(multi_attention, hidden_states=attention_states, encoders=encoders,
-                                       encoder_input_length=encoder_input_length,
-                                       aggregation_method=decoder.aggregation_method)
-        input_shape = tf.shape(decoder_inputs)
-        batch_size = input_shape[0]
-        time_steps = input_shape[1]
-
-        output_size = decoder.vocab_size
-
-        state_size = get_cell().state_size
-        cell_output_size = get_cell().output_size
-
-        if dropout is not None:
-            initial_state = tf.nn.dropout(initial_state, dropout)
-
         initial_state = dense(initial_state, state_size, use_bias=True, name='initial_state_projection',
                               activation=tf.nn.tanh)
 
-        time = tf.constant(0, dtype=tf.int32, name='time')
+    # `zero_state` means that the initial state is not the first state of our decoder (used to predict the
+    # first output word), but the state before it.
+    # Using the attention context as input to the decoder does not make sense in this case,
+    # as we would use the same context vector for state zero and state one.
+    if decoder.zero_state and not decoder.vanilla and not decoder.input_attention:
+        initial_state = get_next_state(initial_state, initial_input, context=None, symbol=None)
 
-        outputs = tf.TensorArray(dtype=tf.float32, size=time_steps)
-        samples = tf.TensorArray(dtype=tf.int64, size=time_steps)
-        inputs = tf.TensorArray(dtype=tf.int64, size=time_steps, clear_after_read=False).unstack(
-                                tf.cast(tf.transpose(decoder_inputs, perm=(1, 0)), tf.int64))
-        states = tf.TensorArray(dtype=tf.float32, size=time_steps)
-        weights = tf.TensorArray(dtype=tf.float32, size=time_steps)
-        attns = tf.TensorArray(dtype=tf.float32, size=time_steps)
+    initial_data = tf.concat([initial_state, tf.expand_dims(initial_pos, axis=1), initial_weights], axis=1)
+    initial_state, initial_pos, initial_weights = tf.split(initial_data, [state_size, 1, -1], axis=1)
+    initial_state.set_shape([None, state_size])
+    initial_pos = initial_pos[:, 0]
 
-        initial_symbol = inputs.read(0)    # first symbol is BOS
-        initial_input = embed(initial_symbol)
-        initial_pos = tf.zeros([batch_size], tf.float32)
-        initial_weights = tf.zeros(tf.shape(attention_states[align_encoder_id])[:2])
+    def _time_step(time, input_, input_symbol, pos, state, outputs, states, weights, attns, prev_weights, samples):
+        # FIXME: use LSTM state or LSTM output
+        context, new_weights = get_attention(state, input_, pos, prev_weights)
 
-        initial_data = tf.concat([initial_state, tf.expand_dims(initial_pos, axis=1), initial_weights], axis=1)
-        initial_state, initial_pos, initial_weights = tf.split(initial_data, [state_size, 1, -1], axis=1)
-        initial_state.set_shape([None, state_size])
-        initial_pos = initial_pos[:, 0]
+        attns = attns.write(time, context)
+        weights = weights.write(time, new_weights)
 
-        def get_next_state(x, state, symbol=None, scope=None):
-            def cell_reuse():
-                try:
-                    return get_cell()(x, state)
-                except ValueError:  # auto_reuse doesn't work with LSTM cells
-                    return get_cell(reuse=True)(x, state)
+        if decoder.vanilla:
+            state = get_next_state(state, input_, context, input_symbol)
 
-            if scope is not None:
-                with tf.variable_scope(scope):
-                    new_output, new_state = cell_reuse()
-            else:
-                new_output, new_state = cell_reuse()
+        states = states.write(time, state)
 
-            if decoder.skip_update and decoder.pred_edits and symbol is not None:
-                is_del = tf.equal(symbol, utils.DEL_ID)
-                new_state = tf.where(is_del, state, new_state)
+        projection_input = [state] if decoder.use_lstm_state else [state[:,-cell_output_size:]]
+        if decoder.use_previous_word:
+            projection_input.append(input_)
+        projection_input.append(context)
 
-            return new_output, new_state
+        output_ = tf.concat(projection_input, axis=1)
 
-        def get_next_pos(pos, symbol, max_pos=None):
-            if not decoder.pred_edits:
-                return pos
+        if decoder.maxout:
+            output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
+            output_ = tf.nn.pool(tf.expand_dims(output_, axis=2), window_shape=[2], pooling_type='MAX',
+                                padding='SAME', strides=[2])
+            output_ = tf.squeeze(output_, axis=2)
 
-            is_keep = tf.equal(symbol, utils.KEEP_ID)
-            is_del = tf.equal(symbol, utils.DEL_ID)
-            is_not_ins = tf.logical_or(is_keep, is_del)
-            pos += tf.to_float(is_not_ins)
-            if max_pos is not None:
-                pos = tf.minimum(pos, tf.to_float(max_pos))
-            return pos
+        if decoder.output_extra_proj:
+            # intermediate projection to embedding size (before projecting to vocabulary size)
+            # this is useful to reduce the number of parameters, and
+            # to use the output embeddings for output projection (tie_embeddings parameter)
+            output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
 
-        def _time_step(time, input_, input_symbol, pos, state, outputs, states, weights, attns, prev_weights, samples):
-            attn_input = state
-            if decoder.attn_prev_word:
-                attn_input = tf.concat([attn_input, input_], axis=1)
+        if decoder.output_extra_proj and decoder.tie_embeddings:
+            bias = get_variable('softmax1/bias', shape=[decoder.vocab_size])
+            output_ = tf.matmul(output_, tf.transpose(embedding)) + bias
+        else:
+            output_ = dense(output_, output_size, use_bias=True, name='softmax1')
 
-            if decoder.pred_edits:
-                pos_ = [pos if i == align_encoder_id else None for i in range(len(encoders))]
-            else:
-                pos_ = None
+        outputs = outputs.write(time, output_)
 
-            prev_weights_ = [prev_weights if i == align_encoder_id else None for i in range(len(encoders))]  # FIXME
+        argmax = lambda: tf.argmax(output_, 1)
+        target = lambda: inputs.read(time + 1)
+        softmax = lambda: tf.squeeze(tf.multinomial(tf.log(tf.nn.softmax(output_)), num_samples=1),
+                                     axis=1)
 
-            # FIXME: use LSTM state or LSTM output
-            context, new_weights = attention_(attn_input, pos=pos_, prev_weights=prev_weights_)
-            attns = attns.write(time, context)
+        predicted_symbol = tf.case([
+            (tf.logical_and(time < time_steps - 1, tf.random_uniform([]) >= feed_previous), target),
+            (tf.logical_not(feed_argmax), softmax)],
+            default=argmax)   # default case is useful for beam-search
+        predicted_symbol.set_shape([None])
+        predicted_symbol = tf.stop_gradient(predicted_symbol)
+        samples = samples.write(time, predicted_symbol)
 
-            new_weights = new_weights[align_encoder_id]
-            weights = weights.write(time, new_weights)
+        input_ = embed(predicted_symbol)
+        pos = get_next_pos(pos, predicted_symbol, encoder_input_length[align_encoder_id])
 
-            rnn_input = input_
-            if decoder.vanilla:
-                if decoder.input_attention:
-                    rnn_input = tf.concat([rnn_input, context], axis=1)
-                rnn_output, state = get_next_state(rnn_input, state, input_symbol)
+        if not decoder.vanilla:
+            state = get_next_state(state, input_, context, predicted_symbol)
 
-            states = states.write(time, state)
+        return (time + 1, input_, predicted_symbol, pos, state, outputs, states, weights, attns, new_weights,
+                samples)
 
-            projection_input = [state] if decoder.use_lstm_state else [state[:,-cell_output_size:]]
-            if decoder.use_previous_word:
-                projection_input.append(input_)
-            projection_input.append(context)
-
-            output_ = tf.concat(projection_input, axis=1)
-
-            if decoder.maxout:
-                output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
-                output_ = tf.nn.pool(tf.expand_dims(output_, axis=2), window_shape=[2], pooling_type='MAX',
-                                    padding='SAME', strides=[2])
-                output_ = tf.squeeze(output_, axis=2)
-
-            if decoder.output_extra_proj:
-                # intermediate projection to embedding size (before projecting to vocabulary size)
-                # this is useful to reduce the number of parameters, and
-                # to use the output embeddings for output projection (tie_embeddings parameter)
-                output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
-
-            if decoder.output_extra_proj and decoder.tie_embeddings:
-                bias = get_variable('softmax1/bias', shape=[decoder.vocab_size])
-                output_ = tf.matmul(output_, tf.transpose(embedding)) + bias
-            else:
-                output_ = dense(output_, output_size, use_bias=True, name='softmax1')
-
-            outputs = outputs.write(time, output_)
-
-            argmax = lambda: tf.argmax(output_, 1)
-            target = lambda: inputs.read(time + 1)
-            softmax = lambda: tf.squeeze(tf.multinomial(tf.log(tf.nn.softmax(output_)), num_samples=1),
-                                         axis=1)
-
-            predicted_symbol = tf.case([
-                (tf.logical_and(time < time_steps - 1, tf.random_uniform([]) >= feed_previous), target),
-                (tf.logical_not(feed_argmax), softmax)],
-                default=argmax)   # default case is useful for beam-search
-            predicted_symbol.set_shape([None])
-            predicted_symbol = tf.stop_gradient(predicted_symbol)
-            samples = samples.write(time, predicted_symbol)
-
-            input_ = embed(predicted_symbol)
-            pos = get_next_pos(pos, predicted_symbol, encoder_input_length[align_encoder_id])
-
-            if not decoder.vanilla:
-                rnn_input = input_
-                if decoder.input_attention:
-                    rnn_input = tf.concat([rnn_input, context], axis=1)
-                rnn_output, state = get_next_state(rnn_input, state, predicted_symbol)
-
-            return (time + 1, input_, predicted_symbol, pos, state, outputs, states, weights, attns, new_weights,
-                    samples)
-
+    with tf.variable_scope('decoder_{}'.format(decoder.name)):
         _, _, _, new_pos, new_state, outputs, states, weights, attns, new_weights, samples = tf.while_loop(
             cond=lambda time, *_: time < time_steps,
             body=_time_step,
@@ -649,23 +656,23 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             parallel_iterations=decoder.parallel_iterations,
             swap_memory=decoder.swap_memory)
 
-        outputs = outputs.stack()
-        weights = weights.stack()  # batch_size, encoders, output time, input time
-        states = states.stack()
-        attns = attns.stack()
-        samples = samples.stack()
+    outputs = outputs.stack()
+    weights = weights.stack()  # batch_size, encoders, output time, input time
+    states = states.stack()
+    attns = attns.stack()
+    samples = samples.stack()
 
-        new_data = tf.concat([new_state, tf.expand_dims(new_pos, axis=1), new_weights], axis=1)
-        beam_tensors = utils.AttrDict(data=initial_data, new_data=new_data)
+    new_data = tf.concat([new_state, tf.expand_dims(new_pos, axis=1), new_weights], axis=1)
+    beam_tensors = utils.AttrDict(data=initial_data, new_data=new_data)
 
-        # put batch_size as first dimension
-        outputs = tf.transpose(outputs, perm=(1, 0, 2))
-        weights = tf.transpose(weights[1:], perm=(1, 0, 2))
-        states = tf.transpose(states, perm=(1, 0, 2))
-        attns = tf.transpose(attns, perm=(1, 0, 2))
-        samples = tf.transpose(samples)
+    # put batch_size as first dimension
+    outputs = tf.transpose(outputs, perm=(1, 0, 2))
+    weights = tf.transpose(weights[1:], perm=(1, 0, 2))
+    states = tf.transpose(states, perm=(1, 0, 2))
+    attns = tf.transpose(attns, perm=(1, 0, 2))
+    samples = tf.transpose(samples)
 
-        return outputs, weights, states, attns, beam_tensors, samples
+    return outputs, weights, states, attns, beam_tensors, samples
 
 
 def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_previous, align_encoder_id=0,
@@ -862,7 +869,7 @@ def sequence_loss(logits, targets, weights, average_across_timesteps=False, aver
 
 def get_weights(sequence, eos_id, include_first_eos=True):
     weights = (1.0 - tf.minimum(
-        tf.cumsum(tf.cast(tf.equal(sequence, eos_id), tf.float32), axis=1), 1.0))
+        tf.cumsum(tf.to_float(tf.equal(sequence, eos_id)), axis=1), 1.0))
 
     if include_first_eos:
         weights = weights[:,:-1]

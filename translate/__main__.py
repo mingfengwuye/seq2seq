@@ -207,9 +207,6 @@ def main(args=None):
             # loads last checkpoint, unless `reset` is true
             model.initialize(sess, **config)
 
-        # Inspect variables:
-        # tf.get_variable_scope().reuse_variables()
-        # import pdb; pdb.set_trace()
         if args.decode is not None:
             model.decode(sess, **config)
         elif args.eval:
