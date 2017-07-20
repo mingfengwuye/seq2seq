@@ -3,7 +3,7 @@ Attention-based sequence to sequence learning
 
 ## Dependencies
 
-* [TensorFlow for Python 3](https://www.tensorflow.org/get_started/os_setup.html)
+* [TensorFlow 1.2 for Python 3](https://www.tensorflow.org/get_started/os_setup.html)
 * YAML and Matplotlib modules for Python 3: `sudo apt-get install python3-yaml python3-matplotlib`
 
 
@@ -12,28 +12,27 @@ Attention-based sequence to sequence learning
 
 Train a model (CONFIG is a YAML configuration file, such as `config/default.yaml`):
 
-    python3 -m translate CONFIG --train -v 
+    ./seq2seq.sh CONFIG --train -v 
 
 
 Translate text using an existing model:
 
-    python3 -m translate CONFIG --decode FILE_TO_TRANSLATE --output OUTPUT_FILE
+    ./seq2seq.sh CONFIG --decode FILE_TO_TRANSLATE --output OUTPUT_FILE
 or for interactive decoding:
 
-    python3 -m translate CONFIG --decode
+    ./seq2seq.sh CONFIG --decode
 
 
 Example model:
 
     experiments/WMT14/download.sh    # download WMT14 data into data/raw
     experiments/WMT14/prepare.sh     # preprocess the data, and copy the files to experiments/WMT14/data
-    python3 -m translate experiments/WMT14/baseline.yaml --train -v   # train a baseline model on this data
+    ./seq2seq.sh experiments/WMT14/baseline.yaml --train -v   # train a baseline model on this data
 
 
 ## Features
 * **YAML configuration files**
 * **Beam-search decoder**
-* **External language model**
 * **Ensemble decoding**
 * **Multiple encoders**
 * **Hierarchical encoder**
@@ -47,10 +46,7 @@ Example model:
 * **Subwords training and decoding**
 * **Input binary features instead of text**
 * **Pre-processing script:** we provide a fully-featured Python script for data pre-processing (vocabulary creation, lowercasing, tokenizing, splitting, etc.)
-* **Dynamic RNNs:** we use symbolic loops instead of statically unrolled RNNs. This means faster model creation, and that we don't need buckets
-
-## Speech translation
-* To replicate the results from [arxiv.org/abs/1612.01744](https://arxiv.org/abs/1612.01744), you should look at the branch `speech`. The default branch `baseline` implements a different model, from [arxiv.org/abs/1409.0473](https://arxiv.org/abs/1409.0473).
+* **Dynamic RNNs:** we use symbolic loops instead of statically unrolled RNNs. This means that we don't mean to manually configure bucket sizes, and that model creation is much faster.
 
 ## Credits
 
