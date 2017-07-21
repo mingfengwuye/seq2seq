@@ -50,6 +50,6 @@ Example model:
 
 ## Credits
 
-* This project is based on [TensorFlow's reference implementation](https://github.com/tensorflow/tensorflow/tree/master/tensorflow/models/rnn)
+* This project is based on [TensorFlow's reference implementation](https://www.tensorflow.org/tutorials/seq2seq)
 * We include some of the pre-processing scripts from [Moses](http://www.statmt.org/moses/)
 * The scripts for subword units come from [github.com/rsennrich/subword-nmt](https://github.com/rsennrich/subword-nmt)

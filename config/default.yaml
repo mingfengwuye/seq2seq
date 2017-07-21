@@ -46,6 +46,8 @@ use_baseline: True       # train a reward baseline for reinforce
 baseline_steps: 0        # pre-training steps for the reward baseline
 baseline_optimizer: adam       # if None, use the same one as the main model
 baseline_learning_rate: 0.001  # likewise
+baseline_layers: null      # TODO
+baseline_activation: null  # default: linear
 
 # model (each one of these settings can be defined specifically in 'encoders' and 'decoders', or generally here)
 cell_size: 1000          # size of the RNN cells

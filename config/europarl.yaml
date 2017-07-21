@@ -1,4 +1,4 @@
-label: 'news'
+label: 'europarl'
 description: "medium-sized character-level NMT model"
 
 dropout_rate: 0.2
