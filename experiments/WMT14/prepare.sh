@@ -26,5 +26,11 @@ ln -s test.fr test.char.fr
 
 cd ${cur_dir}
 
-scripts/prepare-data.py ${data_dir}/train.char en fr ${data_dir} --mode vocab --vocab-size 0 --character-level \
+scripts/prepare-data.py ${data_dir}/train.char en fr ${data_dir} --mode vocab --character-level \
 --vocab-prefix vocab.char --vocab-size 200
+
+scripts/prepare-data.py ${raw_data}/WMT14.fr-en fr en ${data_dir} --no-tokenize \
+--output train.subwords --dev-prefix dev.subwords --test-prefix test.subwords --vocab-prefix vocab.subwords \
+--dev-corpus ${raw_data}/ntst1213.fr-en \
+--test-corpus ${raw_data}/ntst14.fr-en \
+--vocab-size 30000 --subwords --shuffle --seed 1234

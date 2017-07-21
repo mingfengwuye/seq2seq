@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
-model_dir=experiments/btec_speech
+model_dir=experiments/BTEC_speech
 ensemble_dir=${model_dir}/ensemble
 
 mkdir -p ${ensemble_dir}
 
 gpu_id=0
-params="${model_dir}/baseline-multi.yaml --train -v --purge --raw-output --gpu-id ${gpu_id} "
+params="${model_dir}/baseline.yaml --train -v --purge --raw-output --gpu-id ${gpu_id} "
 
 ./seq2seq.sh ${params} --model-dir ${ensemble_dir}/model_1
 ./seq2seq.sh ${params} --model-dir ${ensemble_dir}/model_2

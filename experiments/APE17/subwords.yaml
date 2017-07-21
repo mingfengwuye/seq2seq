@@ -10,8 +10,8 @@ use_lstm: True
 
 weight_scale: 0.1
 
-data_dir: experiments/WMT17/data_2017
-model_dir: experiments/WMT17/subwords
+data_dir: experiments/APE17/data_2017
+model_dir: experiments/APE17/models/subwords
 
 batch_size: 32
 

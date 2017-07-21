@@ -588,7 +588,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
     def _time_step(time, input_, input_symbol, pos, state, outputs, states, weights, attns, prev_weights, samples):
         # FIXME: use LSTM state or LSTM output
-        context, new_weights = get_attention(state, input_, pos, prev_weights)
+        context, new_weights = get_attention(state, input_, pos=pos, prev_weights=prev_weights)
 
         attns = attns.write(time, context)
         weights = weights.write(time, new_weights)

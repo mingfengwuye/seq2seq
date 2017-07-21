@@ -179,7 +179,7 @@ def main(args=None):
     for var in tf.global_variables():
         utils.log('  {} {}'.format(var.name, var.get_shape()))
 
-        if not var.name.startswith('gradients'):
+        if not var.name.startswith('gradients'):  # not counting parameters created by training algorithm (e.g. Adam)
             v = 1
             for d in var.get_shape():
                 v *= d.value

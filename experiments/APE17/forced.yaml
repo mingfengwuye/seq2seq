@@ -10,8 +10,8 @@ use_lstm: True
 
 weight_scale: 0.1
 
-data_dir: experiments/WMT17/data_2017
-model_dir: experiments/WMT17/forced
+data_dir: experiments/APE17/data_2017
+model_dir: experiments/APE17/models/forced
 
 batch_size: 32
 
@@ -21,8 +21,8 @@ learning_rate_decay_factor: 0.95
 decay_every_n_epoch: 1
 decay_after_n_epoch: 3
 
-steps_per_checkpoint: 400
-steps_per_eval: 400
+steps_per_checkpoint: 1000
+steps_per_eval: 1000
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
-raw_data_dir=data/raw
+raw_data=data/raw
 
-mkdir -p ${raw_data_dir}
+mkdir -p ${raw_data}
 cur_dir=`pwd`
-cd ${raw_data_dir}
+cd ${raw_data}
 
 wget "http://www-lium.univ-lemans.fr/~schwenk/nnmt-shared-task/data/bitexts.tgz"
 tar xzf bitexts.tgz

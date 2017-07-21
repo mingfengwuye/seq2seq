@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-raw_data=experiments/APE16/raw_data
-data_dir=experiments/WMT17/data_2017
+raw_data=experiments/APE17/raw_data
+data_dir=experiments/APE17/data_2017
 
 rm -rf ${data_dir}
 mkdir -p ${data_dir}

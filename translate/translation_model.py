@@ -21,6 +21,7 @@ class TranslationModel:
         self.batch_size = batch_size
         self.character_level = {}
         self.binary = []
+
         for encoder_or_decoder in encoders + decoders:
             encoder_or_decoder.ext = encoder_or_decoder.ext or encoder_or_decoder.name
             self.character_level[encoder_or_decoder.ext] = encoder_or_decoder.character_level
@@ -34,6 +35,9 @@ class TranslationModel:
         self.extensions = self.src_ext + self.trg_ext
 
         self.ref_ext = ref_ext
+        if self.ref_ext is not None:
+            self.binary.append(False)
+
         self.pred_edits = pred_edits
         self.dual_output = dual_output
 
@@ -301,6 +305,7 @@ class TranslationModel:
                 extensions.append(self.ref_ext)
 
             lines = list(utils.read_lines(filenames_, binary=self.binary))
+
             if on_dev and max_dev_size:
                 lines = lines[:max_dev_size]
             elif not on_dev and max_test_size:
