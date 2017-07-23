@@ -53,6 +53,11 @@ class CellWrapper(RNNCell):
         return new_h, tf.concat(new_state, 1)
 
 
+class ConditionalCellWrapper(RNNCell):
+    def __init__(self, cell1, cell2):
+        super(ConditionalCellWrapper, self).__init__()
+
+
 def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=None, dropout=None,
                   **kwargs):
     """
@@ -472,7 +477,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
       outputs of the decoder as a tensor of shape (batch_size, output_length, decoder_cell_size)
       attention weights as a tensor of shape (output_length, encoders, batch_size, input_length)
     """
-    assert not decoder.maxout or decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'
+    assert not decoder.output_maxout or decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'
 
     embedding_shape = [decoder.vocab_size, decoder.embedding_size]
 
@@ -598,14 +603,15 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
         states = states.write(time, state)
 
-        projection_input = [state] if decoder.use_lstm_state else [state[:,-cell_output_size:]]
+        rnn_output = state[:, -cell_output_size:]
+        projection_input = [state] if decoder.use_lstm_state else [rnn_output]
         if decoder.use_previous_word:
             projection_input.append(input_)
         projection_input.append(context)
 
         output_ = tf.concat(projection_input, axis=1)
 
-        if decoder.maxout:
+        if decoder.output_maxout:
             output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
             output_ = tf.nn.pool(tf.expand_dims(output_, axis=2), window_shape=[2], pooling_type='MAX',
                                 padding='SAME', strides=[2])

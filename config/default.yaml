@@ -18,7 +18,6 @@ min_learning_rate: 0.000001    # stop training when learning rate is smaller tha
 
 # training parameters
 max_gradient_norm: 5.0   # clip gradients to this norm (prevents exploding gradient)
-dropout_rate: 0.0        # dropout rate applied to the RNN inputs (after embedding), and to the decoder's initial state
 steps_per_checkpoint: 1000   # number of SGD updates between each checkpoint
 steps_per_eval: 1000     # number of SGD updates between each BLEU eval (on dev set)
 eval_burn_in: 0          # minimum number of updates before starting BLEU eval
@@ -27,6 +26,13 @@ max_epochs: 0            # maximum number of epochs before stopping
 keep_best: 4             # number of best checkpoints to keep (based on BLEU score on dev set)
 feed_previous: 0.0       # randomly feed prev output instead of ground truth to decoder during training ([0,1] proba)
 optimizer: adam          # which training algorithm to use ('sgd', 'adadelta', or 'adam')
+
+# dropout
+pervasive_dropout: False   # TODO
+recurrent_dropout: 0.0     # TODO
+initial_state_dropout: 0.0 # TODO
+embedding_dropout: 0.0     # TODO
+dropout_rate: 0.0  # dropout rate applied to the RNN inputs (after embedding), and to the decoder's initial state
 
 # initialization parameters
 weight_scale: null       # if null, initialize weights to TF defaults, otherwise to normal distribution with this stdev
@@ -65,7 +71,6 @@ attention_window_size: 0 # window size for local attention mechanism
 convolutions: null       # list of convolutions to perform on the input sequence
 maxout_stride: null      # maxout layer with this stride on the input sequence (after convolutions)
 trainable_initial_states: True  # whether the initial states of the encoder should be trainable parameters
-concat_last_states: False
 bidir_projection: False  # project bidirectional encoder states to cell_size (or just keep the concatenation)
 time_pooling: null       # perform time pooling (skip states) between the layers of the encoder (list of layers - 1 ratios)
 pooling_avg: True        # average or skip consecutive states
@@ -74,19 +79,23 @@ attention_filters: 0
 attention_filter_length: 0
 input_layers: null       # list of fully connected layer sizes, applied before the encoder
 attention_temperature: 1.0  # 1.0: true softmax (low values: uniform distribution, high values: argmax)
+final_state: default        # last (backward state), concat, average   # TODO
 
 # decoder settings
 tie_embeddings: False    # use transpose of the embedding matrix for output projection (requires 'output_extra_proj')
 output_extra_proj: True  # project decoder output to embedding size before projecting to vocab size
 state_zero: False        # first decoder state is the successor of the initial state (and not the initial state itself)
 use_lstm_state: True     # use LSTM state instead of LSTM output for next word prediction
-maxout: True             # parameters of the decoder
 input_attention: True    # use attention as input to the LSTM
 use_previous_word: True  # use previous word when predicting a new word
 vanilla: False           # use a vanilla decoder (Bahdanau et al.), i.e. do state transition before next word prediction
 attn_prev_word: False    # use the previous word in the attention model
 softmax_temperature: 1.0 # TODO: temperature of the output softmax
 pred_edits: False        # output is a sequence of edits, apply those edits before decoding/evaluating
+conditional_rnn: False   # TODO
+output_maxout: True      # use a maxout layer just before the vocabulary projection and softmax
+deep_output: False       # add a non-linear layer just before softmax  # TODO
+
 
 # data
 max_train_size: 0        # maximum size of the training data (0 for unlimited)
@@ -109,6 +118,7 @@ output: null             # output file for decoding (writes to standard output b
 len_normalization: 1.0   # length normalization coefficient used in beam-search decoder
 early_stopping: True     # reduce beam-size each time a finished hypothesis is encountered (affects decoding speed)
 raw_output: False
+average_checkpoints: False  # like ensemble, but instead of averaging the log-probabilities, average all parameters # TODO
 
 # general
 gpu_id: 0                # index of the GPU to use (starts at zero)
