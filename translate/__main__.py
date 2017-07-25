@@ -36,7 +36,7 @@ parser.add_argument('--no-gpu', action='store_true', help='run on CPU')
 # Decoding options (to avoid having to edit the config file)
 parser.add_argument('--beam-size', type=int)
 parser.add_argument('--ensemble', action='store_const', const=True)
-parser.add_argument('--load', nargs='+')
+parser.add_argument('--checkpoints', nargs='+')
 parser.add_argument('--output')
 parser.add_argument('--max-steps', type=int)
 parser.add_argument('--max-test-size', type=int)
@@ -195,12 +195,12 @@ def main(args=None):
 
         if config.ensemble and (args.eval or args.decode is not None):
             # create one session for each model in the ensemble
-            sess = [tf.Session() for _ in config.load]
-            for sess_, checkpoint in zip(sess, config.load):
+            sess = [tf.Session() for _ in config.checkpoints]
+            for sess_, checkpoint in zip(sess, config.checkpoints):
                 model.initialize(sess_, [checkpoint])
-        elif (not config.load and (args.eval or args.decode is not None or args.align) and
+        elif (not config.checkpoints and (args.eval or args.decode is not None or args.align) and
              (os.path.isfile(best_checkpoint + '.index') or os.path.isfile(best_checkpoint + '.index'))):
-            # in decoding and evaluation mode, unless specified otherwise (by `load`),
+            # in decoding and evaluation mode, unless specified otherwise (by `checkpoints`),
             # try to load the best checkpoint)
             model.initialize(sess, [best_checkpoint])
         else:

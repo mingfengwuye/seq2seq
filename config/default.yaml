@@ -107,7 +107,7 @@ train_prefix: train      # name of the training corpus
 script_dir: scripts      # directory where the scripts are kepts (in particular the scoring scripts)
 dev_prefix: [dev]        # names of the development corpora
 vocab_prefix: vocab      # name of the vocabulary files
-load: []                 # list of checkpoints to load (in this specific order) after main checkpoint
+checkpoints: []          # list of checkpoints to load (in this specific order) after main checkpoint
 
 # decoding
 score_function: corpus_scores # name of the main scoring function (used for selecting models)

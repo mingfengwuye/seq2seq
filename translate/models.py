@@ -563,19 +563,22 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
         output_ = tf.concat(projection_input, axis=1)
 
-        if decoder.pred_maxout_layer:
-            output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
-            output_ = tf.nn.pool(tf.expand_dims(output_, axis=2), window_shape=[2], pooling_type='MAX',
-                                padding='SAME', strides=[2])
-            output_ = tf.squeeze(output_, axis=2)
+        if decoder.pred_deep_layer:
+            output_ = dense(output_, decoder.embedding_size, activation=tf.tanh, use_bias=True, name='deep_output')
+        else:
+            if decoder.pred_maxout_layer:
+                output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
+                output_ = tf.nn.pool(tf.expand_dims(output_, axis=2), window_shape=[2], pooling_type='MAX',
+                                    padding='SAME', strides=[2])
+                output_ = tf.squeeze(output_, axis=2)
 
-        if decoder.pred_embed_proj:
-            # intermediate projection to embedding size (before projecting to vocabulary size)
-            # this is useful to reduce the number of parameters, and
-            # to use the output embeddings for output projection (tie_embeddings parameter)
-            output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
+            if decoder.pred_embed_proj:
+                # intermediate projection to embedding size (before projecting to vocabulary size)
+                # this is useful to reduce the number of parameters, and
+                # to use the output embeddings for output projection (tie_embeddings parameter)
+                output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
 
-        if decoder.pred_embed_proj and decoder.tie_embeddings:
+        if decoder.tie_embeddings and (decoder.pred_embed_proj or decoder.pred_deep_layer):
             bias = get_variable('softmax1/bias', shape=[decoder.vocab_size])
             output_ = tf.matmul(output_, tf.transpose(embedding)) + bias
         else:
@@ -624,13 +627,13 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     def _time_step(time, input_, input_symbol, pos, state, outputs, states, weights, attns, prev_weights, samples):
         if decoder.conditional_rnn:
             with tf.variable_scope('conditional_1'):
-                state = update(input_, state)
+                state = update(state, input_)
 
         context, new_weights = look(state, input_, pos=pos, prev_weights=prev_weights)
 
         if decoder.conditional_rnn:
             with tf.variable_scope('conditional_2'):
-                state = update(context, state)
+                state = update(state, context)
         elif not decoder.generate_first:
             state = update(state, input_, context, input_symbol)
 

@@ -25,15 +25,15 @@ learning_rate_decay_factor: 0.9
 decay_every_n_epoch: 1
 decay_after_n_epoch: 21
 
-steps_per_checkpoint: 200
-steps_per_eval: 200
+steps_per_checkpoint: 500
+steps_per_eval: 500
 score_function: corpus_scores
 
 max_gradient_norm: 1.0
 batch_mode: 'standard'
 read_ahead: 10
 max_len: 25
-max_dev_size: 100
+#max_dev_size: 100
 
 encoders:
   - name: fr
@@ -44,4 +44,5 @@ decoders:
 
 final_state: average
 conditional_rnn: True
-generate_first: False
+pred_deep_layer: True
+max_gradient_norm: 1.0

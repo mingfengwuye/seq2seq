@@ -555,10 +555,10 @@ class TranslationModel:
             for score_, step_ in scores:
                 f.write('{:.2f} {}\n'.format(score_, step_))
 
-    def initialize(self, sess, load=None, reset=False, reset_learning_rate=False, max_to_keep=1,
+    def initialize(self, sess, checkpoints=None, reset=False, reset_learning_rate=False, max_to_keep=1,
                    keep_every_n_hours=0, **kwargs):
         """
-        :param load: list of checkpoints to load (instead of latest checkpoint)
+        :param checkpoints: list of checkpoints to load (instead of latest checkpoint)
         :param reset: don't load latest checkpoint, reset learning rate and global step
         :param reset_learning_rate: reset the learning rate to its initial value
         :param max_to_keep: keep this many latest checkpoints at all times
@@ -578,8 +578,8 @@ class TranslationModel:
         if reset:
             blacklist.append('global_step')
 
-        if load:  # load partial checkpoints
-            for checkpoint in load:  # checkpoint files to load
+        if checkpoints:  # load partial checkpoints
+            for checkpoint in checkpoints:  # checkpoint files to load
                 load_checkpoint(sess, None, checkpoint, blacklist=blacklist)
         elif not reset:
             load_checkpoint(sess, self.checkpoint_dir, blacklist=blacklist)
