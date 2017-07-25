@@ -40,3 +40,8 @@ encoders:
 
 decoders:
   - name: en
+
+
+final_state: average
+conditional_rnn: True
+generate_first: False

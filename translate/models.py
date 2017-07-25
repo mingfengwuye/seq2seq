@@ -182,7 +182,6 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
             parameters = dict(
                 inputs=encoder_inputs_, sequence_length=encoder_input_length_,
                 dtype=tf.float32, parallel_iterations=encoder.parallel_iterations,
-                time_pooling=encoder.time_pooling, pooling_avg=encoder.pooling_avg
             )
 
             state_size = get_cell().state_size
@@ -190,7 +189,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                 state_size = state_size.c + state_size.h
 
             def get_initial_state(name='initial_state'):
-                if encoder.trainable_initial_states:
+                if encoder.train_initial_states:
                     initial_state = get_variable(name, initializer=tf.zeros(state_size))
                     return tf.tile(tf.expand_dims(initial_state, axis=0), [batch_size, 1])
                 else:
@@ -202,6 +201,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                     cells_bw=[get_cell(reuse=reuse) for _ in range(encoder.layers)],
                     initial_states_fw=[get_initial_state('initial_state_fw')] * encoder.layers,
                     initial_states_bw=[get_initial_state('initial_state_bw')] * encoder.layers,
+                    time_pooling=encoder.time_pooling, pooling_avg=encoder.pooling_avg,
                     **parameters)
 
                 try:
@@ -209,9 +209,13 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                 except ValueError:   # Multi-task scenario where we're reusing the same RNN parameters
                     encoder_outputs_, _, backward_states = rnn(reuse=True)
 
-                if encoder.concat_last_states:
-                    encoder_state_ = tf.concat(backward_states, axis=1)  # concats last states of all layers
-                else:  # uses output, not state (which are different for LSTMs), and only the last layer's
+                if encoder.final_state == 'concat_last':
+                    # concats last states of all backward layers (full LSTM states)
+                    encoder_state_ = tf.concat(backward_states, axis=1)
+                elif encoder.final_state == 'average':
+                    # average bidir hidden states (concatenation of backward and forward)
+                    encoder_state_ = tf.reduce_mean(encoder_outputs_, axis=1)
+                else:  # use last backward hidden state
                     encoder_state_ = encoder_outputs_[:, 0, encoder.cell_size:]  # first backward output
 
                 if encoder.bidir_projection:
@@ -219,9 +223,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                                              name='bidir_projection')
 
             else:
-                if encoder.concat_last_states:
-                    raise NotImplementedError
-                if encoder.time_pooling:
+                if encoder.time_pooling or encoder.final_state == 'concat_last':
                     raise NotImplementedError
 
                 if encoder.layers > 1:
@@ -232,8 +234,11 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                     initial_state = get_initial_state()
 
                 encoder_outputs_, _ = auto_reuse(tf.nn.dynamic_rnn)(cell=cell, initial_state=initial_state,
-                                                                    **parameters)
-                encoder_state_ = encoder_outputs_[:, -1, :]
+                                                                             **parameters)
+                if encoder.final_state == 'average':
+                    encoder_state_ = tf.reduce_mean(encoder_outputs_, axis=1)
+                else:
+                    encoder_state_ = encoder_outputs_[:, -1, :]
 
             encoder_outputs.append(encoder_outputs_)
             encoder_states.append(encoder_state_)
@@ -259,7 +264,7 @@ def compute_energy(hidden, state, attn_size, **kwargs):
     return tf.reduce_sum(v * tf.tanh(s), axis=2)
 
 
-def compute_energy_with_filter(hidden, state, prev_weights, attention_filters, attention_filter_length,
+def compute_energy_with_filter(hidden, state, prev_weights, attn_filters, attn_filter_length,
                                **kwargs):
     hidden = tf.expand_dims(hidden, 2)
 
@@ -267,12 +272,12 @@ def compute_energy_with_filter(hidden, state, prev_weights, attention_filters, a
     time_steps = tf.shape(hidden)[1]
     attn_size = hidden.get_shape()[3].value
 
-    filter_shape = [attention_filter_length * 2 + 1, 1, 1, attention_filters]
+    filter_shape = [attn_filter_length * 2 + 1, 1, 1, attn_filters]
     filter_ = get_variable('filter', filter_shape)
-    u = get_variable('U', [attention_filters, attn_size])
+    u = get_variable('U', [attn_filters, attn_size])
     prev_weights = tf.reshape(prev_weights, tf.stack([batch_size, time_steps, 1, 1]))
     conv = tf.nn.conv2d(prev_weights, filter_, [1, 1, 1, 1], 'SAME')
-    shape = tf.stack([tf.multiply(batch_size, time_steps), attention_filters])
+    shape = tf.stack([tf.multiply(batch_size, time_steps), attn_filters])
     conv = tf.reshape(conv, shape)
     z = tf.matmul(conv, u)
     z = tf.reshape(z, tf.stack([batch_size, time_steps, 1, attn_size]))
@@ -296,17 +301,17 @@ def global_attention(state, hidden_states, encoder, encoder_input_length, scope=
         if context is not None and encoder.use_context:
             state = tf.concat([state, context], axis=1)
 
-        if encoder.attention_filters:
+        if encoder.attn_filters:
             e = compute_energy_with_filter(hidden_states, state, attn_size=encoder.attn_size,
-                                           attention_filters=encoder.attention_filters,
-                                           attention_filter_length=encoder.attention_filter_length, **kwargs)
+                                           attn_filters=encoder.attn_filters,
+                                           attn_filter_length=encoder.attn_filter_length, **kwargs)
         else:
             e = compute_energy(hidden_states, state, attn_size=encoder.attn_size, **kwargs)
 
         e -= tf.reduce_max(e, axis=1, keep_dims=True)
         mask = tf.sequence_mask(encoder_input_length, maxlen=tf.shape(hidden_states)[1], dtype=tf.float32)
 
-        T = encoder.attention_temperature or 1.0
+        T = encoder.attn_temperature or 1.0
         exp = tf.exp(T * e) * mask
         weights = exp / tf.reduce_sum(exp, axis=-1, keep_dims=True)
         weighted_average = tf.reduce_sum(tf.expand_dims(weights, 2) * hidden_states, axis=1)
@@ -362,7 +367,7 @@ def local_attention(state, hidden_states, encoder, encoder_input_length, pos=Non
             weights = tf.to_float(tf.one_hot(tf.to_int32(tf.squeeze(pos, axis=1)), depth=attn_length))
 
             weighted_average = []
-            for offset in range(-encoder.attention_window_size, encoder.attention_window_size + 1):
+            for offset in range(-encoder.attn_window_size, encoder.attn_window_size + 1):
                 pos_ = pos + offset
                 pos_ = tf.minimum(pos_, encoder_input_length - 1)
                 pos_ = tf.maximum(pos_, 0)  # TODO: when pos is < 0, use <S> or </S>
@@ -388,8 +393,8 @@ def local_attention(state, hidden_states, encoder, encoder_input_length, pos=Non
             idx = tf.tile(tf.to_float(tf.range(attn_length)), tf.stack([batch_size]))
             idx = tf.reshape(idx, [-1, attn_length])
 
-            low = pos - encoder.attention_window_size
-            high = pos + encoder.attention_window_size
+            low = pos - encoder.attn_window_size
+            high = pos + encoder.attn_window_size
 
             mlow = tf.to_float(idx < low)
             mhigh = tf.to_float(idx > high)
@@ -402,7 +407,7 @@ def local_attention(state, hidden_states, encoder, encoder_input_length, pos=Non
 
             weights = softmax(e, mask=mask)
 
-            sigma = encoder.attention_window_size / 2
+            sigma = encoder.attn_window_size / 2
             numerator = -tf.pow((idx - pos), tf.convert_to_tensor(2, dtype=tf.float32))
             div = tf.truediv(numerator, 2 * sigma ** 2)
             weights *= tf.exp(div)  # result of the truncated normal distribution
@@ -477,7 +482,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
       outputs of the decoder as a tensor of shape (batch_size, output_length, decoder_cell_size)
       attention weights as a tensor of shape (output_length, encoders, batch_size, input_length)
     """
-    assert not decoder.output_maxout or decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'
+    assert not decoder.pred_maxout_layer or decoder.cell_size % 2 == 0, 'cell size must be a multiple of 2'
 
     embedding_shape = [decoder.vocab_size, decoder.embedding_size]
 
@@ -507,7 +512,9 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         else:
             return CellWrapper(MultiRNNCell(cells))
 
-    def get_attention(state, input_, prev_weights=None, pos=None):
+    def look(state, input_, prev_weights=None, pos=None):
+        if not decoder.attn_use_lstm_state:
+            state = state[:, -cell_output_size:]
         prev_weights_ = [prev_weights if i == align_encoder_id else None for i in range(len(encoders))]
         pos_ = None
         if decoder.pred_edits:
@@ -520,8 +527,8 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         context, new_weights = multi_attention(state, pos=pos_, prev_weights=prev_weights_, **parameters)
         return context, new_weights[align_encoder_id]
 
-    def get_next_state(state, input_, context, symbol=None):
-        if decoder.input_attention:
+    def update(state, input_, context=None, symbol=None, name=None):
+        if context is not None and decoder.rnn_feed_attn:
             input_ = tf.concat([input_, context], axis=1)
 
         try:
@@ -532,10 +539,9 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         if decoder.skip_update and decoder.pred_edits and symbol is not None:
             is_del = tf.equal(symbol, utils.DEL_ID)
             new_state = tf.where(is_del, state, new_state)
-
         return new_state
 
-    def get_next_pos(pos, symbol, max_pos=None):
+    def update_pos(pos, symbol, max_pos=None):
         if not decoder.pred_edits:
             return pos
 
@@ -546,6 +552,35 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         if max_pos is not None:
             pos = tf.minimum(pos, tf.to_float(max_pos))
         return pos
+
+    def generate(state, input_, context):
+        if not decoder.pred_use_lstm_state:
+            state = state[:, -cell_output_size:]
+
+        projection_input = [state, context]
+        if decoder.use_previous_word:
+            projection_input.insert(1, input_)  # for back-compatibility
+
+        output_ = tf.concat(projection_input, axis=1)
+
+        if decoder.pred_maxout_layer:
+            output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
+            output_ = tf.nn.pool(tf.expand_dims(output_, axis=2), window_shape=[2], pooling_type='MAX',
+                                padding='SAME', strides=[2])
+            output_ = tf.squeeze(output_, axis=2)
+
+        if decoder.pred_embed_proj:
+            # intermediate projection to embedding size (before projecting to vocabulary size)
+            # this is useful to reduce the number of parameters, and
+            # to use the output embeddings for output projection (tie_embeddings parameter)
+            output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
+
+        if decoder.pred_embed_proj and decoder.tie_embeddings:
+            bias = get_variable('softmax1/bias', shape=[decoder.vocab_size])
+            output_ = tf.matmul(output_, tf.transpose(embedding)) + bias
+        else:
+            output_ = dense(output_, output_size, use_bias=True, name='softmax1')
+        return output_
 
     input_shape = tf.shape(decoder_inputs)
     batch_size = input_shape[0]
@@ -570,7 +605,6 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     initial_input = embed(initial_symbol)
     initial_pos = tf.zeros([batch_size], tf.float32)
     initial_weights = tf.zeros(tf.shape(attention_states[align_encoder_id])[:2])
-    #initial_context, _ = attention_(initial_input, pos=initial_pos, prev_weights=initial_weights)
 
     if dropout is not None:
         initial_state = tf.nn.dropout(initial_state, dropout)
@@ -579,12 +613,8 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         initial_state = dense(initial_state, state_size, use_bias=True, name='initial_state_projection',
                               activation=tf.nn.tanh)
 
-    # `zero_state` means that the initial state is not the first state of our decoder (used to predict the
-    # first output word), but the state before it.
-    # Using the attention context as input to the decoder does not make sense in this case,
-    # as we would use the same context vector for state zero and state one.
-    if decoder.zero_state and not decoder.vanilla and not decoder.input_attention:
-        initial_state = get_next_state(initial_state, initial_input, context=None, symbol=None)
+    if decoder.update_first and not decoder.rnn_feed_attn and not decoder.conditional_rnn:
+        initial_state = update(initial_state, initial_input, context=None, symbol=None)
 
     initial_data = tf.concat([initial_state, tf.expand_dims(initial_pos, axis=1), initial_weights], axis=1)
     initial_state, initial_pos, initial_weights = tf.split(initial_data, [state_size, 1, -1], axis=1)
@@ -592,44 +622,19 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     initial_pos = initial_pos[:, 0]
 
     def _time_step(time, input_, input_symbol, pos, state, outputs, states, weights, attns, prev_weights, samples):
-        # FIXME: use LSTM state or LSTM output
-        context, new_weights = get_attention(state, input_, pos=pos, prev_weights=prev_weights)
+        if decoder.conditional_rnn:
+            with tf.variable_scope('conditional_1'):
+                state = update(input_, state)
 
-        attns = attns.write(time, context)
-        weights = weights.write(time, new_weights)
+        context, new_weights = look(state, input_, pos=pos, prev_weights=prev_weights)
 
-        if decoder.vanilla:
-            state = get_next_state(state, input_, context, input_symbol)
+        if decoder.conditional_rnn:
+            with tf.variable_scope('conditional_2'):
+                state = update(context, state)
+        elif not decoder.generate_first:
+            state = update(state, input_, context, input_symbol)
 
-        states = states.write(time, state)
-
-        rnn_output = state[:, -cell_output_size:]
-        projection_input = [state] if decoder.use_lstm_state else [rnn_output]
-        if decoder.use_previous_word:
-            projection_input.append(input_)
-        projection_input.append(context)
-
-        output_ = tf.concat(projection_input, axis=1)
-
-        if decoder.output_maxout:
-            output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
-            output_ = tf.nn.pool(tf.expand_dims(output_, axis=2), window_shape=[2], pooling_type='MAX',
-                                padding='SAME', strides=[2])
-            output_ = tf.squeeze(output_, axis=2)
-
-        if decoder.output_extra_proj:
-            # intermediate projection to embedding size (before projecting to vocabulary size)
-            # this is useful to reduce the number of parameters, and
-            # to use the output embeddings for output projection (tie_embeddings parameter)
-            output_ = dense(output_, decoder.embedding_size, use_bias=False, name='softmax0')
-
-        if decoder.output_extra_proj and decoder.tie_embeddings:
-            bias = get_variable('softmax1/bias', shape=[decoder.vocab_size])
-            output_ = tf.matmul(output_, tf.transpose(embedding)) + bias
-        else:
-            output_ = dense(output_, output_size, use_bias=True, name='softmax1')
-
-        outputs = outputs.write(time, output_)
+        output_ = generate(state, input_, context)
 
         argmax = lambda: tf.argmax(output_, 1)
         target = lambda: inputs.read(time + 1)
@@ -645,10 +650,15 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         samples = samples.write(time, predicted_symbol)
 
         input_ = embed(predicted_symbol)
-        pos = get_next_pos(pos, predicted_symbol, encoder_input_length[align_encoder_id])
+        pos = update_pos(pos, predicted_symbol, encoder_input_length[align_encoder_id])
 
-        if not decoder.vanilla:
-            state = get_next_state(state, input_, context, predicted_symbol)
+        attns = attns.write(time, context)
+        weights = weights.write(time, new_weights)
+        states = states.write(time, state)
+        outputs = outputs.write(time, output_)
+
+        if not decoder.conditional_rnn and decoder.generate_first:
+            state = update(state, input_, context, predicted_symbol)
 
         return (time + 1, input_, predicted_symbol, pos, state, outputs, states, weights, attns, new_weights,
                 samples)

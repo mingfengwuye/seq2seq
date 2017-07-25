@@ -593,7 +593,6 @@ class TranslationModel:
 
 variable_mapping = [   # map old names to new names (for backward compatibility with old models)
     (r'/layer_norm_basic_lstm_cell', r'/basic_lstm_cell'),
-    (r'/U_a', r'/U_a/kernel'),
     (r'/forward_1/initial_state', r'/initial_state_fw'),
     (r'/backward_1/initial_state', r'/initial_state_bw'),
     (r'map_attns/Matrix', r'map_attns/matrix'),
@@ -604,6 +603,7 @@ variable_mapping = [   # map old names to new names (for backward compatibility 
 ]
 
 reverse_mapping = [   # map new names to old names
+    (r'/attention_.*?/U_a/kernel', '/attention/U_a'),
     (r'/attention_.*?/', r'/attention/'),
 ]
 

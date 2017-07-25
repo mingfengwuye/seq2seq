@@ -28,7 +28,7 @@ def stack_bidirectional_dynamic_rnn(cells_fw, cells_bw, inputs, initial_states_f
                     parallel_iterations=parallel_iterations,
                     dtype=dtype)
                 # Concat the outputs to create the new input.
-                prev_layer = tf.concat(outputs, 2)
+                prev_layer = tf.concat(outputs, axis=2)
 
                 if time_pooling and i < len(cells_fw) - 1:
                     prev_layer, sequence_length = apply_time_pooling(prev_layer, sequence_length, time_pooling[i],
