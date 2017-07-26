@@ -58,8 +58,7 @@ class ConditionalCellWrapper(RNNCell):
         super(ConditionalCellWrapper, self).__init__()
 
 
-def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=None, dropout=None,
-                  **kwargs):
+def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=None, **kwargs):
     """
     Build multiple encoders according to the configuration in `encoders`, reading from `encoder_inputs`.
     The result is a list of the outputs produced by those encoders (for each time-step), and their final state.
@@ -67,7 +66,6 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
     :param encoder_inputs: list of tensors of shape (batch_size, input_length), one tensor for each encoder.
     :param encoders: list of encoder configurations
     :param encoder_input_length: list of tensors of shape (batch_size,) (one tensor for each encoder)
-    :param dropout: scalar tensor or None, specifying the keep probability (1 - dropout)
     :return:
       encoder outputs: a list of tensors of shape (batch_size, input_length, encoder_cell_size), hidden states of the
         encoders.
@@ -109,9 +107,12 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                 else:
                     cell = GRUCell(encoder.cell_size, reuse=reuse)
 
-                if dropout is not None:
-                    cell = DropoutWrapper(cell, input_keep_prob=dropout)
-
+                if encoder.use_dropout:
+                    cell = DropoutWrapper(cell, input_keep_prob=encoder.rnn_input_keep_prob,
+                                          output_keep_prob=encoder.rnn_output_keep_prob,
+                                          state_keep_prob=encoder.rnn_state_keep_prob,
+                                          variational_recurrent=encoder.pervasive_dropout,
+                                          dtype=tf.float32)
                 return cell
 
             embedding = embedding_variables[i]
@@ -128,12 +129,17 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
             if other_inputs is not None:
                 encoder_inputs_ = tf.concat([encoder_inputs_, other_inputs], axis=2)
 
+            if encoder.use_dropout:
+                encoder_inputs_ = tf.nn.dropout(encoder_inputs_, keep_prob=encoder.word_keep_prob,
+                                                noise_shape=[batch_size, time_steps, 1])
+
             if encoder.input_layers:
                 for j, layer_size in enumerate(encoder.input_layers):
+                    if encoder.use_dropout:
+                        encoder_inputs_ = tf.nn.dropout(encoder_inputs_, keep_prob=encoder.input_layer_keep_prob)
+
                     encoder_inputs_ = dense(encoder_inputs_, layer_size, activation=tf.tanh, use_bias=True,
                                             name='layer_{}'.format(j))
-                    if dropout is not None:
-                        encoder_inputs_ = tf.nn.dropout(encoder_inputs_, dropout)
 
             if encoder.convolutions:
                 if encoder.binary:
@@ -457,7 +463,7 @@ def multi_attention(state, hidden_states, encoders, encoder_input_length, pos=No
 
 
 def attention_decoder(decoder_inputs, initial_state, attention_states, encoders, decoder, encoder_input_length,
-                      dropout=None, feed_previous=0.0, align_encoder_id=0, feed_argmax=True, **kwargs):
+                      feed_previous=0.0, align_encoder_id=0, feed_argmax=True, **kwargs):
     """
     :param decoder_inputs: int32 tensor of shape (batch_size, output_length)
     :param initial_state: initial state of the decoder (usually the final state of the encoder),
@@ -470,7 +476,6 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     :param encoder_input_length: list of int32 tensors of shape (batch_size,), tells for each encoder,
      the true length of each sequence in the batch (sequences in the same batch are padded to all have the same
      length).
-    :param dropout: scalar tensor or None, specifying the keep probability (1 - dropout)
     :param feed_previous: scalar tensor corresponding to the probability to use previous decoder output
       instead of the ground truth as input for the decoder (1 when decoding, between 0 and 1 when training)
     :param feed_argmax: boolean tensor, when True the greedy decoder outputs the word with the highest
@@ -502,9 +507,12 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             else:
                 cell = GRUCell(decoder.cell_size, reuse=reuse)
 
-            if dropout is not None:
-                cell = DropoutWrapper(cell, input_keep_prob=dropout)
-
+            if decoder.use_dropout:
+                cell = DropoutWrapper(cell, input_keep_prob=decoder.rnn_input_keep_prob,
+                                      output_keep_prob=decoder.rnn_output_keep_prob,
+                                      state_keep_prob=decoder.rnn_state_keep_prob,
+                                      variational_recurrent=decoder.pervasive_dropout,
+                                      dtype=tf.float32)
             cells.append(cell)
 
         if len(cells) == 1:
@@ -609,8 +617,8 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     initial_pos = tf.zeros([batch_size], tf.float32)
     initial_weights = tf.zeros(tf.shape(attention_states[align_encoder_id])[:2])
 
-    if dropout is not None:
-        initial_state = tf.nn.dropout(initial_state, dropout)
+    if decoder.use_dropout:
+        initial_state = tf.nn.dropout(initial_state, keep_prob=decoder.initial_state_keep_prob)
 
     with tf.variable_scope('decoder_{}'.format(decoder.name)):
         initial_state = dense(initial_state, state_size, use_bias=True, name='initial_state_projection',
@@ -694,7 +702,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     return outputs, weights, states, attns, beam_tensors, samples
 
 
-def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_previous, align_encoder_id=0,
+def encoder_decoder(encoders, decoders, encoder_inputs, targets, feed_previous, align_encoder_id=0,
                     encoder_input_length=None, feed_argmax=True, rewards=None, use_baseline=True, **kwargs):
     decoder = decoders[0]
     targets = targets[0]  # single decoder
@@ -705,7 +713,7 @@ def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_p
             weights = get_weights(encoder_inputs_, utils.EOS_ID, include_first_eos=True)
             encoder_input_length.append(tf.to_int32(tf.reduce_sum(weights, axis=1)))
 
-    parameters = dict(encoders=encoders, decoder=decoder, dropout=dropout, encoder_inputs=encoder_inputs,
+    parameters = dict(encoders=encoders, decoder=decoder, encoder_inputs=encoder_inputs,
                       feed_argmax=feed_argmax)
 
     target_weights = get_weights(targets[:, 1:], utils.EOS_ID, include_first_eos=True)
@@ -737,10 +745,9 @@ def encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_p
     return losses, [outputs], encoder_state, attention_states, attention_weights, beam_tensors, samples
 
 
-def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets, feed_previous,
-                            chaining_strategy=None, more_dropout=False, align_encoder_id=0,
-                            chaining_non_linearity=False, chaining_loss_ratio=1.0, chaining_stop_gradient=False,
-                            **kwargs):
+def chained_encoder_decoder(encoders, decoders, encoder_inputs, targets, feed_previous,
+                            chaining_strategy=None, align_encoder_id=0, chaining_non_linearity=False,
+                            chaining_loss_ratio=1.0, chaining_stop_gradient=False, **kwargs):
     decoder = decoders[0]
     targets = targets[0]  # single decoder
 
@@ -755,7 +762,7 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
 
     target_weights = get_weights(targets[:, 1:], utils.EOS_ID, include_first_eos=True)
 
-    parameters = dict(encoders=encoders[1:], decoder=encoders[0], dropout=dropout, more_dropout=more_dropout)
+    parameters = dict(encoders=encoders[1:], decoder=encoders[0])
 
     attention_states, encoder_state, encoder_input_length[1:] = multi_encoder(
         encoder_inputs[1:], encoder_input_length=encoder_input_length[1:], **parameters)
@@ -789,16 +796,11 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
     if other_inputs is not None and chaining_stop_gradient:
         other_inputs = tf.stop_gradient(other_inputs)
 
-    parameters = dict(encoders=encoders[:1], decoder=decoder, dropout=dropout, encoder_inputs=encoder_inputs[:1],
+    parameters = dict(encoders=encoders[:1], decoder=decoder, encoder_inputs=encoder_inputs[:1],
                       other_inputs=other_inputs)
 
     attention_states, encoder_state, encoder_input_length[:1] = multi_encoder(
         encoder_input_length=encoder_input_length[:1], **parameters)
-
-    if dropout is not None and more_dropout:
-        attns = tf.nn.dropout(attns, keep_prob=dropout)
-        states = tf.nn.dropout(states, keep_prob=dropout)
-        decoder_outputs = tf.nn.dropout(decoder_outputs, keep_prob=dropout)
 
     if chaining_stop_gradient:
         attns = tf.stop_gradient(attns)
@@ -827,8 +829,6 @@ def chained_encoder_decoder(encoders, decoders, dropout, encoder_inputs, targets
         x = tf.einsum('ijk,kl->ijl', x, w) + b
         if chaining_non_linearity:
             x = tf.nn.tanh(x)
-            if dropout is not None and more_dropout:
-                x = tf.nn.dropout(x, keep_prob=dropout)
 
         attention_states[0] += x
 

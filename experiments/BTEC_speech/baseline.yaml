@@ -1,9 +1,6 @@
 label: 'baseline'
 description: "multi-speaker baseline on BTEC, same configuration as Berard et al. 2016"
 
-dropout_rate: 0.5
-max_gradient_norm: 5.0
-
 data_dir: experiments/BTEC_speech/data
 model_dir: experiments/BTEC_speech/baseline
 train_prefix: train.concat.shuf  # Michel, Philippe, Loic, Marion, Helene, Fabienne
@@ -15,42 +12,46 @@ learning_rate: 0.001
 batch_size: 64
 batch_mode: 'standard'
 read_ahead: 10
+max_gradient_norm: 5.0
 
 steps_per_checkpoint: 1000
 steps_per_eval: 1000
 max_steps: 30000
 
+cell_size: 256
+attn_size: 256
+use_lstm: True
+
 encoders:
   - name: feats41
     embedding_size: 41
-    cell_size: 256
-    attn_size: 256
     layers: 3
     time_pooling: [2, 2]
     pooling_avg: True
     binary: True
-    attention_filters: 1
-    attention_filter_length: 25
+    attn_filters: 1
+    attn_filter_length: 25
     max_len: 600
     input_layers: [256, 256]
-    concat_last_states: True
     bidir_projection: True
-    trainable_initial_states: False
+    final_state: concat_last
+    train_initial_states: False
     bidir: True
-    use_lstm: True
 
 decoders:
   - name: en
     layers: 2
     embedding_size: 256
-    cell_size: 256
-    attn_size: 256
     max_len: 25
-    maxout: False
-    input_attention: False
+    pred_maxout_layer: False
+    rnn_feed_attn: False
     use_previous_word: False
-    vanilla: False
-    use_lstm_state: False
-    output_extra_proj: False
+    pred_use_lstm_state: False
+    pred_embed_proj: False
     attn_prev_word: False
-    zero_state: True
+    update_first: True
+
+use_dropout: True
+rnn_input_dropout: 0.5
+initial_state_dropout: 0.5
+input_layer_dropout: 0.5

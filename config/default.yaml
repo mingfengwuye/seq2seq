@@ -28,11 +28,15 @@ feed_previous: 0.0       # randomly feed prev output instead of ground truth to 
 optimizer: adam          # which training algorithm to use ('sgd', 'adadelta', or 'adam')
 
 # dropout
-pervasive_dropout: False   # TODO
-recurrent_dropout: 0.0     # TODO
-initial_state_dropout: 0.0 # TODO
-embedding_dropout: 0.0     # TODO
-dropout_rate: 0.0  # dropout rate applied to the RNN inputs (after embedding), and to the decoder's initial state
+pervasive_dropout: False
+rnn_input_dropout: 0.0
+rnn_output_dropout: 0.0
+rnn_state_dropout: 0.0
+initial_state_dropout: 0.0
+word_dropout: 0.0
+input_layer_dropout: 0.0
+output_dropout: 0.0        # TODO
+use_dropout: False
 
 # initialization parameters
 weight_scale: null       # if null, initialize weights to TF defaults, otherwise to normal distribution with this stdev

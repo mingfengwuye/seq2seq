@@ -6,7 +6,7 @@
 # and the Voxygen credentials (wsclient.cred) are in experiments/btec_speech/voxygen
 raw_data_dir=data/raw/btec.fr-en
 raw_audio_dir=${raw_data_dir}/speech_fr
-speech_dir=experiments/btec_speech
+speech_dir=experiments/BTEC_speech
 data_dir=${speech_dir}/data   # output directory for the processed files (text and audio features)
 
 mkdir -p ${raw_audio_dir} ${data_dir}

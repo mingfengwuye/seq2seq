@@ -10,9 +10,9 @@ from collections import namedtuple
 
 
 class Seq2SeqModel(object):
-    def __init__(self, encoders, decoders, learning_rate, global_step, max_gradient_norm, dropout_rate=0.0,
-                 freeze_variables=None, feed_previous=0.0, optimizer='sgd', decode_only=False, len_normalization=1.0,
-                 name=None, chained_encoders=False, dual_output=False, pred_edits=False, baseline_step=None,
+    def __init__(self, encoders, decoders, learning_rate, global_step, max_gradient_norm, use_dropout=False,
+                 freeze_variables=None, feed_previous=0.0, optimizer='sgd', decode_only=False,
+                 len_normalization=1.0, name=None, chained_encoders=False, pred_edits=False, baseline_step=None,
                  use_baseline=True, **kwargs):
         self.encoders = encoders
         self.decoders = decoders
@@ -27,12 +27,26 @@ class Seq2SeqModel(object):
         self.max_input_len = [encoder.max_len for encoder in encoders]
         self.len_normalization = len_normalization
 
-        if dropout_rate > 0:
-            self.dropout = tf.Variable(1 - dropout_rate, trainable=False, name='dropout_keep_prob')
-            self.dropout_off = self.dropout.assign(1.0)
-            self.dropout_on = self.dropout.assign(1 - dropout_rate)
-        else:
-            self.dropout = None
+        dropout_on = []
+        dropout_off = []
+
+        if use_dropout:
+            for encoder_or_decoder in encoders + decoders:
+                names = ['rnn_input', 'rnn_output', 'rnn_state', 'initial_state', 'word', 'input_layer', 'output']
+
+                for name in names:
+                    value = encoder_or_decoder.get(name + '_dropout')
+                    var_name = name + '_keep_prob'
+                    if not value:
+                        encoder_or_decoder[var_name] = 1.0
+                        continue
+                    var = tf.Variable(1 - value, trainable=False, name=var_name)
+                    encoder_or_decoder[var_name] = var
+                    dropout_on.append(var.assign(1.0 - value))
+                    dropout_off.append(var.assign(1.0))
+
+        self.dropout_on = tf.group(*dropout_on)
+        self.dropout_off = tf.group(*dropout_off)
 
         self.feed_previous = tf.constant(feed_previous, dtype=tf.float32)
         self.feed_argmax = tf.constant(True, dtype=tf.bool)  # feed with argmax or sample from softmax
@@ -65,7 +79,7 @@ class Seq2SeqModel(object):
         # elif dual_output or pred_edits:
         #     architecture = models.multi_encoder_decoder
 
-        tensors = architecture(encoders, decoders, self.dropout, self.encoder_inputs, self.targets, self.feed_previous,
+        tensors = architecture(encoders, decoders, self.encoder_inputs, self.targets, self.feed_previous,
                                encoder_input_length=self.encoder_input_length, feed_argmax=self.feed_argmax,
                                rewards=self.rewards, use_baseline=use_baseline, **kwargs)
 
@@ -130,8 +144,7 @@ class Seq2SeqModel(object):
 
     def reinforce_step(self, session, data, update_model=True, align=False, use_sgd=False, update_baseline=True,
                        reward_function=None, **kwargs):
-        if self.dropout is not None:
-            session.run(self.dropout_on)
+        session.run(self.dropout_on)   # FIXME
 
         encoder_inputs, targets, input_length = self.get_batch(data)
         input_feed = {self.targets: targets, self.feed_argmax: False, self.feed_previous: 1.0}
@@ -181,8 +194,7 @@ class Seq2SeqModel(object):
                                                                   res.get('baseline_loss'))
 
     def step(self, session, data, update_model=True, align=False, use_sgd=False, **kwargs):
-        if self.dropout is not None:
-            session.run(self.dropout_on)
+        session.run(self.dropout_on)
 
         encoder_inputs, targets, input_length = self.get_batch(data)
         input_feed = {self.targets: targets}
@@ -201,8 +213,7 @@ class Seq2SeqModel(object):
         return namedtuple('output', 'loss weights')(res['loss'], res.get('weights'))
 
     def greedy_decoding(self, session, token_ids):
-        if self.dropout is not None:
-            session.run(self.dropout_off)
+        session.run(self.dropout_off)
 
         data = [
             ids + [[] for _ in self.decoders] if len(ids) == len(self.encoders) else ids
@@ -225,9 +236,8 @@ class Seq2SeqModel(object):
         if not isinstance(session, list):
             session = [session]
 
-        if self.dropout is not None:
-            for session_ in session:
-                session_.run(self.dropout_off)
+        for session_ in session:
+            session_.run(self.dropout_off)
 
         data = [token_ids + [[]]]
         encoder_inputs, targets, input_length = self.get_batch(data, decoding=True)

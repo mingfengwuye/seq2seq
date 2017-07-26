@@ -1,5 +1,4 @@
 
-dropout_rate: 0.5
 cell_size: 128
 attn_size: 128
 embedding_size: 128
@@ -15,24 +14,24 @@ model_dir: experiments/APE17/models/global
 
 batch_size: 32
 
-optimizer: 'sgd'
+optimizer: sgd
 learning_rate: 1.0
 learning_rate_decay_factor: 0.95
 decay_every_n_epoch: 1
 decay_after_n_epoch: 3
 
-steps_per_checkpoint: 400
-steps_per_eval: 400
+steps_per_checkpoint: 1000
+steps_per_eval: 1000
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
 max_epochs: 80
-batch_mode: 'standard'
+batch_mode: standard
 read_ahead: 10
 
 encoders:
   - name: mt
-    attention_type: 'global'
+    attention_type: global
     max_len: 37
 
 decoders:
@@ -41,3 +40,8 @@ decoders:
 
 pred_edits: True
 ref_ext: pe
+
+use_dropout: True
+rnn_input_dropout: 0.5
+initial_state_dropout: 0.5
+input_layer_dropout: 0.5

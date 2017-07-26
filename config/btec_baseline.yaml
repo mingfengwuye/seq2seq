@@ -1,0 +1,57 @@
+label: 'BTEC baseline'
+description: "small BTEC config"
+
+cell_size: 256
+attn_size: 256
+embedding_size: 128
+
+layers: 1
+bidir: True
+use_lstm: True
+weight_scale: 0.1
+
+data_dir: data/btec
+model_dir: models/btec_baseline
+batch_size: 32
+dev_prefix: dev
+
+optimizer: 'adam'
+learning_rate: 0.001
+
+sgd_after_n_epoch: 20
+sgd_learning_rate: 0.2
+learning_rate_decay_factor: 0.9
+decay_every_n_epoch: 1
+decay_after_n_epoch: 21
+
+steps_per_checkpoint: 500
+steps_per_eval: 500
+score_function: corpus_scores
+
+max_gradient_norm: 1.0
+batch_mode: 'standard'
+read_ahead: 10
+max_len: 25
+
+encoders:
+  - name: fr
+
+decoders:
+  - name: en
+
+final_state: average
+conditional_rnn: True
+pred_deep_layer: True
+pred_embed_proj: False
+pred_maxout_layer: False
+
+pervasive_dropout: True
+rnn_input_dropout: 0.0
+rnn_output_dropout: 0.2
+rnn_state_dropout: 0.2
+initial_state_dropout: 0.2
+word_dropout: 0.2
+input_layer_dropout: 0.0
+output_dropout: 0.0
+use_dropout: True
+train_initial_states: True

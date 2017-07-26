@@ -1,5 +1,4 @@
 
-dropout_rate: 0.5
 cell_size: 128
 attn_size: 128
 embedding_size: 128
@@ -12,29 +11,30 @@ weight_scale: 0.1
 
 data_dir: experiments/APE17/data_2017
 model_dir: experiments/APE17/models/forced_syn
+train_prefix: train.concat
+vocab_prefix: vocab.concat
 
 batch_size: 32
 
-optimizer: 'sgd'
+optimizer: sgd
 learning_rate: 1.0
 learning_rate_decay_factor: 0.8
 decay_every_n_epoch: 0.5
 decay_after_n_epoch: 1
 
-steps_per_checkpoint: 400
-steps_per_eval: 400
+steps_per_checkpoint: 1000
+steps_per_eval: 1000
 score_function: corpus_scores_ter
 
 max_gradient_norm: 1.0
 max_epochs: 8
-batch_mode: 'standard'
+batch_mode: standard
 read_ahead: 10
 
 encoders:
   - name: mt
-    align_edits: True
-    attention_type: 'local'
-    attention_window_size: 0
+    attention_type: local
+    attn_window_size: 0
     max_len: 40
 
 decoders:
@@ -44,5 +44,7 @@ decoders:
 pred_edits: True
 ref_ext: pe
 
-train_prefix: train.concat
-vocab_prefix: vocab.concat
+use_dropout: True
+rnn_input_dropout: 0.5
+initial_state_dropout: 0.5
+input_layer_dropout: 0.5
