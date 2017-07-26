@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+label: "Baseline WMT14"
+description: "Baseline WMT14 fr->en model, similar to Bahdanau et al."
+
+cell_size: 1000
+attn_size: 1000
+embedding_size: 620
+bidir: True
+use_lstm: False
+
+data_dir: experiments/WMT14/data
+max_len: 50
+model_dir: experiments/WMT14/models/baseline
+
+steps_per_checkpoint: 5000
+steps_per_eval: 5000
+score_function: corpus_scores
+keep_best: 8
+
+optimizer: 'adam'
+learning_rate: 0.001
+batch_size: 80
+batch_mode: 'standard'
+read_ahead: 20
+max_gradient_norm: 1.0
+max_epochs: 10
+
+attention_type: 'global'
+final_state: last
+
+weight_scale: 0.1
+
+encoders:
+  - name: en
+
+decoders:
+  - name: fr
