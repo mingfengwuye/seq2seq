@@ -1,5 +1,3 @@
-#!/usr/bin/env bash
-
 label: "Baseline WMT14"
 description: "Baseline WMT14 fr->en model, similar to Bahdanau et al."
 
@@ -15,7 +13,7 @@ model_dir: experiments/WMT14/models/baseline
 
 steps_per_checkpoint: 5000
 steps_per_eval: 5000
-score_function: corpus_scores
+score_function: corpus_bleu
 keep_best: 8
 
 optimizer: 'adam'

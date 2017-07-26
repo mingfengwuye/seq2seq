@@ -1,5 +1,3 @@
-#!/usr/bin/env bash
-
 label: "ENCDEC-M-CGRU"
 description: "AMU 2017 Multi-Encoder Conditional GRU Method"
 
