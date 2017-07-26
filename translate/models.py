@@ -101,7 +101,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
             encoder_inputs_ = encoder_inputs[i]
             encoder_input_length_ = encoder_input_length[i]
 
-            def get_cell(reuse=False):
+            def get_cell(input_size=None, reuse=False):
                 if encoder.use_lstm:
                     cell = CellWrapper(BasicLSTMCell(encoder.cell_size, reuse=reuse))
                 else:
@@ -112,7 +112,7 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                                           output_keep_prob=encoder.rnn_output_keep_prob,
                                           state_keep_prob=encoder.rnn_state_keep_prob,
                                           variational_recurrent=encoder.pervasive_dropout,
-                                          dtype=tf.float32)
+                                          dtype=tf.float32, input_size=input_size)
                 return cell
 
             embedding = embedding_variables[i]
@@ -190,9 +190,8 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                 dtype=tf.float32, parallel_iterations=encoder.parallel_iterations,
             )
 
-            state_size = get_cell().state_size
-            if isinstance(state_size, LSTMStateTuple):
-                state_size = state_size.c + state_size.h
+            input_size = encoder_inputs_.get_shape()[2]
+            state_size = get_cell(input_size).state_size
 
             def get_initial_state(name='initial_state'):
                 if encoder.train_initial_states:
@@ -203,8 +202,8 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
 
             if encoder.bidir:
                 rnn = lambda reuse: stack_bidirectional_dynamic_rnn(
-                    cells_fw=[get_cell(reuse=reuse) for _ in range(encoder.layers)],
-                    cells_bw=[get_cell(reuse=reuse) for _ in range(encoder.layers)],
+                    cells_fw=[get_cell(input_size, reuse=reuse) for _ in range(encoder.layers)],
+                    cells_bw=[get_cell(input_size, reuse=reuse) for _ in range(encoder.layers)],
                     initial_states_fw=[get_initial_state('initial_state_fw')] * encoder.layers,
                     initial_states_bw=[get_initial_state('initial_state_bw')] * encoder.layers,
                     time_pooling=encoder.time_pooling, pooling_avg=encoder.pooling_avg,
@@ -233,10 +232,10 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                     raise NotImplementedError
 
                 if encoder.layers > 1:
-                    cell = MultiRNNCell([get_cell() for _ in range(encoder.layers)])
+                    cell = MultiRNNCell([get_cell(input_size) for _ in range(encoder.layers)])
                     initial_state = (get_initial_state(),) * encoder.layers
                 else:
-                    cell = get_cell()
+                    cell = get_cell(input_size)
                     initial_state = get_initial_state()
 
                 encoder_outputs_, _ = auto_reuse(tf.nn.dynamic_rnn)(cell=cell, initial_state=initial_state,
@@ -498,7 +497,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     def embed(input_):
         return tf.nn.embedding_lookup(embedding, input_)
 
-    def get_cell(reuse=False):
+    def get_cell(input_size=None, reuse=False, dropout=True):
         cells = []
 
         for _ in range(decoder.layers):
@@ -507,12 +506,12 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             else:
                 cell = GRUCell(decoder.cell_size, reuse=reuse)
 
-            if decoder.use_dropout:
+            if dropout and decoder.use_dropout:
                 cell = DropoutWrapper(cell, input_keep_prob=decoder.rnn_input_keep_prob,
                                       output_keep_prob=decoder.rnn_output_keep_prob,
                                       state_keep_prob=decoder.rnn_state_keep_prob,
                                       variational_recurrent=decoder.pervasive_dropout,
-                                      dtype=tf.float32)
+                                      dtype=tf.float32, input_size=input_size)
             cells.append(cell)
 
         if len(cells) == 1:
@@ -535,14 +534,15 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         context, new_weights = multi_attention(state, pos=pos_, prev_weights=prev_weights_, **parameters)
         return context, new_weights[align_encoder_id]
 
-    def update(state, input_, context=None, symbol=None, name=None):
+    def update(state, input_, context=None, symbol=None):
         if context is not None and decoder.rnn_feed_attn:
             input_ = tf.concat([input_, context], axis=1)
+        input_size = input_.get_shape()[1]
 
         try:
-            _, new_state = get_cell()(input_, state)
+            _, new_state = get_cell(input_size)(input_, state)
         except ValueError:  # auto_reuse doesn't work with LSTM cells
-            _, new_state = get_cell(reuse=True)(input_, state)
+            _, new_state = get_cell(input_size, reuse=True)(input_, state)
 
         if decoder.skip_update and decoder.pred_edits and symbol is not None:
             is_del = tf.equal(symbol, utils.DEL_ID)
@@ -599,8 +599,8 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
     output_size = decoder.vocab_size
 
-    state_size = get_cell().state_size
-    cell_output_size = get_cell().output_size
+    state_size = get_cell(dropout=False).state_size
+    cell_output_size = get_cell(dropout=False).output_size
 
     time = tf.constant(0, dtype=tf.int32, name='time')
 
@@ -921,7 +921,7 @@ def reinforce_baseline(decoder_states, reward):
 
 def baseline_loss(rewards, weights, average_across_timesteps=False, average_across_batch=True):
     """
-    :param reward: tensor of shape (batch_size, time_steps)
+    :param rewards: tensor of shape (batch_size, time_steps)
     :param weights: tensor of shape (batch_size, time_steps)
     """
     batch_size = tf.shape(rewards)[0]
@@ -940,4 +940,3 @@ def baseline_loss(rewards, weights, average_across_timesteps=False, average_acro
         cost /= tf.to_float(batch_size)
 
     return cost
-

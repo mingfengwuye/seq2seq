@@ -36,6 +36,7 @@ parser.add_argument('--no-gpu', action='store_true', help='run on CPU')
 # Decoding options (to avoid having to edit the config file)
 parser.add_argument('--beam-size', type=int)
 parser.add_argument('--ensemble', action='store_const', const=True)
+parser.add_argument('--avg-checkpoints', action='store_const', const=True)
 parser.add_argument('--checkpoints', nargs='+')
 parser.add_argument('--output')
 parser.add_argument('--max-steps', type=int)
@@ -76,6 +77,7 @@ def main(args=None):
         'steps-per-eval should be a multiple of steps-per-checkpoint')
     assert args.decode is not None or args.eval or args.train or args.align, (
         'you need to specify at least one action (decode, eval, align, or train)')
+    assert not (args.avg_checkpoints and args.ensemble)
 
     if args.purge:
         utils.log('deleting previous model')
@@ -190,14 +192,26 @@ def main(args=None):
     tf_config.gpu_options.allow_growth = config.allow_growth
     tf_config.gpu_options.per_process_gpu_memory_fraction = config.mem_fraction
 
+    def average_checkpoints(main_sess, sessions):
+        for var in tf.global_variables():
+            avg_value = sum(sess.run(var) for sess in sessions) / len(sessions)
+            main_sess.run(var.assign(avg_value))
+
     with tf.Session(config=tf_config) as sess:
         best_checkpoint = os.path.join(config.checkpoint_dir, 'best')
 
-        if config.ensemble and (args.eval or args.decode is not None):
+        if ((config.ensemble or config.avg_checkpoints) and
+                (args.eval or args.decode is not None) and len(config.checkpoints) > 1):
             # create one session for each model in the ensemble
-            sess = [tf.Session() for _ in config.checkpoints]
-            for sess_, checkpoint in zip(sess, config.checkpoints):
+            sessions = [tf.Session() for _ in config.checkpoints]
+            for sess_, checkpoint in zip(sessions, config.checkpoints):
                 model.initialize(sess_, [checkpoint])
+
+            if config.ensemble:
+                sess = sessions
+            else:
+                sess = sessions[0]
+                average_checkpoints(sess, sessions)
         elif (not config.checkpoints and (args.eval or args.decode is not None or args.align) and
              (os.path.isfile(best_checkpoint + '.index') or os.path.isfile(best_checkpoint + '.index'))):
             # in decoding and evaluation mode, unless specified otherwise (by `checkpoints`),

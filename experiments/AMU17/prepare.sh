@@ -32,4 +32,6 @@ preprocess ${data_dir}/train.raw.src ${data_dir}/true.en ${data_dir}/en.bpe ${da
 preprocess ${data_dir}/train.raw.mt ${data_dir}/true.de ${data_dir}/de.bpe ${data_dir}/train.mt
 preprocess ${data_dir}/train.raw.pe ${data_dir}/true.de ${data_dir}/de.bpe ${data_dir}/train.pe
 
+rm ${data_dir}/train.raw.*
+
 scripts/prepare-data.py ${data_dir}/train src mt pe ${data_dir} --mode vocab --vocab-size 0

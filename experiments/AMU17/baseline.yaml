@@ -50,3 +50,5 @@ decoders:
     pred_deep_layer: True
     pred_maxout_layer: False
     pred_embed_proj: False
+
+post_process_script: experiments/AMU17/post-process.sh

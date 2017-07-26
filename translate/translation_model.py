@@ -11,6 +11,7 @@ import itertools
 from collections import OrderedDict
 from translate import utils, evaluation
 from translate.seq2seq_model import Seq2SeqModel
+from subprocess import Popen, PIPE
 
 
 class TranslationModel:
@@ -174,21 +175,23 @@ class TranslationModel:
 
                 if self.pred_edits:
                     # first output is ops, second output is words
-                    raw = ' '.join('_'.join(tokens) for tokens in zip(*trg_tokens))
+                    raw_hypothesis = ' '.join('_'.join(tokens) for tokens in zip(*trg_tokens))
                     trg_tokens = utils.reverse_edits(src_tokens[0].split(), trg_tokens, fix=fix_edits)
                     trg_tokens = [token for token in trg_tokens if token not in utils._START_VOCAB]
                     # FIXME: char-level
                 else:
                     trg_tokens = trg_tokens[0]
-                    raw = ''.join(trg_tokens) if self.char_output else ' '.join(trg_tokens)
+                    raw_hypothesis = ''.join(trg_tokens) if self.char_output else ' '.join(trg_tokens)
 
                 if remove_unk:
                     trg_tokens = [token for token in trg_tokens if token != utils._UNK]
 
                 if self.char_output:
-                    yield ''.join(trg_tokens), raw
+                    hypothesis = ''.join(trg_tokens)
                 else:
-                    yield ' '.join(trg_tokens).replace('@@ ', ''), raw  # merge subword units
+                    hypothesis = ' '.join(trg_tokens).replace('@@ ', '')  # merge subwords units
+
+                yield hypothesis, raw_hypothesis
 
 
     def align(self, sess, output=None, align_encoder_id=0, **kwargs):
@@ -261,8 +264,9 @@ class TranslationModel:
             if output_file is not None:
                 output_file.close()
 
-    def evaluate(self, sess, beam_size, score_function, on_dev=True, output=None, remove_unk=False, max_dev_size=None,
-                 early_stopping=True, raw_output=False, fix_edits=True, max_test_size=None, **kwargs):
+    def evaluate(self, sess, beam_size, score_function, on_dev=True, output=None, remove_unk=False,
+                 max_dev_size=None, early_stopping=True, raw_output=False, fix_edits=True, max_test_size=None,
+                 post_process_script=None, **kwargs):
         """
         Decode a dev or test set, and perform evaluation with respect to gold standard, using the provided
         scoring function. If `output` is defined, also save the decoding output to this file.
@@ -351,6 +355,11 @@ class TranslationModel:
             finally:
                 if output_file is not None:
                     output_file.close()
+
+            if post_process_script is not None:
+                data = '\n'.join(hypotheses).encode()
+                data = Popen([post_process_script], stdout=PIPE, stdin=PIPE).communicate(input=data)[0].decode()
+                hypotheses = data.splitlines()
 
             # default scoring function is utils.bleu_score
             score, score_summary = getattr(evaluation, score_function)(hypotheses, references)

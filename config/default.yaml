@@ -33,9 +33,9 @@ rnn_input_dropout: 0.0
 rnn_output_dropout: 0.0
 rnn_state_dropout: 0.0
 initial_state_dropout: 0.0
-word_dropout: 0.0
+word_dropout: 0.0        # TODO: no target word dropout for now
 input_layer_dropout: 0.0
-output_dropout: 0.0        # TODO
+output_dropout: 0.0      # TODO
 use_dropout: False
 
 # initialization parameters
@@ -97,7 +97,7 @@ rnn_feed_attn: True       # feed attention context to the RNN's transition fonct
 attn_use_lstm_state: True # use LSTM's full state for attention
 pred_use_lstm_state: True # use LSTM's full state for next word prediction
 pred_embed_proj: True     # project decoder output to embedding size before projecting to vocab size
-pred_deep_layer: False    # TODO: add a non-linear transformation just before softmax
+pred_deep_layer: False    # add a non-linear transformation just before softmax
 pred_maxout_layer: True   # use a maxout layer just before the vocabulary projection and softmax
 aggregation_method: concat # how to combine the attention contexts of multiple encoders (concat, sum)
 
@@ -114,7 +114,8 @@ vocab_prefix: vocab      # name of the vocabulary files
 checkpoints: []          # list of checkpoints to load (in this specific order) after main checkpoint
 
 # decoding
-score_function: corpus_scores # name of the main scoring function (used for selecting models)
+score_function: corpus_scores # name of the main scoring function, inside 'evaluation.py' (used for selecting models)
+post_process_script: null # path to post-processing script (called before evaluating)
 remove_unk: False        # remove UNK symbols from the decoder output
 beam_size: 1             # beam size for decoding (decoder is greedy by default)
 ensemble: False          # use an ensemble of models while decoding (specified by the --checkpoints parameter)
@@ -122,7 +123,7 @@ output: null             # output file for decoding (writes to standard output b
 len_normalization: 1.0   # length normalization coefficient used in beam-search decoder
 early_stopping: True     # reduce beam-size each time a finished hypothesis is encountered (affects decoding speed)
 raw_output: False        # output translation hypotheses without any post-processing
-avg_checkpoints: False   # TODO: like ensemble, but instead of averaging the log-probs, average all parameters
+avg_checkpoints: False   # like ensemble, but instead of averaging the log-probs, average all parameters
 
 # general
 gpu_id: 0                # index of the GPU to use (starts at zero)
