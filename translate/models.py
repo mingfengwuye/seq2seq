@@ -623,8 +623,8 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
         initial_state = dense(initial_state, state_size, use_bias=True, name='initial_state_projection',
                               activation=tf.nn.tanh)
 
-    if decoder.update_first and not decoder.rnn_feed_attn and not decoder.conditional_rnn:
-        initial_state = update(initial_state, initial_input, context=None, symbol=None)
+        if decoder.update_first and not decoder.rnn_feed_attn and not decoder.conditional_rnn:
+            initial_state = update(initial_state, initial_input, context=None, symbol=None)
 
     initial_data = tf.concat([initial_state, tf.expand_dims(initial_pos, axis=1), initial_weights], axis=1)
     initial_state, initial_pos, initial_weights = tf.split(initial_data, [state_size, 1, -1], axis=1)
