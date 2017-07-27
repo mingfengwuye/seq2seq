@@ -23,10 +23,12 @@ done
 preprocess ${raw_data}/dev.src ${data_dir}/true.en ${data_dir}/en.bpe ${data_dir}/dev.src
 preprocess ${raw_data}/dev.mt ${data_dir}/true.de ${data_dir}/de.bpe ${data_dir}/dev.mt
 preprocess ${raw_data}/dev.pe ${data_dir}/true.de ${data_dir}/de.bpe ${data_dir}/dev.pe
+cp ${raw_data}/dev.pe ${data_dir}/dev.raw.pe
 
 preprocess ${raw_data}/test.2016.src ${data_dir}/true.en ${data_dir}/en.bpe ${data_dir}/test.src
 preprocess ${raw_data}/test.2016.mt ${data_dir}/true.de ${data_dir}/de.bpe ${data_dir}/test.mt
-preprocess ${raw_data}/test.2016.pe ${data_dir}/true.de ${data_dir}/de.bpe ${data_dir}/test.pe
+cp ${raw_data}/test.2016.pe ${data_dir}/test.pe
+#preprocess ${raw_data}/test.2016.pe ${data_dir}/true.de ${data_dir}/de.bpe ${data_dir}/test.pe
 
 preprocess ${data_dir}/train.raw.src ${data_dir}/true.en ${data_dir}/en.bpe ${data_dir}/train.src
 preprocess ${data_dir}/train.raw.mt ${data_dir}/true.de ${data_dir}/de.bpe ${data_dir}/train.mt
