@@ -195,15 +195,17 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
 
             if encoder.bidir:
                 rnn = lambda reuse: stack_bidirectional_dynamic_rnn(
-                    cells_fw=[get_cell(input_size, reuse=reuse) for _ in range(encoder.layers)],
-                    cells_bw=[get_cell(input_size, reuse=reuse) for _ in range(encoder.layers)],
+                    cells_fw=[get_cell(input_size if j == 0 else 2 * encoder.cell_size, reuse=reuse)
+                              for j in range(encoder.layers)],
+                    cells_bw=[get_cell(input_size if j == 0 else 2 * encoder.cell_size, reuse=reuse)
+                              for j in range(encoder.layers)],
                     initial_states_fw=[get_initial_state('initial_state_fw')] * encoder.layers,
                     initial_states_bw=[get_initial_state('initial_state_bw')] * encoder.layers,
                     time_pooling=encoder.time_pooling, pooling_avg=encoder.pooling_avg,
                     **parameters)
 
-                with tf.variable_scope(tf.get_variable_scope(),
-                                       initializer=CellInitializer(input_size, encoder.cell_size)):
+                initializer = CellInitializer(encoder.cell_size)
+                with tf.variable_scope(tf.get_variable_scope(), initializer=initializer):
                     try:
                         encoder_outputs_, _, backward_states = rnn(reuse=False)
                     except ValueError:   # Multi-task scenario where we're reusing the same RNN parameters
@@ -227,14 +229,15 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                     raise NotImplementedError
 
                 if encoder.layers > 1:
-                    cell = MultiRNNCell([get_cell(input_size) for _ in range(encoder.layers)])
+                    cell = MultiRNNCell([get_cell(input_size if j == 0 else encoder.cell_size)
+                                         for j in range(encoder.layers)])
                     initial_state = (get_initial_state(),) * encoder.layers
                 else:
                     cell = get_cell(input_size)
                     initial_state = get_initial_state()
 
                 encoder_outputs_, _ = auto_reuse(tf.nn.dynamic_rnn)(cell=cell, initial_state=initial_state,
-                                                                             **parameters)
+                                                                    **parameters)
                 if encoder.final_state == 'average':
                     encoder_state_ = tf.reduce_mean(encoder_outputs_, axis=1)
                 else:
@@ -495,18 +498,19 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     def get_cell(input_size=None, reuse=False):
         cells = []
 
-        for _ in range(decoder.layers):
+        for j in range(decoder.layers):
             if decoder.use_lstm:
                 cell = CellWrapper(BasicLSTMCell(decoder.cell_size, reuse=reuse))
             else:
                 cell = GRUCell(decoder.cell_size, reuse=reuse)
 
             if decoder.use_dropout:
+                input_size_ = input_size if j == 0 else decoder.cell_size
                 cell = DropoutWrapper(cell, input_keep_prob=decoder.rnn_input_keep_prob,
                                       output_keep_prob=decoder.rnn_output_keep_prob,
                                       state_keep_prob=decoder.rnn_state_keep_prob,
                                       variational_recurrent=decoder.pervasive_dropout,
-                                      dtype=tf.float32, input_size=input_size)
+                                      dtype=tf.float32, input_size=input_size_)
             cells.append(cell)
 
         if len(cells) == 1:
@@ -534,8 +538,8 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             input_ = tf.concat([input_, context], axis=1)
         input_size = input_.get_shape()[1].value
 
-        with tf.variable_scope(tf.get_variable_scope(),
-                               initializer=CellInitializer(input_size, decoder.cell_size)):
+        initializer = CellInitializer(decoder.cell_size)
+        with tf.variable_scope(tf.get_variable_scope(), initializer=initializer):
             try:
                 _, new_state = get_cell(input_size)(input_, state)
             except ValueError:  # auto_reuse doesn't work with LSTM cells

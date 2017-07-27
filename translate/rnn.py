@@ -67,19 +67,18 @@ class CellInitializer(init_ops.Initializer):
     """
     Orthogonal initialization of recurrent connections, like in Bahdanau et al. 2015
     """
-    def __init__(self, input_size, cell_size):
-        self.input_size = input_size
+    def __init__(self, cell_size):
         self.cell_size = cell_size
         self.default_initializer = tf.get_variable_scope().initializer or init_ops.glorot_uniform_initializer()
         self.initializer = tf.orthogonal_initializer()
 
     def __call__(self, shape, dtype=None, partition_info=None, verify_shape=None):
-        assert shape[0] == self.input_size + self.cell_size
         assert shape[1] % self.cell_size == 0
+        input_size = shape[0] - self.cell_size
 
         W, U = [], []
         for _ in range(shape[1] // self.cell_size):
-            W.append(self.default_initializer(shape=[self.input_size, self.cell_size]))
+            W.append(self.default_initializer(shape=[input_size, self.cell_size]))
             U.append(self.initializer(shape=[self.cell_size, self.cell_size]))
 
         return tf.concat([tf.concat(W, axis=1), tf.concat(U, axis=1)], axis=0)
