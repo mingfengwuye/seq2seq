@@ -14,20 +14,20 @@ scripts/prepare-data.py ${raw_data}/WMT14.fr-en fr en ${data_dir} --no-tokenize 
 --vocab-size 30000 --shuffle --seed 1234
 # --unescape-special-chars --normalize-punk
 
-cur_dir=`pwd`
-cd ${data_dir}
-
-ln -s train.en train.char.en
-ln -s train.fr train.char.fr
-ln -s dev.en dev.char.en
-ln -s dev.fr dev.char.fr
-ln -s test.en test.char.en
-ln -s test.fr test.char.fr
-
-cd ${cur_dir}
-
-scripts/prepare-data.py ${data_dir}/train.char en fr ${data_dir} --mode vocab --character-level \
---vocab-prefix vocab.char --vocab-size 200
+#cur_dir=`pwd`
+#cd ${data_dir}
+#
+#ln -s train.en train.char.en
+#ln -s train.fr train.char.fr
+#ln -s dev.en dev.char.en
+#ln -s dev.fr dev.char.fr
+#ln -s test.en test.char.en
+#ln -s test.fr test.char.fr
+#
+#cd ${cur_dir}
+#
+#scripts/prepare-data.py ${data_dir}/train.char en fr ${data_dir} --mode vocab --character-level \
+#--vocab-prefix vocab.char --vocab-size 200
 
 scripts/prepare-data.py ${raw_data}/WMT14.fr-en fr en ${data_dir} --no-tokenize \
 --output train.subwords --dev-prefix dev.subwords --test-prefix test.subwords --vocab-prefix vocab.subwords \
