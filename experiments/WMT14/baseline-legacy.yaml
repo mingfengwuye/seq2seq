@@ -9,15 +9,15 @@ use_lstm: False
 
 data_dir: experiments/WMT14/data
 max_len: 50
-model_dir: experiments/WMT14/models/baseline
+model_dir: experiments/WMT14/models/baseline_legacy
 
-steps_per_checkpoint: 5000
-steps_per_eval: 5000
+steps_per_checkpoint: 4000
+steps_per_eval: 4000
 score_function: corpus_bleu
 keep_best: 8
 
-optimizer: adam
-learning_rate: 0.001
+optimizer: adadelta
+learning_rate: 1.0
 batch_size: 80
 batch_mode: standard
 read_ahead: 20
@@ -27,10 +27,12 @@ max_epochs: 10
 attention_type: global
 final_state: last
 
-weight_scale: 0.1
+weight_scale: 0.01
 
 encoders:
   - name: en
 
 decoders:
   - name: fr
+
+generate_first: False

@@ -16,18 +16,18 @@ steps_per_eval: 5000
 score_function: corpus_scores_ter
 keep_best: 8
 
-optimizer: 'adam'
-learning_rate: 0.001
+optimizer: adam
+learning_rate: 0.0001
 batch_size: 64
-batch_mode: 'standard'
+batch_mode: standard
 read_ahead: 20
 max_gradient_norm: 1.0
 max_epochs: 12
 
-attention_type: 'global'
+attention_type: global
 final_state: average
 
-weight_scale: 0.1
+weight_scale: 0.01
 
 use_dropout: True
 pervasive_dropout: True

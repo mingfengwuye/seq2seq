@@ -1,9 +1,7 @@
 import tensorflow as tf
-import functools
-import math
 from tensorflow.contrib.rnn import BasicLSTMCell, DropoutWrapper, RNNCell
-from tensorflow.contrib.rnn import MultiRNNCell, LSTMStateTuple, GRUCell, LayerNormBasicLSTMCell
-from translate.rnn import stack_bidirectional_dynamic_rnn
+from tensorflow.contrib.rnn import MultiRNNCell, GRUCell
+from translate.rnn import stack_bidirectional_dynamic_rnn, CellInitializer
 from translate import utils
 
 
@@ -51,11 +49,6 @@ class CellWrapper(RNNCell):
         state = tf.split(value=state, num_or_size_splits=self.num_splits, axis=1)
         new_h, new_state = self.cell(inputs, state, scope=scope)
         return new_h, tf.concat(new_state, 1)
-
-
-class ConditionalCellWrapper(RNNCell):
-    def __init__(self, cell1, cell2):
-        super(ConditionalCellWrapper, self).__init__()
 
 
 def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=None, **kwargs):
@@ -190,8 +183,8 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                 dtype=tf.float32, parallel_iterations=encoder.parallel_iterations,
             )
 
-            input_size = encoder_inputs_.get_shape()[2]
-            state_size = get_cell(input_size).state_size
+            input_size = encoder_inputs_.get_shape()[2].value
+            state_size = (encoder.cell_size * 2 if encoder.use_lstm else encoder.cell_size)
 
             def get_initial_state(name='initial_state'):
                 if encoder.train_initial_states:
@@ -209,10 +202,12 @@ def multi_encoder(encoder_inputs, encoders, encoder_input_length, other_inputs=N
                     time_pooling=encoder.time_pooling, pooling_avg=encoder.pooling_avg,
                     **parameters)
 
-                try:
-                    encoder_outputs_, _, backward_states = rnn(reuse=False)
-                except ValueError:   # Multi-task scenario where we're reusing the same RNN parameters
-                    encoder_outputs_, _, backward_states = rnn(reuse=True)
+                with tf.variable_scope(tf.get_variable_scope(),
+                                       initializer=CellInitializer(input_size, encoder.cell_size)):
+                    try:
+                        encoder_outputs_, _, backward_states = rnn(reuse=False)
+                    except ValueError:   # Multi-task scenario where we're reusing the same RNN parameters
+                        encoder_outputs_, _, backward_states = rnn(reuse=True)
 
                 if encoder.final_state == 'concat_last':
                     # concats last states of all backward layers (full LSTM states)
@@ -497,7 +492,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     def embed(input_):
         return tf.nn.embedding_lookup(embedding, input_)
 
-    def get_cell(input_size=None, reuse=False, dropout=True):
+    def get_cell(input_size=None, reuse=False):
         cells = []
 
         for _ in range(decoder.layers):
@@ -506,7 +501,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             else:
                 cell = GRUCell(decoder.cell_size, reuse=reuse)
 
-            if dropout and decoder.use_dropout:
+            if decoder.use_dropout:
                 cell = DropoutWrapper(cell, input_keep_prob=decoder.rnn_input_keep_prob,
                                       output_keep_prob=decoder.rnn_output_keep_prob,
                                       state_keep_prob=decoder.rnn_state_keep_prob,
@@ -537,12 +532,14 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
     def update(state, input_, context=None, symbol=None):
         if context is not None and decoder.rnn_feed_attn:
             input_ = tf.concat([input_, context], axis=1)
-        input_size = input_.get_shape()[1]
+        input_size = input_.get_shape()[1].value
 
-        try:
-            _, new_state = get_cell(input_size)(input_, state)
-        except ValueError:  # auto_reuse doesn't work with LSTM cells
-            _, new_state = get_cell(input_size, reuse=True)(input_, state)
+        with tf.variable_scope(tf.get_variable_scope(),
+                               initializer=CellInitializer(input_size, decoder.cell_size)):
+            try:
+                _, new_state = get_cell(input_size)(input_, state)
+            except ValueError:  # auto_reuse doesn't work with LSTM cells
+                _, new_state = get_cell(input_size, reuse=True)(input_, state)
 
         if decoder.skip_update and decoder.pred_edits and symbol is not None:
             is_del = tf.equal(symbol, utils.DEL_ID)
@@ -575,10 +572,8 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
             output_ = dense(output_, decoder.embedding_size, activation=tf.tanh, use_bias=True, name='deep_output')
         else:
             if decoder.pred_maxout_layer:
-                output_ = dense(output_, decoder.cell_size, use_bias=False, name='maxout')
-                output_ = tf.nn.pool(tf.expand_dims(output_, axis=2), window_shape=[2], pooling_type='MAX',
-                                    padding='SAME', strides=[2])
-                output_ = tf.squeeze(output_, axis=2)
+                output_ = dense(output_, decoder.cell_size, use_bias=True, name='maxout')
+                output_ = tf.maximum(*tf.split(output_, num_or_size_splits=2, axis=1))
 
             if decoder.pred_embed_proj:
                 # intermediate projection to embedding size (before projecting to vocabulary size)
@@ -599,8 +594,8 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, encoders,
 
     output_size = decoder.vocab_size
 
-    state_size = get_cell(dropout=False).state_size
-    cell_output_size = get_cell(dropout=False).output_size
+    state_size = (decoder.cell_size * 2 if decoder.use_lstm else decoder.cell_size) * decoder.layers
+    cell_output_size = decoder.cell_size
 
     time = tf.constant(0, dtype=tf.int32, name='time')
 

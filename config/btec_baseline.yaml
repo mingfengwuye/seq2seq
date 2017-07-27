@@ -33,13 +33,12 @@ max_len: 25
 
 encoders:
   - name: fr
+    final_state: average
 
 decoders:
   - name: en
-
-final_state: average
-conditional_rnn: True
-pred_deep_layer: True
+    conditional_rnn: True
+    pred_deep_layer: True
 
 use_dropout: True
 pervasive_dropout: True
